@@ -118,6 +118,176 @@ def fetch_live_cve(query, limit=3):
     except:
         return []
 
+import xml.etree.ElementTree as ET
+
+GOOGLE_NEWS_RSS = "https://news.google.com/rss/search"
+GITHUB_TAGS_API = "https://api.github.com/search/repositories"
+
+import xml.etree.ElementTree as ET
+
+GOOGLE_NEWS_RSS = "https://news.google.com/rss/search"
+GITHUB_TAGS_API = "https://api.github.com/search/repositories"
+
+def fetch_google_news(query, limit=5):
+    """Fetch real news articles from Google News RSS — verified press sources."""
+    try:
+        import requests as req
+        r = req.get(
+            GOOGLE_NEWS_RSS,
+            params={"q": query + " software update security", "hl": "en", "gl": "US", "ceid": "US:en"},
+            timeout=15
+        )
+        root = ET.fromstring(r.content)
+        items = root.findall(".//item")
+        results = []
+        for item in items[:limit]:
+            title  = item.find("title")
+            link   = item.find("link")
+            pubdate= item.find("pubDate")
+            source = item.find("source")
+            if title is not None:
+                results.append({
+                    "title":     title.text or "",
+                    "subreddit": source.text if source is not None else "Google News",
+                    "sentiment": "Negative" if any(w in (title.text or "").lower()
+                                 for w in ["vulnerability","breach","hack","exploit","critical","attack"]) else "Neutral",
+                    "score":     0,
+                    "divergence": 0.0,
+                    "source":    "google_news",
+                    "url":       link.text if link is not None else "",
+                    "date":      (pubdate.text or "")[:16] if pubdate is not None else "",
+                })
+        return results
+    except Exception as e:
+        return []
+
+def fetch_github_releases(query, limit=4):
+    """Fetch GitHub release info for software matching the query."""
+    try:
+        import requests as req
+        # Extract main software name from query
+        software_terms = [w for w in query.lower().split()
+                         if len(w) > 3 and w not in
+                         {"what","when","where","which","latest","update","release","version","security","patch","bug","fix"}]
+        if not software_terms:
+            return []
+        search_term = software_terms[0]
+        r = req.get(
+            "https://api.github.com/search/repositories",
+            params={"q": search_term, "sort": "updated", "per_page": 3},
+            timeout=15
+        )
+        repos = r.json().get("items", [])
+        results = []
+        for repo in repos[:2]:
+            # Get latest release for each repo
+            owner = repo.get("owner", {}).get("login", "")
+            name  = repo.get("name", "")
+            try:
+                rel_r = req.get(
+                    f"https://api.github.com/repos/{owner}/{name}/releases/latest",
+                    timeout=10
+                )
+                if rel_r.status_code == 200:
+                    rel = rel_r.json()
+                    results.append({
+                        "title":     f"{name} {rel.get('tag_name','')} — {rel.get('name','')}",
+                        "subreddit": "GitHub",
+                        "sentiment": "Positive",
+                        "score":     0,
+                        "divergence": 0.0,
+                        "source":    "github",
+                        "url":       rel.get("html_url",""),
+                        "date":      rel.get("published_at","")[:10],
+                        "detail":    (rel.get("body","") or "")[:150],
+                    })
+            except:
+                pass
+        return results
+    except Exception as e:
+        return []
+
+
+def fetch_google_news(query, limit=5):
+    """Fetch real news articles from Google News RSS — verified press sources."""
+    try:
+        import requests as req
+        r = req.get(
+            GOOGLE_NEWS_RSS,
+            params={"q": query + " software update security", "hl": "en", "gl": "US", "ceid": "US:en"},
+            timeout=15
+        )
+        root = ET.fromstring(r.content)
+        items = root.findall(".//item")
+        results = []
+        for item in items[:limit]:
+            title  = item.find("title")
+            link   = item.find("link")
+            pubdate= item.find("pubDate")
+            source = item.find("source")
+            if title is not None:
+                results.append({
+                    "title":     title.text or "",
+                    "subreddit": source.text if source is not None else "Google News",
+                    "sentiment": "Negative" if any(w in (title.text or "").lower()
+                                 for w in ["vulnerability","breach","hack","exploit","critical","attack"]) else "Neutral",
+                    "score":     0,
+                    "divergence": 0.0,
+                    "source":    "google_news",
+                    "url":       link.text if link is not None else "",
+                    "date":      (pubdate.text or "")[:16] if pubdate is not None else "",
+                })
+        return results
+    except Exception as e:
+        return []
+
+def fetch_github_releases(query, limit=4):
+    """Fetch GitHub release info for software matching the query."""
+    try:
+        import requests as req
+        # Extract main software name from query
+        software_terms = [w for w in query.lower().split()
+                         if len(w) > 3 and w not in
+                         {"what","when","where","which","latest","update","release","version","security","patch","bug","fix"}]
+        if not software_terms:
+            return []
+        search_term = software_terms[0]
+        r = req.get(
+            "https://api.github.com/search/repositories",
+            params={"q": search_term, "sort": "updated", "per_page": 3},
+            timeout=15
+        )
+        repos = r.json().get("items", [])
+        results = []
+        for repo in repos[:2]:
+            # Get latest release for each repo
+            owner = repo.get("owner", {}).get("login", "")
+            name  = repo.get("name", "")
+            try:
+                rel_r = req.get(
+                    f"https://api.github.com/repos/{owner}/{name}/releases/latest",
+                    timeout=10
+                )
+                if rel_r.status_code == 200:
+                    rel = rel_r.json()
+                    results.append({
+                        "title":     f"{name} {rel.get('tag_name','')} — {rel.get('name','')}",
+                        "subreddit": "GitHub",
+                        "sentiment": "Positive",
+                        "score":     0,
+                        "divergence": 0.0,
+                        "source":    "github",
+                        "url":       rel.get("html_url",""),
+                        "date":      rel.get("published_at","")[:10],
+                        "detail":    (rel.get("body","") or "")[:150],
+                    })
+            except:
+                pass
+        return results
+    except Exception as e:
+        return []
+
+
 def load_docs():
     """Load local dataset as fallback only."""
     if DATA_PATH.exists():
@@ -217,18 +387,24 @@ class RetrieverAgent:
         print(f"  Purpose  : Live API search — Releases + Reddit + CVE")
         pause()
 
-        # Fetch from all 3 live sources
+        # Fetch from all 5 verified sources simultaneously
         print(f"  Fetching : releasetrain.io/api/v/ ...")
         releases = fetch_live_releases(rewritten_query, limit=4)
-        
+
         print(f"  Fetching : releasetrain.io/api/reddit/query/positive ...")
         reddit = fetch_live_reddit(rewritten_query, limit=3)
-        
+
         print(f"  Fetching : releasetrain.io/api/reddit/query/cve ...")
         cve = fetch_live_cve(rewritten_query, limit=2)
 
-        # Combine all live results
-        results = releases + reddit + cve
+        print(f"  Fetching : Google News RSS ...")
+        news = fetch_google_news(rewritten_query, limit=3)
+
+        print(f"  Fetching : GitHub Releases ...")
+        github = fetch_github_releases(rewritten_query, limit=2)
+
+        # Combine all verified sources
+        results = releases + reddit + cve + news + github
 
         # Fallback to local if live APIs return nothing
         if not results:
@@ -241,7 +417,7 @@ class RetrieverAgent:
             )
             results = [d for s, d in scored if s > 0][:top_k] or DOCS[:top_k]
 
-        print(f"  Found    : {len(results)} results ({len(releases)} releases, {len(reddit)} community, {len(cve)} CVE)")
+        print(f"  Found    : {len(results)} results | releases={len(releases)} reddit={len(reddit)} cve={len(cve)} news={len(news)} github={len(github)}")
         for i, doc in enumerate(results[:top_k], 1):
             icon = "🔴" if doc["sentiment"]=="Negative" else "🟢" if doc["sentiment"]=="Positive" else "🟡"
             src  = f"[{doc.get('source','?')}]"
@@ -277,6 +453,7 @@ class EvaluatorAgent:
 
         from datetime import datetime as _dt
         verified_src = list(set(d.get('source','local') for d in docs))
+        has_live = any(s in ['releases','reddit_live','cve','google_news','github'] for s in verified_src)
         has_live     = any(s in ['releases','reddit_live','cve'] for s in verified_src)
         confidence   = "HIGH" if quality >= 0.5 else "MEDIUM" if quality >= 0.3 else "LOW"
         verified_tag = "✅ VERIFIED from live releasetrain.io APIs" if has_live else "⚠️  From local dataset — may not reflect today's data"
