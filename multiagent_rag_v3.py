@@ -288,6 +288,411 @@ def fetch_github_releases(query, limit=4):
         return []
 
 
+
+# ─────────────────────────────────────────────────────────────
+# VERIFIED SOURCE AGENTS — Tier 1 (official) + Tier 2 (community)
+# ─────────────────────────────────────────────────────────────
+
+# Source trust tiers
+TIER1 = ["vendor_releases","releases","apple_rss","cisa_kev","circl_cve","nvd","cve"]
+TIER2 = ["vendor_reddit","reddit_live","reddit_search","google_news","github"]
+
+APPLE_RSS  = "https://developer.apple.com/news/releases/rss/releases.rss"
+CISA_KEV   = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+CIRCL_APPLE = "https://vulnerability.circl.lu/recent/cvelistv5.atom?vendor=apple&per_page=20"
+
+def fetch_apple_rss(query, limit=5):
+    """Tier 1 — Official Apple release RSS feed."""
+    try:
+        import requests as req, xml.etree.ElementTree as ET
+        r = req.get(APPLE_RSS, timeout=15)
+        root = ET.fromstring(r.content)
+        items = root.findall(".//item")
+        terms = set(query.lower().replace("?","").replace("!","").split())
+        results = []
+        for item in items:
+            title = item.find("title")
+            link  = item.find("link")
+            pub   = item.find("pubDate")
+            if title and title.text:
+                t = title.text.lower()
+                hits = sum(1 for w in terms if w in t)
+                if hits >= 1 or any(k in t for k in ["ios","macos","iphone","ipad","siri","apple","security","watchos"]):
+                    results.append((hits, {
+                        "title":   title.text,
+                        "subreddit": "Apple Official",
+                        "sentiment": "Negative" if any(w in t for w in ["security","vulnerability","fix","patch"]) else "Positive",
+                        "score": 0, "divergence": 0.0,
+                        "source": "apple_rss",
+                        "url": link.text if link is not None else "",
+                        "date": (pub.text or "")[:16] if pub is not None else "",
+                        "verified": True,
+                        "tier": 1,
+                    }))
+        results.sort(key=lambda x: x[0], reverse=True)
+        return [d for _,d in results[:limit]]
+    except Exception as e:
+        return []
+
+def fetch_cisa_kev(query, limit=3):
+    """Tier 1 — CISA Known Exploited Vulnerabilities (US Gov, actively exploited only)."""
+    try:
+        import requests as req
+        r = req.get(CISA_KEV, timeout=15)
+        data = r.json().get("vulnerabilities", [])
+        terms = set(query.lower().replace("?","").replace("!","").split())
+        results = []
+        for v in data:
+            txt = (v.get("vendorProject","") + " " + v.get("product","") + " " +
+                   v.get("vulnerabilityName","") + " " + v.get("shortDescription","")).lower()
+            hits = sum(1 for w in terms if w in txt)
+            if hits >= 2:
+                results.append((hits, {
+                    "title":   f"[CISA KEV] {v.get('vulnerabilityName','')} — {v.get('product','')}",
+                    "subreddit": "CISA US-CERT",
+                    "sentiment": "Negative",
+                    "score": 0, "divergence": 0.5,
+                    "source": "cisa_kev",
+                    "url": f"https://nvd.nist.gov/vuln/detail/{v.get('cveID','')}",
+                    "date": v.get("dateAdded",""),
+                    "detail": v.get("shortDescription","")[:150],
+                    "cve_id": v.get("cveID",""),
+                    "action": v.get("requiredAction",""),
+                    "verified": True,
+                    "tier": 1,
+                }))
+        results.sort(key=lambda x: x[0], reverse=True)
+        return [d for _,d in results[:limit]]
+    except Exception as e:
+        return []
+
+def fetch_circl_apple(query, limit=3):
+    """Tier 1 — CIRCL Apple CVE Atom feed (no API key, aggregates NVD+CISA+CVEProject)."""
+    try:
+        import requests as req, xml.etree.ElementTree as ET
+        r = req.get(CIRCL_APPLE, timeout=15)
+        root = ET.fromstring(r.content)
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        entries = root.findall("atom:entry", ns)
+        terms = set(query.lower().replace("?","").replace("!","").split())
+        results = []
+        for e in entries:
+            title   = e.find("atom:title", ns)
+            link    = e.find("atom:link", ns)
+            summary = e.find("atom:summary", ns)
+            updated = e.find("atom:updated", ns)
+            if title and title.text:
+                txt = (title.text + " " + (summary.text or "")).lower()
+                hits = sum(1 for w in terms if w in txt)
+                if hits >= 1:
+                    results.append((hits, {
+                        "title":    title.text,
+                        "subreddit": "CIRCL/NVD",
+                        "sentiment": "Negative",
+                        "score": 0, "divergence": 0.4,
+                        "source": "circl_cve",
+                        "url": link.get("href","") if link is not None else "",
+                        "date": (updated.text or "")[:10] if updated is not None else "",
+                        "detail": (summary.text or "")[:150],
+                        "verified": True,
+                        "tier": 1,
+                    }))
+        results.sort(key=lambda x: x[0], reverse=True)
+        return [d for _,d in results[:limit]]
+    except Exception as e:
+        return []
+
+def fetch_reddit_subreddit(query, subreddits=None, limit=5):
+    """Tier 2 — Direct Reddit subreddit JSON search (community, not verified)."""
+    try:
+        import requests as req
+        if subreddits is None:
+            # Auto-detect relevant subreddits from query
+            q = query.lower()
+            if any(w in q for w in ["ios","iphone","ipad","siri","apple","macos"]):
+                subreddits = ["applehelp","ios","apple"]
+            elif any(w in q for w in ["linux","ubuntu","fedora","debian","grub","kernel"]):
+                subreddits = ["linuxquestions","linux","Ubuntu"]
+            elif any(w in q for w in ["chrome","firefox","edge","browser"]):
+                subreddits = ["chrome","firefox","MicrosoftEdge"]
+            elif any(w in q for w in ["windows","microsoft","win11"]):
+                subreddits = ["windows","techsupport","sysadmin"]
+            else:
+                subreddits = ["techsupport","sysadmin","software"]
+
+        results = []
+        headers = {"User-Agent": "AMARA-Research/1.0"}
+        for sub in subreddits[:2]:  # max 2 subreddits
+            try:
+                url = f"https://www.reddit.com/r/{sub}/search.json"
+                r = req.get(url, params={"q": query, "sort":"relevance","limit":10,"restrict_sr":"on"},
+                            headers=headers, timeout=10)
+                if r.status_code == 200:
+                    posts = r.json().get("data",{}).get("children",[])
+                    for p in posts:
+                        d = p.get("data",{})
+                        results.append({
+                            "title":     d.get("title",""),
+                            "subreddit": d.get("subreddit",""),
+                            "sentiment": "Negative" if any(w in d.get("title","").lower()
+                                         for w in ["broken","fix","issue","bug","error","fail"]) else "Positive",
+                            "score":     d.get("score",0),
+                            "divergence": 0.0,
+                            "source":    "reddit_search",
+                            "url":       f"https://reddit.com{d.get('permalink','')}",
+                            "date":      "",
+                            "verified":  False,
+                            "tier":      2,
+                        })
+            except: pass
+        return results[:limit]
+    except Exception as e:
+        return []
+
+def get_source_label(source):
+    """Return trust label and icon for a source."""
+    labels = {
+        "vendor_releases": ("✅ VERIFIED", "releasetrain.io — Targeted Vendor Release Notes"),
+        "apple_rss":       ("✅ VERIFIED", "Apple Official Release Feed"),
+        "cisa_kev":        ("✅ VERIFIED", "CISA US-CERT Known Exploited Vulnerabilities"),
+        "circl_cve":       ("✅ VERIFIED", "CIRCL/NVD Apple CVE Database"),
+        "nvd":             ("✅ VERIFIED", "NVD/NIST Official CVE Database"),
+        "releases":        ("✅ VERIFIED", "releasetrain.io Release Notes (general)"),
+        "cve":             ("✅ VERIFIED", "releasetrain.io CVE Advisories"),
+        "vendor_reddit":   ("🟡 COMMUNITY", "Reddit — Vendor Subreddit (targeted)"),
+        "reddit_live":     ("🟡 COMMUNITY", "Reddit Community Posts (releasetrain.io)"),
+        "reddit_search":   ("🟡 COMMUNITY", "Reddit Community Posts (direct search)"),
+        "google_news":     ("🟡 COMMUNITY", "Google News Press Coverage"),
+        "github":          ("🟡 COMMUNITY", "GitHub Release Notes"),
+        "local":           ("⚠️ UNVERIFIED", "Local Dataset (may be outdated)"),
+    }
+    return labels.get(source, ("⚠️ UNVERIFIED", f"Unknown source: {source}"))
+
+
+
+# ─────────────────────────────────────────────────────────────
+# VENDOR EXTRACTION — Dr. Berhe's recommendation
+# Extract product/vendor from query first, then query targeted APIs
+# ─────────────────────────────────────────────────────────────
+
+import difflib
+import requests as requests
+
+_VENDOR_NAMES    = []   # from /api/c/names        — 14,223 products
+_SUBREDDIT_NAMES = []   # from /api/reddit/meta/subreddits — 628 subreddits
+_VENDORS_LOADED  = False
+
+def load_vendor_lists():
+    """Cache vendor + subreddit lists once at startup."""
+    global _VENDOR_NAMES, _SUBREDDIT_NAMES, _VENDORS_LOADED
+    if _VENDORS_LOADED:
+        return
+    try:
+        r1 = requests.get("https://releasetrain.io/api/c/names", timeout=15)
+        _VENDOR_NAMES = [v.lower() for v in r1.json() if isinstance(v, str)]
+        print(f"  Loaded {len(_VENDOR_NAMES)} vendor names")
+    except Exception as e:
+        print(f"  Warning: could not load vendor names: {e}")
+
+    try:
+        r2 = requests.get("https://releasetrain.io/api/reddit/meta/subreddits", timeout=15)
+        _SUBREDDIT_NAMES = [s.lower() for s in r2.json().get("data", []) if isinstance(s, str)]
+        print(f"  Loaded {len(_SUBREDDIT_NAMES)} subreddit names")
+    except Exception as e:
+        print(f"  Warning: could not load subreddits: {e}")
+
+    _VENDORS_LOADED = True
+
+# Common aliases — maps query terms to canonical vendor names
+VENDOR_ALIASES = {
+    # Apple
+    "ios": "ios", "iphone": "ios", "ipad": "ios", "siri": "ios",
+    "icloud": "ios", "apple id": "ios", "find my": "ios",
+    "macos": "macos", "mac": "macos", "macbook": "macos", "tahoe": "macos",
+    # Browsers
+    "firefox": "firefox", "ff": "firefox",
+    "chrome": "chrome", "chromium": "chrome",
+    "edge": "MicrosoftEdge", "microsoft edge": "MicrosoftEdge",
+    # OS
+    "windows": "windows", "win11": "windows", "win10": "windows",
+    "linux": "linux", "ubuntu": "ubuntu", "debian": "debian",
+    "fedora": "fedora", "kernel": "linux",
+    "android": "android", "pixel": "android",
+    # Hardware/Networking
+    "ubiquiti": "Ubiquiti", "unifi": "Ubiquiti", "g6": "Ubiquiti",
+    "bullet": "Ubiquiti", "udr": "Ubiquiti", "udm": "Ubiquiti",
+    "proxmox": "Proxmox", "nginx": "nginx", "apache": "apache",
+    "docker": "docker",
+    # AI/ML tools
+    "ollama": "ollama",
+    "comfyui": "comfyui", "comfy": "comfyui", "gguf": "comfyui",
+    "ace-step": "comfyui", "acestep": "comfyui", "queue": "comfyui",
+    "wan2": "comfyui", "flux": "comfyui",
+    "ace-step": "comfyui", "ace step": "comfyui",
+    "wan2": "comfyui", "wan 2": "comfyui",
+    "openclaw": "openclaw",
+    # GPU
+    "nvidia": "nvidia", "nvidia drivers": "nvidia",
+    # Home automation
+    "home assistant": "homeassistant", "homeassistant": "homeassistant",
+    "zigbee": "homeassistant", "z2m": "homeassistant",
+    # Dev tools
+    "vscode": "vscode", "vs code": "vscode",
+    "wordpress": "Wordpress", "wp": "Wordpress",
+    "git": "git", "github": "github",
+    "python": "python",
+    "nginx": "nginx",
+}
+
+def extract_vendor(query: str) -> list:
+    """
+    Extract vendor/product names from a query.
+    Returns list of matched vendor names (lowercase).
+    Priority: aliases > exact word match in vendor list > subreddit match > fuzzy.
+    Falls back to [] if no match found.
+    """
+    load_vendor_lists()
+    q_lower = query.lower()
+    found = []
+
+    # 0. Check [r/subreddit] prefix from auto mode
+    import re
+    sub_match = re.match(r'\[r/(\w+)\]', query.strip())
+    if sub_match:
+        sub_name = sub_match.group(1).lower()
+        # Map subreddit to vendor
+        SUB_TO_VENDOR = {
+            "comfyui": "comfyui", "ubiquiti": "Ubiquiti",
+            "openclaw": "openclaw", "ollama": "ollama",
+            "homeassistant": "homeassistant", "applehelp": "ios",
+            "linuxquestions": "linux", "fedora": "linux",
+            "linux": "linux", "ubuntu": "ubuntu",
+        }
+        if sub_name in SUB_TO_VENDOR:
+            found.append(SUB_TO_VENDOR[sub_name])
+
+    # 1. Check aliases first (fastest, most reliable)
+    for alias, canonical in VENDOR_ALIASES.items():
+        if alias in q_lower:
+            if canonical.lower() not in [f.lower() for f in found]:
+                found.append(canonical)
+
+    # 2. Check exact word match against vendor names list
+    if not found:
+        words = set(q_lower.replace("?","").replace("!","").split())
+        for word in words:
+            if len(word) > 3 and word in _VENDOR_NAMES:
+                found.append(word)
+
+    # 3. Check subreddit names (they're curated and clean)
+    if not found:
+        words = set(q_lower.replace("?","").replace("!","").split())
+        for word in words:
+            if len(word) > 3 and word in _SUBREDDIT_NAMES:
+                found.append(word)
+
+    # 4. Fuzzy match as last resort (only if confident)
+    if not found and _VENDOR_NAMES:
+        words = [w for w in q_lower.split() if len(w) > 4]
+        for word in words:
+            matches = difflib.get_close_matches(word, _VENDOR_NAMES, n=1, cutoff=0.92)
+            if matches:
+                found.append(matches[0])
+
+    return list(dict.fromkeys(found))  # deduplicate preserving order
+
+def fetch_vendor_releases(vendor: str, limit: int = 10) -> list:
+    """Fetch targeted releases for a specific vendor using /api/c/name/{vendor}"""
+    try:
+        url = f"https://releasetrain.io/api/c/name/{vendor.lower()}"
+        r = requests.get(url, timeout=15)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        # Response is {vendor_name: [...releases]}
+        releases = []
+        for key, items in data.items():
+            if isinstance(items, list):
+                releases.extend(items)
+        results = []
+        for v in releases[:limit]:
+            notes = v.get("versionReleaseNotes", "")
+            if isinstance(notes, list): notes = " ".join(notes)
+            results.append({
+                "title":     f"{v.get('versionProductBrand',vendor)} v{v.get('versionNumber','')} — {str(notes)[:120]}",
+                "subreddit": v.get("versionProductBrand", vendor),
+                "sentiment": "Negative" if v.get("isCve") else "Positive",
+                "score":     0,
+                "divergence": 0.0,
+                "source":    "vendor_releases",
+                "url":       v.get("versionUrl", ""),
+                "date":      str(v.get("versionReleaseDate", ""))[:8],
+                "detail":    str(notes)[:150],
+                "verified":  True,
+                "tier":      1,
+                "vendor":    vendor,
+            })
+        return results
+    except Exception as e:
+        return []
+
+def fetch_vendor_reddit(vendor: str, query: str = "", limit: int = 10) -> list:
+    """Fetch targeted Reddit posts for a specific vendor subreddit, filtered by query relevance."""
+    try:
+        r = requests.get(
+            "https://releasetrain.io/api/reddit/by-subreddit",
+            params={"q": vendor.lower(), "limit": 200},
+            timeout=15
+        )
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        posts = data.get("data", [])
+
+        # Filter by query relevance if query provided
+        if query:
+            q_terms = set(w.lower().strip("?!.,") for w in query.split() if len(w) > 3)
+            scored = []
+            for p in posts:
+                title = p.get("title", "").lower()
+                body  = str(p.get("author_description", "") or "").lower()
+                txt   = title + " " + body
+                hits  = sum(1 for t in q_terms if t in txt)
+                # Boost exact title match
+                if query.lower()[:25] in title:
+                    hits += 10
+                scored.append((hits, p))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            posts = [p for _, p in scored if _ > 0][:limit]
+        else:
+            posts = posts[:limit]
+
+        results = []
+        for p in posts:
+            title  = p.get("title", "")
+            body   = str(p.get("author_description", "") or "")[:300]
+            f_comm = str(p.get("first_author_comment", "") or "")[:200] if p.get("first_author_comment") else ""
+            detail = (body + (" | Top comment: " + f_comm if f_comm else "")).strip()
+            results.append({
+                "title":     title,
+                "subreddit": p.get("subreddit", vendor),
+                "sentiment": "Negative" if any(w in title.lower()
+                             for w in ["broken","fix","bug","error","fail","crash","issue","unstable"]) else "Positive",
+                "score":     p.get("score", 0),
+                "divergence": 0.0,
+                "source":    "vendor_reddit",
+                "url":       p.get("url", ""),
+                "date":      "",
+                "detail":    detail,
+                "verified":  False,
+                "tier":      2,
+                "vendor":    vendor,
+            })
+        return results
+    except Exception as e:
+        return []
+
+
 def load_docs():
     """Load local dataset as fallback only."""
     if DATA_PATH.exists():
@@ -387,24 +792,77 @@ class RetrieverAgent:
         print(f"  Purpose  : Live API search — Releases + Reddit + CVE")
         pause()
 
-        # Fetch from all 5 verified sources simultaneously
-        print(f"  Fetching : releasetrain.io/api/v/ ...")
-        releases = fetch_live_releases(rewritten_query, limit=4)
+        # ── STEP 1: Extract vendor/product from query (Dr. Berhe) ──
+        vendors = extract_vendor(rewritten_query)
+        if vendors:
+            print(f"  Vendor   : Detected → {vendors}")
+        else:
+            print(f"  Vendor   : None detected — using general search")
 
-        print(f"  Fetching : releasetrain.io/api/reddit/query/positive ...")
-        reddit = fetch_live_reddit(rewritten_query, limit=3)
+        # ── STEP 2: Targeted vendor queries (if vendor found) ──
+        vendor_releases = []
+        vendor_reddit   = []
+        if vendors:
+            # Expand vendor to related subreddits for better coverage
+            VENDOR_SUBREDDITS = {
+                "linux":     ["linux","linuxquestions","Fedora","Ubuntu","debian"],
+                "ollama":    ["ollama","LocalLLaMA","openclaw"],
+                "comfyui":   ["comfyui"],
+                "openclaw":  ["openclaw"],
+                "Ubiquiti":  ["Ubiquiti"],
+                "ios":       ["applehelp","ios","apple"],
+                "macos":     ["MacOS","applehelp"],
+                "windows":   ["windows","techsupport"],
+                "chrome":    ["chrome","chromium"],
+                "homeassistant": ["homeassistant"],
+            }
+            for v in vendors[:2]:  # max 2 vendors
+                print(f"  Fetching : releasetrain.io/api/c/name/{v} ...")
+                vendor_releases += fetch_vendor_releases(v, limit=8)
+                # Search all related subreddits for this vendor
+                subs_to_search = VENDOR_SUBREDDITS.get(v, [v])
+                for sub in subs_to_search[:3]:
+                    print(f"  Fetching : releasetrain.io/api/reddit/by-subreddit?q={sub} ...")
+                    vendor_reddit += fetch_vendor_reddit(sub, query=rewritten_query, limit=8)
+
+        # ── STEP 3: General sources (always run as fallback/supplement) ──
+        print(f"  Fetching : releasetrain.io/api/v/ (general) ...")
+        releases = fetch_live_releases(rewritten_query, limit=4) if not vendor_releases else []
+
+        print(f"  Fetching : Apple Official RSS ...")
+        apple = fetch_apple_rss(rewritten_query, limit=3)
+
+        print(f"  Fetching : CISA KEV (actively exploited CVEs) ...")
+        cisa = fetch_cisa_kev(rewritten_query, limit=2)
+
+        print(f"  Fetching : CIRCL Apple CVE feed ...")
+        circl = fetch_circl_apple(rewritten_query, limit=2)
 
         print(f"  Fetching : releasetrain.io/api/reddit/query/cve ...")
         cve = fetch_live_cve(rewritten_query, limit=2)
 
+        print(f"  Fetching : releasetrain.io/api/reddit/query/positive ...")
+        reddit = fetch_live_reddit(rewritten_query, limit=3) if not vendor_reddit else []
+
         print(f"  Fetching : Google News RSS ...")
-        news = fetch_google_news(rewritten_query, limit=3)
+        news = fetch_google_news(rewritten_query, limit=2)
 
-        print(f"  Fetching : GitHub Releases ...")
-        github = fetch_github_releases(rewritten_query, limit=2)
+        # ── Tier 1: vendor-specific first, then general verified ──
+        tier1 = vendor_releases + releases + apple + cisa + circl + cve
+        # ── Tier 2: vendor reddit first, then general community ──
+        tier2 = vendor_reddit + reddit + news
 
-        # Combine all verified sources
-        results = releases + reddit + cve + news + github
+        # Boost: if Apple RSS or Reddit has direct query match, put it first
+        q_low = rewritten_query.lower()
+        boosted, rest = [], []
+        for d in tier1 + tier2:
+            title = d.get("title","").lower()
+            # Direct product/topic match — move to front
+            if any(w in title for w in q_low.split()[:4] if len(w)>3):
+                boosted.append(d)
+            else:
+                rest.append(d)
+        results = boosted + rest
 
         # Fallback to local if live APIs return nothing
         if not results:
@@ -417,7 +875,13 @@ class RetrieverAgent:
             )
             results = [d for s, d in scored if s > 0][:top_k] or DOCS[:top_k]
 
-        print(f"  Found    : {len(results)} results | releases={len(releases)} reddit={len(reddit)} cve={len(cve)} news={len(news)} github={len(github)}")
+        t1_count = len(tier1); t2_count = len(tier2)
+        print(f"  Found    : {len(results)} results | ✅ Tier1={t1_count} (verified) | 🟡 Tier2={t2_count} (community)")
+        for i, doc in enumerate(results[:6], 1):
+            lbl, src_name = get_source_label(doc.get("source","?"))
+            icon = "🔴" if doc["sentiment"]=="Negative" else "🟢"
+            date = f" ({doc.get('date','')[:10]})" if doc.get('date') else ''
+            print(f"    {i}. {icon} {lbl[:4]} [{doc.get('source','?')}] {doc['title'][:55]}{date}")
         for i, doc in enumerate(results[:top_k], 1):
             icon = "🔴" if doc["sentiment"]=="Negative" else "🟢" if doc["sentiment"]=="Positive" else "🟡"
             src  = f"[{doc.get('source','?')}]"
@@ -439,9 +903,50 @@ class EvaluatorAgent:
         pause()
 
         query_terms = set(original_query.lower().split())
-        quality     = round(min(len(query_terms & set(docs[0]["title"].lower().split()))
-                                / max(len(query_terms), 1), 1.0), 2) if docs else 0.0
-        signal      = "✅ positive" if quality >= 0.15 else "⚠️  negative — manager will retry"
+        if docs:
+            scores = []
+            for d in docs:
+                txt = (d.get("title","") + " " + d.get("subreddit","") +
+                       " " + d.get("detail","")).lower()
+                hits = len(query_terms & set(txt.split()))
+                # Bonus for verified sources with any match
+                if d.get("source","") in ["apple_rss","cisa_kev","circl_cve"] and hits >= 1:
+                    hits += 3
+                # Bonus for exact title match in community posts
+                if original_query.lower()[:20] in txt:
+                    hits += 5
+                scores.append(hits)
+            best = max(scores) if scores else 0
+            quality = round(min(best / max(len(query_terms), 1), 1.0), 2)
+            # If we have verified Apple sources, minimum quality is MEDIUM
+            has_apple = any(d.get("source") in ["apple_rss","cisa_kev","circl_cve"]
+                           for d in docs)
+            if has_apple and quality < 0.3:
+                quality = 0.3
+        else:
+            quality = 0.0
+        # If vendor-targeted releases found — that IS a quality signal
+        has_vendor_releases = any(d.get("source") == "vendor_releases" for d in docs)
+        has_vendor_reddit   = any(d.get("source") == "vendor_reddit"   for d in docs)
+        tier1_hits = [d for d in docs if d.get("source","") in TIER1]
+        tier2_hits = [d for d in docs if d.get("source","") in TIER2]
+        has_ios_match = any(
+            any(w in (d.get("title","") + d.get("detail","")).lower()
+                for w in ["ios","iphone","apple","siri","ipad","macos"])
+            for d in docs
+        )
+
+        # Vendor-targeted results = strong relevance signal
+        if has_vendor_releases and has_vendor_reddit:
+            quality = max(quality, 0.6)   # MEDIUM-HIGH
+        elif has_vendor_releases or has_vendor_reddit:
+            quality = max(quality, 0.35)  # MEDIUM — Llama will run
+        elif has_ios_match and tier1_hits:
+            quality = max(quality, 0.5)
+        elif tier1_hits and quality < 0.3:
+            quality = 0.3
+
+        signal = "✅ positive" if quality >= 0.15 else "⚠️  negative — manager will retry"
 
         print(f"  Quality  : {quality:.2f} / 1.0")
         print(f"  RLAIF    : {signal}")
@@ -472,7 +977,7 @@ class EvaluatorAgent:
             lines.append("    • Try rephrasing — e.g. 'Linux kernel security patch' instead of 'Linux updates'")
             lines.append("    • Check releasetrain.io directly for latest releases")
             lines.append("    • Try a more specific version number or CVE ID")
-        elif confidence == "LOW":
+        elif confidence == "LOW" and not any(d.get("source") in ["reddit_live","cve"] for d in docs):
             lines.append("  ⚠️  LOW CONFIDENCE — Results found but may not directly answer your question.")
             lines.append("  Here are the closest matches found. Please verify independently:")
             lines.append("")
@@ -487,16 +992,95 @@ class EvaluatorAgent:
             lines.append("    • Search CVE database: https://nvd.nist.gov")
             lines.append("    • Check vendor release notes directly")
         else:
-            lines.append(f"  ✅ ANSWER — Based on {len(docs)} verified source(s):")
+            # ── Llama synthesis — generate a direct answer from retrieved docs ──
+            context_parts = []
+            # Prioritize vendor-specific docs first
+            sorted_docs = sorted(docs, key=lambda d: (
+                0 if d.get("source") in ["vendor_releases","vendor_reddit"] else 1
+            ))
+            for d in sorted_docs[:8]:
+                src    = d.get('source','?')
+                title  = d.get('title','')[:120]
+                detail = d.get('detail','')[:350] if d.get('detail') else ''
+                url    = d.get('url','')
+                cve    = url.split('/')[-1] if url and 'CVE' in url else ''
+                sub    = d.get('subreddit','')
+                src_lbl = "COMMUNITY POST" if d.get('source') in ['vendor_reddit','reddit_live'] else "RELEASE NOTE"
+                entry  = f"[{src_lbl}][{sub}] {title}"
+                if detail: entry += f"\n  Content: {detail}"
+                if cve:    entry += f"\n  CVE: {cve}"
+                context_parts.append(entry)
+            context = "\n\n".join(context_parts) if context_parts else "No direct matches found."
+
+
+            # Get vendor name from docs — must be before prompt
+            vendor_name = next((d.get("vendor","") for d in docs if d.get("vendor")), "the vendor")
+            vendor_url  = f"https://github.com/search?q={vendor_name}" if vendor_name != "the vendor" else "releasetrain.io"
+
+            llm_prompt = f"""You are a software support assistant. Answer ONLY using the sources below. Do NOT add anything not in the sources.
+
+User question: "{original_query}"
+
+Sources retrieved:
+{context}
+
+Rules:
+1. Community posts showing the SAME question mean other users have the same problem. Acknowledge this and summarize any details from the post content.
+2. If a community post body contains a question like "Do I still use X or Y?" — answer based on what the release notes say about X and Y.
+3. Release notes tell you what changed — use them to answer "what is the current state" questions.
+4. Only use the fallback "sources don't address this" if the sources are about completely different products.
+5. NEVER invent version numbers, CVE IDs, or workarounds not in the sources.
+6. Keep answer to 2-3 sentences.
+
+Answer:"""
+
+            print(f"  Synthesizing answer with Llama 3.1...")
+            llm_answer = call_llama(llm_prompt)
+            # Separate by trust tier
+            tier1_docs = [d for d in docs if d.get("source","") in TIER1]
+            tier2_docs = [d for d in docs if d.get("source","") in TIER2]
+            unverified = [d for d in docs if d.get("source","") not in TIER1+TIER2]
+
+            lines.append(f"  ✅ ANSWER (synthesized by Llama 3.1):")
             lines.append("")
-            if neg:
-                lines.append(f"  🔴 CRITICAL/SECURITY ({len(neg)} item(s)):")
-                for d in neg[:4]:
-                    src  = d.get('source','?')
-                    date = f" ({d.get('date','')})" if d.get('date') else ''
-                    lines.append(f"    • [{src}] {d['title'][:90]}{date}")
-                    if d.get('detail'): lines.append(f"      Detail: {d['detail'][:100]}")
+            lines.append(f"  {llm_answer}")
+            lines.append("")
+
+            if tier1_docs:
+                lines.append(f"  ✅ VERIFIED SOURCES ({len(tier1_docs)}):")
+                for d in tier1_docs[:4]:
+                    lbl, src_name = get_source_label(d.get("source","?"))
+                    date = f" ({d.get('date','')[:10]})" if d.get('date') else ''
+                    cve_id = d.get("cve_id","")
+                    lines.append(f"    • {lbl} [{src_name}]")
+                    lines.append(f"      {d['title'][:90]}{date}")
+                    if d.get('detail'): lines.append(f"      ↳ {d['detail'][:100]}")
+                    if cve_id: lines.append(f"      ↳ CVE: {cve_id}")
                     if d.get('url'):    lines.append(f"      🔗 {d['url']}")
+                    if d.get('action'): lines.append(f"      ⚡ Action: {d['action'][:80]}")
+                lines.append("")
+
+            if tier2_docs:
+                lines.append(f"  🟡 COMMUNITY SOURCES ({len(tier2_docs)}) — not officially verified:")
+                for d in tier2_docs[:4]:
+                    lbl, src_name = get_source_label(d.get("source","?"))
+                    sub  = d.get("subreddit","")
+                    date = f" ({d.get('date','')[:10]})" if d.get('date') else ''
+                    ups  = f" ↑{d.get('score',0)}" if d.get('score',0) > 0 else ''
+                    lines.append(f"    • {lbl} [r/{sub}]{ups}")
+                    lines.append(f"      {d['title'][:90]}{date}")
+                    if d.get('url'): lines.append(f"      🔗 {d['url']}")
+                lines.append("")
+
+            if unverified:
+                lines.append(f"  ⚠️  OTHER SOURCES ({len(unverified)}) — treat with caution:")
+                for d in unverified[:2]:
+                    lines.append(f"    • [{d.get('source','unknown')}] {d['title'][:80]}")
+                lines.append("")
+
+            if not tier1_docs and not tier2_docs:
+                lines.append("  ⚠️  No verified or community sources matched this query.")
+                lines.append("  Please check vendor documentation directly.")
             if pos:
                 lines.append(f"\n  🟢 UPDATES/RELEASES ({len(pos)} item(s)):")
                 for d in pos[:3]:
@@ -591,6 +1175,51 @@ def run_demo(query: str):
     print(answer)
     bar("═")
 
+
+def auto_mode(limit=5):
+    """AUTO MODE — fetch live Reddit questions and answer each one automatically."""
+    print("\n" + "="*58)
+    print("  AUTO MODE — Fetching latest Reddit questions...")
+    print("="*58)
+    try:
+        # Fetch page 1 + page 2 = 200 live questions
+        questions = []
+        for page in [1, 2]:
+            r = requests.get(
+                "https://releasetrain.io/api/reddit/query/questions",
+                params={"page": page, "limit": 100},
+                timeout=15
+            )
+            data = r.json()
+            batch = data if isinstance(data, list) else data.get("data", [])
+            questions.extend(batch)
+    except Exception as e:
+        print(f"  Could not fetch questions: {e}")
+        return
+    if not questions:
+        print("  No questions returned from API.")
+        return
+    print(f"  Found {len(questions)} live questions — answering top {limit}:")
+    for i, q in enumerate(questions[:limit], 1):
+        title = q.get("title", q.get("query", ""))
+        sub   = q.get("subreddit", "")
+        url   = q.get("url", "")
+        if not title:
+            continue
+        print("\n" + "-"*58)
+        print(f"  [{i}/{limit}]  r/{sub}")
+        print(f"  Q: {title}")
+        if url:
+            print(f"  Reddit: {url}")
+        print("-"*58)
+        run_demo(title)
+        ans = input("\n  Press Enter for next (or q to quit auto mode): ")
+        if ans.strip().lower() == "q":
+            break
+    print("\n" + "="*58)
+    print("  Auto mode complete.")
+    print("="*58)
+
 def interactive():
     print()
     bar("═")
@@ -601,6 +1230,7 @@ def interactive():
     print("  Commands:")
     print("    'why'  — show why multi-agent matters (start here!)")
     print("    'demo' — run all 3 demo queries")
+    print("    'auto' — AUTO MODE: fetch live Reddit questions and answer them")
     print("    'exit' — quit")
     print("    or type any question")
     bar("═")
@@ -617,6 +1247,13 @@ def interactive():
             for q in DEMO_QUERIES:
                 run_demo(q)
                 input("\n  Press Enter for next query...")
+        elif user_input.lower() in ("auto", "auto mode"):
+            try:
+                n = input("  How many questions to answer? (default 5): ").strip()
+                n = int(n) if n else 5
+            except:
+                n = 5
+            auto_mode(limit=n)
         else:
             run_demo(user_input)
 
@@ -626,3 +1263,62 @@ if __name__ == "__main__":
         for q in DEMO_QUERIES: run_demo(q)
     else:
         interactive()
+# ─────────────────────────────────────────────────────────────
+# AUTO MODE — fetch live Reddit questions and answer them
+# ─────────────────────────────────────────────────────────────
+
+def auto_mode(limit=5):
+    """Fetch latest Reddit questions and answer each one automatically."""
+    print("\n" + "═"*58)
+    print("  🤖  AUTO MODE — Fetching latest Reddit questions...")
+    print("═"*58)
+
+    try:
+        # Fetch page 1 + page 2 = 200 live questions
+        questions = []
+        for page in [1, 2]:
+            r = requests.get(
+                "https://releasetrain.io/api/reddit/query/questions",
+                params={"page": page, "limit": 100},
+                timeout=15
+            )
+            data = r.json()
+            batch = data if isinstance(data, list) else data.get("data", [])
+            questions.extend(batch)
+    except Exception as e:
+        print(f"  ❌ Could not fetch questions: {e}")
+        return
+
+    if not questions:
+        print("  ❌ No questions returned from API.")
+        return
+
+    print(f"  Found {len(questions)} live questions — answering top {limit}:\n")
+
+    for i, q in enumerate(questions[:limit], 1):
+        title = q.get("title", q.get("query", ""))
+        sub   = q.get("subreddit", "")
+        url   = q.get("url", "")
+
+        if not title:
+            continue
+
+        print(f"\n" + "─"*58)
+        print(f"  [{i}/{limit}]  r/{sub}")
+        print(f"  ❓  {title}")
+        if url:
+            print(f"  🔗  Reddit: {url}")
+        print("─"*58)
+
+        # Run through the full AMARA pipeline
+        # Prepend subreddit context to help vendor detection
+        query_with_context = f"[r/{sub}] {title}" if sub else title
+        run_demo(query_with_context)
+
+        ans = input("\n  Press Enter for next question (or q to quit): ")
+        if ans.strip().lower() == "q":
+            break
+
+    print("\n" + "═"*58)
+    print("  Auto mode complete.")
+    print("═"*58)
