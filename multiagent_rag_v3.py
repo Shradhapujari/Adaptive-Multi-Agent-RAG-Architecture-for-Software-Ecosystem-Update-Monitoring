@@ -535,7 +535,7 @@ VENDOR_STOP_WORDS = {
     "any","get","set","run","use","make","take","need","want","know",
     "think","see","look","try","back","first","last","next","same",
     "other","good","bad","big","small","free","open","automattic",
-    "trash","dead","broken","terrible","stupid","awful","great",
+    "trash","dead","broken","terrible","stupid","awful","great","performance","behavior","recent","update","patch","stable","unstable","issue","security","release","releases","software","latest","fixed","bugs","community","reaction","feedback","negative","positive","versions","version","offline","execute","tasks","after","update","fail","fails","failing",
 }
 
 # Subreddit → vendor fallback map
@@ -549,7 +549,7 @@ SUBREDDIT_VENDOR_MAP = {
     "neovim": "neovim",
     "linuxquestions": "linux",
     "applehelp": "ios",
-    "homeassistant": "homeassistant",
+    "homeassistant": "homeassistant", "home assistant": "homeassistant", "hass": "homeassistant", "ha": "homeassistant", "hassio": "homeassistant",
     "fedora": "fedora",
     "debian": "debian",
     "ubuntu": "ubuntu",
@@ -557,11 +557,11 @@ SUBREDDIT_VENDOR_MAP = {
     "firefox": "firefox",
     "openclaw": "openclaw",
     "comfyui": "comfyui",
-    "ollama": "ollama",
+    "ollama": "ollama", "ollama.ai": "ollama",
     "ubiquiti": "Ubiquiti",
     # Hardware/Networking
-    "ubiquiti": "Ubiquiti", "unifi": "Ubiquiti", "g6": "Ubiquiti",
-    "bullet": "Ubiquiti", "udr": "Ubiquiti", "udm": "Ubiquiti",
+    "ubiquiti": "Ubiquiti", "unifi": "Ubiquiti", "g6": "Ubiquiti", "g6 bullet": "Ubiquiti",
+    "bullet": "Ubiquiti", "udr": "Ubiquiti", "udm": "Ubiquiti", "uap": "Ubiquiti", "edgerouter": "Ubiquiti",
     "proxmox": "Proxmox", "nginx": "nginx", "apache": "apache",
     "docker": "docker",
     # AI/ML tools
@@ -575,7 +575,7 @@ SUBREDDIT_VENDOR_MAP = {
     # GPU
     "nvidia": "nvidia", "nvidia drivers": "nvidia",
     # Home automation
-    "home assistant": "homeassistant", "homeassistant": "homeassistant",
+    "home assistant": "homeassistant", "homeassistant": "homeassistant", "home assistant": "homeassistant", "hass": "homeassistant", "ha": "homeassistant", "hassio": "homeassistant",
     "zigbee": "homeassistant", "z2m": "homeassistant",
     # Dev tools
     "vscode": "vscode", "vs code": "vscode",
@@ -596,6 +596,25 @@ def extract_vendor(query: str, _subreddit_hint: str = "") -> list:
     q_lower = query.lower()
     found = []
 
+    # 0a. Multi-word and short aliases — checked BEFORE stop-word filter
+    MULTI_WORD = {
+        "g6 bullet":      "Ubiquiti",
+        "home assistant": "homeassistant",
+        "home-assistant": "homeassistant",
+        "hassio":         "homeassistant",
+        "microsoft edge": "MicrosoftEdge",
+        "ace step":       "comfyui",
+        "ace-step":       "comfyui",
+        "proxmox ve":     "Proxmox",
+    }
+    for phrase, pvendor in MULTI_WORD.items():
+        if phrase in q_lower:
+            return [pvendor]
+    # Short tokens (len<=2) that stop-word filter drops
+    for token in q_lower.split():
+        if token == "g6":
+            return ["Ubiquiti"]
+
     # 0. Check [r/subreddit] prefix from auto mode
     import re
     sub_match = re.match(r'\[r/(\w+)\]', query.strip())
@@ -605,7 +624,7 @@ def extract_vendor(query: str, _subreddit_hint: str = "") -> list:
         SUB_TO_VENDOR = {
             "comfyui": "comfyui", "ubiquiti": "Ubiquiti",
             "openclaw": "openclaw", "ollama": "ollama",
-            "homeassistant": "homeassistant", "applehelp": "ios",
+            "homeassistant": "homeassistant", "home assistant": "homeassistant", "hass": "homeassistant", "ha": "homeassistant", "hassio": "homeassistant", "applehelp": "ios",
             "linuxquestions": "linux", "fedora": "linux",
             "linux": "linux", "ubuntu": "ubuntu",
         }
@@ -648,7 +667,27 @@ def extract_vendor(query: str, _subreddit_hint: str = "") -> list:
         if sub_vendor:
             found.append(sub_vendor)
 
-    return list(dict.fromkeys(found))  # deduplicate preserving order
+        # Score each vendor by how strongly it matches the query
+    # and return only the single best match
+    found = list(dict.fromkeys(found))
+    if len(found) <= 1:
+        return found
+
+    q_lower_check = query.lower()
+    def vendor_score(v):
+        vl = v.lower()
+        # Direct name in query = highest confidence
+        if vl in q_lower_check:
+            return 0
+        # Alias match
+        for alias, canonical in VENDOR_ALIASES.items():
+            if alias in q_lower_check and canonical.lower() == vl:
+                return 1
+        # Subreddit fallback = lowest confidence
+        return 2
+
+    found.sort(key=vendor_score)
+    return found[:1]
 
 def extract_date_from_query(query: str):
     """Extract a target date from a query like 'on January 1st 2026' or 'in March 2025'."""
@@ -706,6 +745,35 @@ def fetch_vendor_releases(vendor: str, limit: int = 10, target_date: str = None)
             releases = [v for _, v in dated[:limit]]
         else:
             releases = releases[:limit]
+
+        # ── Canonical brand prioritization ─────────────────────────────
+        # Move entries where brand EXACTLY matches vendor to the front
+        # This fixes Linux returning openCryptoki instead of torvalds kernel
+        CANONICAL_MAP = {
+            "linux": ["torvalds", "linux kernel"],
+            "ios":   ["apple", "ios"],
+            "macos": ["apple", "macos"],
+            "firefox": ["mozilla", "firefox"],
+            "chrome": ["google", "chrome"],
+        }
+        canonical_brands = [b.lower() for b in CANONICAL_MAP.get(vendor.lower(), [vendor.lower()])]
+
+        def canonical_score(v):
+            brand = str(v.get("versionProductBrand","")).lower()
+            name  = str(v.get("versionProductName","")).lower()
+            # Exact canonical match = highest priority
+            if any(cb in brand or cb in name for cb in canonical_brands):
+                return 0
+            # Vendor name exact match = second priority
+            if brand == vendor.lower():
+                return 1
+            # CVE noise = lowest priority
+            if v.get("isCve"):
+                return 3
+            return 2
+
+        if not target_date:
+            releases.sort(key=canonical_score)
 
         results = []
         for v in releases:
@@ -900,7 +968,7 @@ class RetrieverAgent:
         vendor_releases = []
         vendor_reddit   = []
         # Extract date from query if present
-        target_date = extract_date_from_query(rewritten_query) or extract_date_from_query(original_query)
+        target_date = extract_date_from_query(rewritten_query)
         if target_date:
             print(f"  Date     : Detected → {target_date}")
 
@@ -1040,10 +1108,11 @@ class EvaluatorAgent:
 
         # Vendor-targeted results = strong relevance signal
         if has_vendor_releases and has_vendor_reddit:
-            quality = max(quality, 0.6)   # MEDIUM-HIGH
-        elif has_vendor_releases or has_vendor_reddit:
-            quality = max(quality, 0.35)  # MEDIUM — Llama will run
-        elif has_ios_match and tier1_hits:
+            quality = max(quality, 0.65)  # HIGH — both vendor sources confirmed
+        elif has_vendor_releases:
+            quality = max(quality, 0.50)  # MEDIUM-HIGH — release notes found
+        elif has_vendor_reddit:
+            quality = max(quality, 0.40)  # MEDIUM — community posts found
             quality = max(quality, 0.5)
         elif tier1_hits and quality < 0.3:
             quality = 0.3
@@ -1119,20 +1188,40 @@ class EvaluatorAgent:
             vendor_name = next((d.get("vendor","") for d in docs if d.get("vendor")), "the vendor")
             vendor_url  = f"https://github.com/search?q={vendor_name}" if vendor_name != "the vendor" else "releasetrain.io"
 
-            llm_prompt = f"""You are a software support assistant. Answer ONLY using the sources below. Do NOT add anything not in the sources.
+            # Detect query type to give Llama the right instructions
+            q_low = original_query.lower()
+            is_version_query = any(w in q_low for w in ["latest version","what version","current version","which version","version of"])
+            is_bug_query     = any(w in q_low for w in ["broken","crash","fail","issue","unstable","doesnt load","not working","error","bug","freeze","slow","dead","missing","disappeared"])
+
+            if is_version_query:
+                version_instruction = """IMPORTANT: This is a VERSION query.
+Look at the FIRST release source. Extract the version number and date.
+Respond EXACTLY in this format:
+The latest version of [product] is v[version], released on [date]. Source: [url]
+Do NOT say you could not find it. The version is in the sources."""
+            elif is_bug_query:
+                version_instruction = """IMPORTANT: This is a BUG/ISSUE query.
+State whether this issue is confirmed by community posts or release notes.
+If confirmed: say "This is a known issue. [what sources say]. Verdict: CONFIRMED."
+If not found: say "No matching reports found for this specific issue." """
+            else:
+                version_instruction = """Answer directly from the sources. Be specific and factual.
+If release notes are present, state what changed. If community posts match, summarize them."""
+
+            llm_prompt = f"""You are a software update assistant. Answer ONLY using the sources below.
+
+{version_instruction}
+
+STRICT RULES:
+- NEVER say "I couldn't find" if at least one source was retrieved
+- NEVER invent version numbers, CVE IDs, or fixes not in the sources
+- NEVER say "it appears" or "it is likely" — only state what sources confirm
+- Keep answer to 2-3 sentences maximum
 
 User question: "{original_query}"
 
 Sources retrieved:
 {context}
-
-Rules:
-1. Community posts showing the SAME question mean other users have the same problem. Acknowledge this and summarize any details from the post content.
-2. If a community post body contains a question like "Do I still use X or Y?" — answer based on what the release notes say about X and Y.
-3. Release notes tell you what changed — use them to answer "what is the current state" questions.
-4. Only use the fallback "sources don't address this" if the sources are about completely different products.
-5. NEVER invent version numbers, CVE IDs, or workarounds not in the sources.
-6. Keep answer to 2-3 sentences.
 
 Answer:"""
 
@@ -1258,9 +1347,9 @@ def show_why():
     """)
 
 DEMO_QUERIES = [
-    "What bugs were fixed in the latest update?",
-    "Which software releases got negative community reaction?",
-    "Are there any security fixes in recent updates?",
+    "What is the latest version of Linux?",
+    "Siri fail to execute tasks when offline after iOS 26.4 update",
+    "Updated to kernel 6.19.11 and now desktop doesnt load",
 ]
 
 def run_demo(query: str):
