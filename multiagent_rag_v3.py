@@ -690,9 +690,49 @@ def extract_vendor(query: str, _subreddit_hint: str = "") -> list:
     return found[:1]
 
 def extract_date_from_query(query: str):
-    """Extract a target date from a query like 'on January 1st 2026' or 'in March 2025'."""
+    """Extract a target date from a query.
+    Handles both absolute dates (Jan 1 2026) and relative tokens
+    (yesterday, last week, recently, latest, just, now, still).
+    Returns YYYYMMDD string or None.
+    """
     import re
+    from datetime import datetime, timedelta
     q = query.lower()
+    today = datetime.now()
+
+    # ── Relative date tokens ────────────────────────────────────────────
+    RELATIVE_TOKENS = {
+        # token: (days_back, label)
+        "yesterday":   (1,   "yesterday"),
+        "last night":  (1,   "yesterday"),
+        "today":       (0,   "today"),
+        "just now":    (0,   "today"),
+        "this week":   (7,   "this week"),
+        "last week":   (7,   "last week"),
+        "past week":   (7,   "past week"),
+        "this month":  (30,  "this month"),
+        "last month":  (30,  "last month"),
+        "past month":  (30,  "past month"),
+        "recently":    (14,  "recently"),
+        "recent":      (14,  "recent"),
+        "latest":      (0,   "latest"),   # 0 = fetch most recent
+        "just":        (7,   "just"),
+        "still":       (30,  "still"),
+        "anymore":     (30,  "anymore"),
+        "now":         (0,   "now"),
+        "currently":   (0,   "currently"),
+        "current":     (0,   "current"),
+        "after update":(14,  "after update"),
+        "after the update": (14, "after update"),
+    }
+
+    for token, (days_back, label) in RELATIVE_TOKENS.items():
+        if token in q:
+            resolved = today - timedelta(days=days_back)
+            resolved_str = resolved.strftime("%Y%m%d")
+            return resolved_str  # return date filter
+
+    # ── Absolute date patterns ──────────────────────────────────────────
     # Match patterns like "january 1st 2026", "jan 1 2026", "2026-01-01", "20260101"
     months = {"january":1,"jan":1,"february":2,"feb":2,"march":3,"mar":3,
               "april":4,"apr":4,"may":5,"june":6,"jun":6,"july":7,"jul":7,
@@ -801,6 +841,57 @@ def fetch_vendor_releases(vendor: str, limit: int = 10, target_date: str = None)
     except Exception as e:
         return []
 
+def get_top_voted_comment(post: dict) -> dict | None:
+    """Extract the highest-voted comment from a Reddit post.
+    Returns dict with body, score, author or None if no comments."""
+    comments = post.get("comments", [])
+    if not comments or not isinstance(comments, list):
+        # Try first_author_comment as fallback
+        fac = post.get("first_author_comment")
+        if fac and fac != "None" and fac:
+            return {"body": str(fac), "score": 0, "author": post.get("author","")}
+        return None
+
+    # Filter out empty/deleted comments
+    valid = [c for c in comments
+             if isinstance(c, dict)
+             and c.get("body","").strip()
+             and c.get("body","") not in ["[deleted]","[removed]",""]
+             and len(c.get("body","")) > 10]
+
+    if not valid:
+        return None
+
+    # Sort by score descending — pick highest voted
+    valid.sort(key=lambda c: int(c.get("score", 0)), reverse=True)
+    top = valid[0]
+    return {
+        "body":   top.get("body","").strip(),
+        "score":  int(top.get("score", 0)),
+        "author": top.get("author",""),
+        "id":     top.get("id",""),
+    }
+
+
+def enrich_reddit_docs_with_top_comments(docs: list) -> list:
+    """For each Reddit doc, find the top-voted comment and add it
+    to the detail field so Llama can use it for synthesis."""
+    enriched = []
+    for doc in docs:
+        top_comment = get_top_voted_comment(doc.get("_raw_post", {}))
+        if top_comment and top_comment["score"] > 0:
+            # Prepend top comment to detail
+            comment_text = (
+                f"[Top comment by u/{top_comment['author']} "
+                f"↑{top_comment['score']}]: {top_comment['body'][:200]}"
+            )
+            doc["detail"]        = comment_text + " | " + doc.get("detail","")
+            doc["top_comment"]   = top_comment["body"]
+            doc["top_comment_score"] = top_comment["score"]
+        enriched.append(doc)
+    return enriched
+
+
 def fetch_vendor_reddit(vendor: str, query: str = "", limit: int = 10) -> list:
     """Fetch targeted Reddit posts for a specific vendor subreddit, filtered by query relevance."""
     try:
@@ -828,7 +919,7 @@ def fetch_vendor_reddit(vendor: str, query: str = "", limit: int = 10) -> list:
                     hits += 10
                 scored.append((hits, p))
             scored.sort(key=lambda x: x[0], reverse=True)
-            posts = [p for _, p in scored if _ > 0][:limit]
+            posts = [p for _, p in scored][:limit]  # keep all, sorted by relevance
         else:
             posts = posts[:limit]
 
@@ -852,7 +943,11 @@ def fetch_vendor_reddit(vendor: str, query: str = "", limit: int = 10) -> list:
                 "verified":  False,
                 "tier":      2,
                 "vendor":    vendor,
+                "_raw_post": p,
             })
+        # Sort by upvotes, enrich with top comments
+        results.sort(key=lambda x: int(x.get("score",0)), reverse=True)
+        results = enrich_reddit_docs_with_top_comments(results)
         return results
     except Exception as e:
         return []
