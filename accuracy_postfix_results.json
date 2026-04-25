@@ -1,0 +1,62 @@
+[
+  {
+    "id": 1,
+    "query": "What is the latest version of Linux?",
+    "verdict": "CORRECT",
+    "answer": "Query: \"What is the latest version of Linux?\"\nVerified: \u26a0\ufe0f  From local dataset \u2014 may not reflect today's data\nConfidence: HIGH (quality=0.50) | Sources: vendor_releases\nRetrieved: 2026-04-24 21:14\n\n  \u2705 ANSWER (synthesized by Llama 3.1):\n\n  The latest version of Linux is v7.0.0, released on 20260424."
+  },
+  {
+    "id": 2,
+    "query": "What is the latest version of Firefox?",
+    "verdict": "CORRECT",
+    "answer": "Query: \"What is the latest version of Firefox?\"\nVerified: \u26a0\ufe0f  From local dataset \u2014 may not reflect today's data\nConfidence: HIGH (quality=0.50) | Sources: vendor_releases\nRetrieved: 2026-04-24 21:15\n\n  \u2705 ANSWER (synthesized by Llama 3.1):\n\n  The latest version of Firefox is v150.0.0, released on 202"
+  },
+  {
+    "id": 3,
+    "query": "What was the Linux version on January 1st 2026?",
+    "verdict": "CORRECT",
+    "answer": "Query: \"What was the Linux version on January 1st 2026?\"\nVerified: \u26a0\ufe0f  From local dataset \u2014 may not reflect today's data\nConfidence: HIGH (quality=0.50) | Sources: vendor_releases\nRetrieved: 2026-04-24 21:15\n\n  \u2705 ANSWER (synthesized by Llama 3.1):\n\n  The Linux version on January 1st, 2026 was torval"
+  },
+  {
+    "id": 4,
+    "query": "Siri fails offline after iOS 26.4 update",
+    "verdict": "CORRECT",
+    "answer": "Query: \"Siri fails offline after iOS 26.4 update\"\nVerified: \u26a0\ufe0f  From local dataset \u2014 may not reflect today's data\nConfidence: HIGH (quality=0.65) | Sources: vendor_reddit, vendor_releases\nRetrieved: 2026-04-24 21:15\n\n  \u2705 ANSWER (synthesized by Llama 3.1):\n\n  This is not a known issue specifically ab"
+  },
+  {
+    "id": 5,
+    "query": "Updated to kernel 6.19.11 and now desktop doesnt load",
+    "verdict": "CORRECT",
+    "answer": "Query: \"Updated to kernel 6.19.11 and now desktop doesnt load\"\nVerified: \u26a0\ufe0f  From local dataset \u2014 may not reflect today's data\nConfidence: HIGH (quality=0.50) | Sources: vendor_releases\nRetrieved: 2026-04-24 21:16\n\n  \u2705 ANSWER (synthesized by Llama 3.1):\n\n  No matching reports found for this specific"
+  },
+  {
+    "id": 6,
+    "query": "G6 Bullet unstable?",
+    "verdict": "CORRECT",
+    "answer": "Query: \"G6 Bullet unstable?\"\nVerified: \u2705 VERIFIED from live releasetrain.io APIs\nConfidence: MEDIUM (quality=0.30) | Sources: releases\nRetrieved: 2026-04-24 21:16\n\n  \u2705 ANSWER (synthesized by Llama 3.1):\n\n  No matching reports found for this specific issue in the provided sources.\n\n  \u2705 VERIFIED SOURC"
+  },
+  {
+    "id": 7,
+    "query": "Home Assistant update broke my thermostat",
+    "verdict": "CORRECT",
+    "answer": "Query: \"Home Assistant update broke my thermostat\"\nVerified: \u2705 VERIFIED from live releasetrain.io APIs\nConfidence: HIGH (quality=0.50) | Sources: vendor_reddit, releases\nRetrieved: 2026-04-24 21:16\n\n  \u2705 ANSWER (synthesized by Llama 3.1):\n\n  The provided sources do not indicate that a recent Home Ass"
+  },
+  {
+    "id": 8,
+    "query": "What is the latest version of ollama?",
+    "verdict": "CORRECT",
+    "answer": "Query: \"What is the latest version of ollama?\"\nVerified: \u26a0\ufe0f  From local dataset \u2014 may not reflect today's data\nConfidence: HIGH (quality=0.50) | Sources: vendor_releases\nRetrieved: 2026-04-24 21:17\n\n  \u2705 ANSWER (synthesized by Llama 3.1):\n\n  The latest version of ollama is v0.20.61, released on 20260"
+  },
+  {
+    "id": 9,
+    "query": "Firefox settings being reset after update",
+    "verdict": "CORRECT",
+    "answer": "Query: \"Firefox settings being reset after update\"\nVerified: \u26a0\ufe0f  From local dataset \u2014 may not reflect today's data\nConfidence: HIGH (quality=0.65) | Sources: vendor_reddit, vendor_releases\nRetrieved: 2026-04-24 21:17\n\n  \u2705 ANSWER (synthesized by Llama 3.1):\n\n  The community post does not directly add"
+  },
+  {
+    "id": 10,
+    "query": "GGUF in latest versions of ComfyUI",
+    "verdict": "CORRECT",
+    "answer": "Query: \"GGUF in latest versions of ComfyUI\"\nVerified: \u26a0\ufe0f  From local dataset \u2014 may not reflect today's data\nConfidence: HIGH (quality=0.50) | Sources: vendor_releases\nRetrieved: 2026-04-24 21:17\n\n  \u2705 ANSWER (synthesized by Llama 3.1):\n\n  The latest version of ComfyUI in the provided sources is v0.19"
+  }
+]
