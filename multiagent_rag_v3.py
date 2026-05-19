@@ -49,7 +49,12 @@ def fetch_live_releases(query, limit=5, min_overlap=2):
     try:
         import requests as req
         r = req.get(RELEASES_API, timeout=30)
-        all_v = r.json().get("versions",[]) if r.status_code==200 else []
+        # API returns {vendor_name: [...]} — extract all items across all keys
+        raw = r.json() if r.status_code==200 else {}
+        all_v = []
+        for key, val in raw.items():
+            if isinstance(val, list):
+                all_v.extend(val)
         exp = expand_terms(query)
         scored = []
         for v in all_v:
