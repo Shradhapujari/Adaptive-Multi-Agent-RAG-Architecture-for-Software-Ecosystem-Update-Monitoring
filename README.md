@@ -1,9 +1,8 @@
-# AMARA: An Adaptive Multi-Agent RAG Architecture for Software Ecosystem Update Monitoring
+# An Adaptive Multi-Agent RAG Architecture for Software Ecosystem Update Monitoring
 
 > Multi-agent RAG system that answers software update questions — *"are there known Siri issues after iOS 26.4?"* — by integrating release notes, security advisories, and community discussions, with a self-improving retrieval memory that learns from its own outcomes. Runs locally on Llama 3.1 8B.
 
-📄 **Paper:** *An Adaptive Multi-Agent RAG Architecture for Software Ecosystem Update Monitoring* — AgenticSE '26 (Workshop on Agentic Software Engineering), San Jose, CA, May 26, 2026.
-https://drive.google.com/file/d/1WssnrTSiUxtYd2wWdV5QUKbIcB2-iPLH/view?usp=sharing
+📄 **Paper:** *An Adaptive Multi-Agent RAG Architecture for Software Ecosystem Update Monitoring* — presented at **AgenticSE '26** (Workshop on Agentic Software Engineering, ACM CAIS 2026), San Jose, CA, May 26–29, 2026. [[PDF](https://drive.google.com/file/d/1WssnrTSiUxtYd2wWdV5QUKbIcB2-iPLH/view?usp=sharing)]
 
 👩‍💻 **Authors:** Shradha Devendra Pujari, Dr. Solomon Berhe — University of the Pacific, Department of Computer Science.
 
@@ -22,7 +21,7 @@ https://drive.google.com/file/d/1WssnrTSiUxtYd2wWdV5QUKbIcB2-iPLH/view?usp=shari
 
 Every time a software update ships — iOS, Linux, Firefox, a NAS firmware, whatever — the information you need is scattered. Release notes tell you the official version. CVE feeds tell you the security side. Reddit tells you what's actually breaking for real users. Ask a normal single-agent RAG system *"are there Siri issues after iOS 26.4?"* and you get a vague answer with no real evidence.
 
-AMARA is built around the observation that single-agent RAG systems do query rewriting, retrieval, and evaluation all in one reasoning pass — which causes vocabulary mismatch (users say *"iPhone,"* release notes say *"iOS"*) and offers no feedback loop when retrieval fails. We decompose those tasks into four specialized agents and add a persistent memory of what worked.
+This system is built around the observation that single-agent RAG systems do query rewriting, retrieval, and evaluation all in one reasoning pass — which causes vocabulary mismatch (users say *"iPhone,"* release notes say *"iOS"*) and offers no feedback loop when retrieval fails. We decompose those tasks into four specialized agents and add a persistent memory of what worked.
 
 ---
 
@@ -115,19 +114,22 @@ Verified and community sources are kept separate and weighted differently in the
 
 ### Answer accuracy
 
-On version-specific questions, AMARA correctly identified Linux v7.0.0 (April 13, 2026) and Firefox v149.0.1 (April 7, 2026) from the corresponding release sources. On a supplementary 10-question live evaluation: **4 fully correct, 6 partially correct, 0 unsupported version numbers or CVE identifiers generated.**
+On version-specific questions, the system correctly identified Linux v7.0.0 (April 13, 2026) and Firefox v149.0.1 (April 7, 2026) from the corresponding release sources. On a supplementary 10-question live evaluation: **4 fully correct, 6 partially correct, 0 unsupported version numbers or CVE identifiers generated.**
+
+Raw per-question results are in `eval_50_results_v2.json` and the per-question results table. Ablation results are in `ablation_results.json`.
 
 ---
 
 ## Tech stack
 
 - **Models:** Llama 3.1 8B (primary), Mistral 7B (tested) — local via [Ollama](https://ollama.com), temperature 0
-- **Frameworks:** LangChain, smolagents, CrewAI
+- **Frameworks:** LangChain, smolagents
 - **Embeddings & search:** HuggingFace BGE-Large, FAISS, ChromaDB
+- **Frontend:** Streamlit
 - **Adaptation:** RLAIF-style retrieval-level feedback, persistent term-weight memory
 - **Hardware tested:** Apple Silicon, 24 GB unified memory, Metal GPU acceleration
 
-Three implementations are provided (Pure Python, LangChain, smolagents) — they produce equivalent retrieval results on the evaluation dataset. The Pure Python implementation gives the cleanest execution trace.
+Multiple implementation variants are provided (Pure Python in `multiagent_rag_v3.py`, smolagents in `rag_smolagents_v2.py`) — they produce equivalent retrieval results on the evaluation dataset. The Pure Python implementation gives the cleanest execution trace.
 
 ---
 
@@ -151,52 +153,67 @@ cd AMARA-An-Adaptive-Multi-Agent-RAG-Architecture-for-Software-Ecosystem-Update-
 python3.11 -m venv venv311
 source venv311/bin/activate
 
-# Dependencies (pinned for reproducibility)
+# Dependencies
 pip install -r requirements.txt
 
 # Pull the model
 ollama pull llama3.1:8b
 ```
 
-### Run a query
+### Run the Streamlit demo (recommended)
+
+The easiest way to try this system is the Streamlit interface — ask a question and watch the four agents coordinate live:
 
 ```bash
-python multiagent_rag_v3.py --question "Are there known Siri issues after iOS 26.4?"
+streamlit run amara_app.py
+```
+
+Then open the URL Streamlit prints (usually `http://localhost:8501`).
+
+### Run from the CLI
+
+For scripted use or to inspect execution traces directly:
+
+```bash
+python multiagent_rag_v3.py
 ```
 
 ### Reproduce the evaluation
 
 ```bash
-python run_evaluation.py --questions data/eval_50q.json --output results/
+python evaluate_v3.py
 ```
 
-> ⚠️ The system relies on live software ecosystem APIs. Results may shift over time as upstream data changes. For controlled comparison, snapshot the API responses (see `Reproducibility Notes` in the paper, §5.3).
+> ⚠️ The system relies on live software ecosystem APIs. Results may shift over time as upstream data changes. For controlled comparison, snapshot the API responses (see *Reproducibility Notes* in the paper, §5.3).
 
 ---
 
 ## Repository layout
 
-```
-.
-├── multiagent_rag_v3.py          # Main four-agent system
-├── unified_agent_system.py       # Single-agent baseline (for ablation)
-├── agents/
-│   ├── orchestrator.py
-│   ├── query_rewriter.py
-│   ├── retriever.py
-│   └── evaluator.py
-├── memory/
-│   └── self_improvement.py       # Persistent term-weight memory
-├── data/
-│   ├── eval_50q.json             # Evaluation questions
-│   └── vendor_registry.json      # 14,223 vendor entries
-├── results/
-│   └── AMARA_DrBerhe_Table.xlsx  # Per-question results table
-├── paper/
-│   ├── AMARA_MobiSPC2026_FINAL.tex
-│   └── figure1_architecture.tex
-└── requirements.txt
-```
+Key entry points:
+
+| File | What it is |
+|---|---|
+| `amara_app.py` | Streamlit demo — primary way to interact with the system |
+| `multiagent_rag_v3.py` | Main four-agent system (pure Python implementation) |
+| `unified_agent_system.py` | Single-agent baseline used for comparison |
+| `rag_smolagents_v2.py` | Equivalent implementation using HuggingFace smolagents |
+| `self_improving_agent.py` | Persistent term-weight memory for the Self-Improvement Memory |
+| `evaluate_v3.py` | Evaluation harness (latest version) |
+| `test_apis.py` | Standalone test of the underlying data-source APIs |
+| `run_all.sh` | Shell script to run the full evaluation pipeline |
+
+Data and results:
+
+| Path | What's in it |
+|---|---|
+| `data/` | Evaluation question sets and supporting data |
+| `eval_50_results_v2.json` | Per-question scores for the 50-question evaluation |
+| `ablation_results.json` | Ablation study results (per-component contribution) |
+| `accuracy_test_results.json`, `accuracy_postfix_results.json` | Answer-accuracy evaluations |
+| `MultiAgent_Presentation_20thMarch.pptx` | Earlier presentation slides |
+
+Older / archived versions of the main scripts (`multiagent_rag.py`, `multiagent_rag_v2.py`, `evaluate.py`, `evaluate_v2.py`, `app.py`, etc.) are kept in the repo root for reference and reproducibility.
 
 ---
 
@@ -208,30 +225,30 @@ We're explicit about these in the paper (§5) — they're real, and good directi
 - **Temporal queries.** *"What was the Linux version on January 1st 2026?"* — the date constraint isn't currently passed to retrieval, so we return the latest version. Fixable.
 - **Vendor extraction failures** on phrases like *"Synology NAS unreachable after upgrade"* — preprocessing strips domain terms. Future fix: embedding-based vendor matching over the full registry.
 - **Community-source reliability.** Reddit is the weakest link. We require ≥10 comments, ≥3 author replies, quality ≥ 0.3, and separate verified from community sources — but a single popular wrong post can still bias an answer.
-- **Evaluation size.** 50 questions is statistically significant but small. A 500-question multi-ecosystem benchmark is the next study.
+- **Evaluation size.** 50 questions is statistically significant but small. A larger multi-ecosystem benchmark is the next study.
 - **Heuristic thresholds** (θ = 0.30 for retry, the Evaluator scoring weights) were manually tuned. Learned reward models and adaptive threshold selection are in the roadmap.
 
 ---
 
 ## Roadmap
 
-- [ ] 500-question multi-ecosystem benchmark
+- [ ] Larger multi-ecosystem benchmark
 - [ ] Embedding-based vendor matching (replace static alias dictionary)
 - [ ] Learned reward model for the Evaluator (replace heuristic scoring)
 - [ ] Adaptive threshold selection
 - [ ] Head-to-head comparison with Self-RAG, CRAG, MA-RAG, MAIN-RAG (requires porting them to the software-ecosystem retrieval setting)
 - [ ] Cross-post agreement analysis for community-source credibility
 - [ ] Multilingual evaluation
-- [ ] Decay / capping for the Self-Improvement Memory to prevent drift at scale
+- [ ] Persistent cross-session memory with decay/capping to prevent drift at scale
 
 ---
 
-## Citing AMARA
+## Citation
 
 If you build on this work, please cite:
 
 ```bibtex
-@inproceedings{pujari2026amara,
+@inproceedings{pujari2026adaptive,
   title     = {An Adaptive Multi-Agent RAG Architecture for Software Ecosystem Update Monitoring},
   author    = {Pujari, Shradha Devendra and Berhe, Solomon},
   booktitle = {Proceedings of the Workshop on Agentic Software Engineering (AgenticSE '26)},
@@ -253,9 +270,9 @@ I'm actively looking for collaborators on:
 - Multilingual extensions
 - Head-to-head benchmarks against other multi-agent RAG systems
 
-If anything here connects to what you're working on — or you'd like to contribute — open an issue or reach out directly. I'd love to chat at AgenticSE '26 or after.
+If anything here connects to what you're working on — or you'd like to contribute — open an issue or reach out directly.
 
-**Contact:** Shradha Devendra Pujari — `s_pujari@u.pacific.edu` · [GitHub @Shradhapujari](https://github.com/Shradhapujari)
+**Contact:** Shradha Devendra Pujari — `s_pujari@u.pacific.edu` · [GitHub @Shradhapujari](https://github.com/Shradhapujari) · [LinkedIn](https://linkedin.com/in/shradha-pujari-98900)
 
 **Advisor:** Dr. Solomon Berhe — `sberhe@pacific.edu`
 
@@ -269,4 +286,4 @@ Thanks to the maintainers of public software ecosystem data sources, online comm
 
 ## License
 
-TBD — license will be added once the paper review process concludes. In the meantime, please reach out if you'd like to use or extend this work.
+MIT — see [`LICENSE`](LICENSE) for details. You're free to use, modify, and build on this work; attribution is appreciated.
