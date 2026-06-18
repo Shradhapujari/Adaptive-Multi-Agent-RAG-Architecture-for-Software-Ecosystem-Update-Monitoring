@@ -1,6 +1,6 @@
 {
   "generators": [
-    "amara",
+    "marag",
     "single_agent",
     "raw:ollama:llama3.1",
     "raw:ollama:mistral"
@@ -17,7 +17,7 @@
   "seed": 42,
   "results_dir": "/Users/shradha/Downloads/Research-on-Software-Updates-main/MyResarchProject-Volunteer/results",
   "systems_evaluated": [
-    "amara",
+    "marag",
     "single_agent",
     "raw:ollama:llama3.1",
     "raw:ollama:mistral"

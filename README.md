@@ -146,8 +146,8 @@ Multiple implementation variants are provided (Pure Python in `multiagent_rag_v3
 
 ```bash
 # Clone
-git clone https://github.com/Shradhapujari/AMARA-An-Adaptive-Multi-Agent-RAG-Architecture-for-Software-Ecosystem-Update-Monitoring.git
-cd AMARA-An-Adaptive-Multi-Agent-RAG-Architecture-for-Software-Ecosystem-Update-Monitoring
+git clone https://github.com/Shradhapujari/Adaptive-Multi-Agent-RAG-Architecture-for-Software-Ecosystem-Update-Monitoring.git
+cd Adaptive-Multi-Agent-RAG-Architecture-for-Software-Ecosystem-Update-Monitoring
 
 # Virtual environment
 python3.11 -m venv venv311
@@ -165,7 +165,7 @@ ollama pull llama3.1:8b
 The easiest way to try this system is the Streamlit interface — ask a question and watch the four agents coordinate live:
 
 ```bash
-streamlit run amara_app.py
+streamlit run marag_app.py
 ```
 
 Then open the URL Streamlit prints (usually `http://localhost:8501`).
@@ -194,7 +194,7 @@ Key entry points:
 
 | File | What it is |
 |---|---|
-| `amara_app.py` | Streamlit demo — primary way to interact with the system |
+| `marag_app.py` | Streamlit demo — primary way to interact with the system |
 | `multiagent_rag_v3.py` | Main four-agent system (pure Python implementation) |
 | `unified_agent_system.py` | Single-agent baseline used for comparison |
 | `rag_smolagents_v2.py` | Equivalent implementation using HuggingFace smolagents |
