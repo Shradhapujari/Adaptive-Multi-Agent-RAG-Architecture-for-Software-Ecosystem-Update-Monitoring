@@ -12,3 +12,4 @@ node_modules/
 results/
 _derename.py
 *.pyes
+venv/
