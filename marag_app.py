@@ -1,5 +1,5 @@
 """
-AMARA — Adaptive Multi-Agent RAG Architecture
+Multi-Agent RAG System — Adaptive Multi-Agent RAG Architecture
 Streamlit App with Live releasetrain.io APIs
 University of the Pacific · 2026
 """
@@ -10,7 +10,7 @@ import json
 import urllib.request
 import time
 
-st.set_page_config(page_title="AMARA", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="Multi-Agent RAG System", page_icon="🤖", layout="wide")
 
 # ── LIVE API ENDPOINTS ────────────────────────────────────
 REDDIT_API   = "https://releasetrain.io/api/reddit/query/positive"
@@ -152,7 +152,7 @@ def rlaif_evaluate(community, releases, cve, query):
 
 # ── SIDEBAR ───────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 🤖 AMARA")
+    st.markdown("### 🤖 Multi-Agent RAG System")
     st.markdown("**Adaptive Multi-Agent RAG**")
     st.markdown("University of the Pacific · 2026")
     st.divider()
@@ -178,7 +178,7 @@ with st.sidebar:
             st.rerun()
 
 # ── MAIN UI ───────────────────────────────────────────────
-st.title("🤖 AMARA — Software Ecosystem Monitor")
+st.title("🤖 Multi-Agent RAG System — Software Ecosystem Monitor")
 st.caption("Adaptive Multi-Agent RAG · University of the Pacific · releasetrain.io Live APIs")
 
 query = st.text_input(
@@ -327,4 +327,4 @@ elif run and not query:
     st.warning("Please enter a query.")
 
 st.markdown("---")
-st.caption("AMARA · Adaptive Multi-Agent RAG Architecture · University of the Pacific · Shradha Devendra Pujari · Dr. Solomon Berhe · 2026")
+st.caption("Multi-Agent RAG System · Adaptive Multi-Agent RAG Architecture · University of the Pacific · Shradha Devendra Pujari · Dr. Solomon Berhe · 2026")

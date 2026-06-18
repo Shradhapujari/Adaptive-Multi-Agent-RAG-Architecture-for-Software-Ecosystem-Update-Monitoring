@@ -1,0 +1,452 @@
+[
+  {
+    "id": 1,
+    "query": "Can I use gemma4 in google edge gallery to run openclaw in my iPhone now",
+    "reddit_id": "1se08sb",
+    "category": "general",
+    "answer": "[HIGH] Access v3.6.4: SiYuan is a personal knowledge management system. Prior to 3 [CVE-2026-39846] | CVE: Do/did you guys take classes? How do you fill in knowledge g",
+    "rlaif_score": 0.75,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 2,
+    "query": "how can i mess around with prime to try to get wayland external displays working again debian testing?",
+    "reddit_id": "1sdzx3x",
+    "category": "general",
+    "answer": "[HIGH] CAN v0.17.1: libp2p-rust is the official rust language Implementation of [CVE-2026-35405] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.95,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 3,
+    "query": "Z2MQTT disappeared ?",
+    "reddit_id": "1sdv785",
+    "category": "general",
+    "answer": "[MEDIUM] CVE: Do/did you guys take classes? How do you fill in knowledge g",
+    "rlaif_score": 0.475,
+    "rlaif_signal": "acceptable"
+  },
+  {
+    "id": 4,
+    "query": "Question about IP addresses for Virtual machines on azure?",
+    "reddit_id": "1sdudiw",
+    "category": "general",
+    "answer": "[HIGH] WordPress v2.2.6: The MainWP Child Reports plugin for WordPress is vulnerable [CVE-2026-4299] | CVE: E-Reader/DAP component list and questions",
+    "rlaif_score": 0.6,
+    "rlaif_signal": "positive"
+  },
+  {
+    "id": 5,
+    "query": "Resetting iPhone when Touch ID is broken?",
+    "reddit_id": "1sdt5o7",
+    "category": "bugs",
+    "answer": "[HIGH] CAN v4.12.12: Hono is a Web application framework that provides support fo [CVE-2026-39407] | CVE: So many professional looking projects here. Hope this inspir",
+    "rlaif_score": 0.6,
+    "rlaif_signal": "positive"
+  },
+  {
+    "id": 6,
+    "query": "Something is broken with my WiFi, and I don\u2019t know fix it",
+    "reddit_id": "1sdg8uu",
+    "category": "bugs",
+    "answer": "[HIGH] GitHub v1.13.2: Axios is a promise based HTTP client for the browser and Nod [CVE-2026-39865] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.933,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 7,
+    "query": "My iMac 2012 is stuck after an update",
+    "reddit_id": "1sd9hcz",
+    "category": "releases",
+    "answer": "[HIGH] WordPress v1.1.5: The BEAR \u2013 Bulk Editor and Products Manager Professional for [CVE-2026-1672] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 1.0,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 8,
+    "query": "Can vim.pack be used in parallel with lazy.nvim?",
+    "reddit_id": "1sd8tr5",
+    "category": "general",
+    "answer": "[HIGH] WordPress v5.1.2: The User Registration & Membership \u2013 Free & Paid Memberships [CVE-2026-1865] | CVE: Do/did you guys take classes? How do you fill in knowledge g",
+    "rlaif_score": 0.7,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 9,
+    "query": "Why I can never be a sysadmin; or, Why is software like this?",
+    "reddit_id": "1sd8sff",
+    "category": "general",
+    "answer": "[HIGH] CAN v2026.2.18: mise manages dev tools like node, python, cmake, and terrafo [CVE-2026-35533] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.8,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 10,
+    "query": "What happened? Plasma 6.6.3, after i think updating?",
+    "reddit_id": "1sd868v",
+    "category": "community",
+    "answer": "[HIGH] Elfsight Elfsight WhatsApp Chat CC v1.2.0: Improper Neutralization of Input During Web Page Generation [CVE-2026-39696] | CVE: New in ESP32 Dev",
+    "rlaif_score": 0.6,
+    "rlaif_signal": "positive"
+  },
+  {
+    "id": 11,
+    "query": "How Rough Are You?",
+    "reddit_id": "1sd3zjo",
+    "category": "general",
+    "answer": "[HIGH] Google v0.31.4: CI4MS is a CodeIgniter 4-based CMS skeleton that delivers a [CVE-2026-39390] | CVE: Does the development environment OS matter for you? What is",
+    "rlaif_score": 1.0,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 12,
+    "query": "Am I too paranoid about kernel panics?",
+    "reddit_id": "1scymzw",
+    "category": "general",
+    "answer": "[HIGH] Windows v1.26.2: Podman Desktop is a graphical tool for developing on contain [CVE-2026-34045] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 1.0,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 13,
+    "query": "I get these errors everytime I update fedora, is there anything I should be concerned about?",
+    "reddit_id": "1scy2ug",
+    "category": "bugs",
+    "answer": "[HIGH] RFC v1.0.6: rfc3161-client is a Python library implementing the Time-Sta [CVE-2026-33753] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.85,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 14,
+    "query": "AI is causing coding skill decay so I build FreshStack\u2026.",
+    "reddit_id": "1scw3xd",
+    "category": "general",
+    "answer": "[HIGH] CAN v1.11.3: Tinyproxy through 1.11.3 is vulnerable to HTTP request parsi [CVE-2026-31842] | CVE: E-Reader/DAP component list and questions",
+    "rlaif_score": 0.733,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 15,
+    "query": "Is anyone experiencing extreme heating and standby drain after updating to iOS 26.4?",
+    "reddit_id": "1scvqtf",
+    "category": "community",
+    "answer": "[HIGH] GitHub v1.13.2: Axios is a promise based HTTP client for the browser and Nod [CVE-2026-39865] | CVE: Trying to transfer to new iPhone 17 without success",
+    "rlaif_score": 0.6,
+    "rlaif_signal": "positive"
+  },
+  {
+    "id": 16,
+    "query": "Weird white line under Chrome address bar when playing videos",
+    "reddit_id": "1scrtu8",
+    "category": "general",
+    "answer": "[HIGH] HTML v1.0.0: The Inquiry Form to Posts or Pages plugin for WordPress is v [CVE-2026-5169] | CVE: Single \"Smart\" Camera Event Timeline for Smart Cameras and U",
+    "rlaif_score": 0.75,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 17,
+    "query": "Plugin update via ZIP shows \u201cnew version available\u201d even after updating (need to install twice?)",
+    "reddit_id": "1scnsyb",
+    "category": "releases",
+    "answer": "[HIGH] WordPress v2.1.3: The Booking for Appointments and Events Calendar \u2013 Amelia pl [CVE-2026-5465] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 1.0,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 18,
+    "query": "Zooz 800 stick not entering inclusion mode?",
+    "reddit_id": "1scn449",
+    "category": "general",
+    "answer": "[HIGH] CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.6,
+    "rlaif_signal": "positive"
+  },
+  {
+    "id": 19,
+    "query": "After update, I can't set my thermostats to window_open_external",
+    "reddit_id": "1scjdgx",
+    "category": "releases",
+    "answer": "[HIGH] Access v16.0.6: Open Access Management (OpenAM) is an access management solu [CVE-2026-33439] | CVE: Siemens TIA Portal v18 - Only TeleService available instead",
+    "rlaif_score": 1.0,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 20,
+    "query": "Has anyone dealt with Google Play re-rejecting a previously approved app after a store listing update with no code changes?",
+    "reddit_id": "1sciisv",
+    "category": "releases",
+    "answer": "[HIGH] CAN v1.56.0: Windmill versions 1.56.0 through 1.614.0 contain a missing a [CVE-2026-22683] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.75,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 21,
+    "query": "OpenClaw updates keep breaking setups \u2014 how are you managing stability?",
+    "reddit_id": "1scgt5y",
+    "category": "releases",
+    "answer": "[HIGH] PropertyTypeEditor v7.1.0: ChurchCRM is an open-source church management system. Prior [CVE-2026-39340] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.657,
+    "rlaif_signal": "positive"
+  },
+  {
+    "id": 22,
+    "query": "My ProxMox is breaking everyday for a reason I dont know so I want to change OS. Is CasaOS a good option for my case?",
+    "reddit_id": "1scc42p",
+    "category": "general",
+    "answer": "[HIGH] GitHub v5.0.0: OrangeHRM is a comprehensive human resource management (HRM) [CVE-2026-39347] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.65,
+    "rlaif_signal": "positive"
+  },
+  {
+    "id": 23,
+    "query": "Massive power draw (20W-30W+) and stuttering on Edge Mac v146.0.3856.97 - Anyone else?",
+    "reddit_id": "1sc98il",
+    "category": "community",
+    "answer": "[HIGH] WordPress v1.1.5: The BEAR \u2013 Bulk Editor and Products Manager Professional for [CVE-2026-1672] | CVE: Do/did you guys take classes? How do you fill in knowledge g",
+    "rlaif_score": 0.8,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 24,
+    "query": "TAB key for AI Mode is driving me insane",
+    "reddit_id": "1sc3sd8",
+    "category": "general",
+    "answer": "[HIGH] CAN v6.1.5: defu is software that allows uers to assign default properti [CVE-2026-35209] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.84,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 25,
+    "query": "Siri fail to execute tasks when offline after iOS 26.4 update",
+    "reddit_id": "1sc15ys",
+    "category": "releases",
+    "answer": "[HIGH] HTML v1.0.0: The Inquiry Form to Posts or Pages plugin for WordPress is v [CVE-2026-5169] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.95,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 26,
+    "query": "Virus that activates sometimes??",
+    "reddit_id": "1sbyxbl",
+    "category": "general",
+    "answer": "[HIGH] CVE: Do/did you guys take classes? How do you fill in knowledge g",
+    "rlaif_score": 0.6,
+    "rlaif_signal": "positive"
+  },
+  {
+    "id": 27,
+    "query": "wallpaper keeps turning black?",
+    "reddit_id": "1sbyvtr",
+    "category": "general",
+    "answer": "[HIGH] CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.6,
+    "rlaif_signal": "positive"
+  },
+  {
+    "id": 28,
+    "query": "Hello, I want to buy a new cellphone in aliexprees, specifically the one plus ace 2 pro 5G, but I'm not sure about it, I don't want to have issues with the updates or my bank app. I don't care to much about the NFC thing, but Idk if is going to be a problem in the future",
+    "reddit_id": "1sbyeeg",
+    "category": "bugs",
+    "answer": "[HIGH] Access v3.9.1: A race condition in the Apache Kafka Java producer client\u2019s [CVE-2026-35554] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.75,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 29,
+    "query": "If your Firefox settings are being reset, PLEASE HELP US",
+    "reddit_id": "1sbybxw",
+    "category": "general",
+    "answer": "[HIGH] Google v0.31.4: CI4MS is a CodeIgniter 4-based CMS skeleton that delivers a [CVE-2026-39390] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.733,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 30,
+    "query": "I downloaded Tahoe on Macbook Air M1 8GB and it's .... genuinely fast?",
+    "reddit_id": "1sbsal7",
+    "category": "general",
+    "answer": "[HIGH] tailwindcss v4.2.2: docs/fix-lightning-css-typo-postcss-readme (#19913)  <!--  \ud83d\udc4b | CVE: OpenAI API getting expensive : Options for mainly local on a",
+    "rlaif_score": 0.6,
+    "rlaif_signal": "positive"
+  },
+  {
+    "id": 31,
+    "query": "\"Your browser is managed by your organization\" issue",
+    "reddit_id": "1sbqwvc",
+    "category": "bugs",
+    "answer": "[HIGH] GitHub v4.12.12: Hono is a Web application framework that provides support fo [CVE-2026-39410] | CVE: Do I Really Need Custom Software or Am I Just Overthinking I",
+    "rlaif_score": 1.0,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 32,
+    "query": "Do I need to update my Nvidia drivers?",
+    "reddit_id": "1sbqog1",
+    "category": "releases",
+    "answer": "[HIGH] WordPress v4.1.10: The Prime Slider \u2013 Addons for Elementor plugin for WordPress [CVE-2026-4341] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 1.0,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 33,
+    "query": "Old iPad suddenly can\u2019t open Home Assistant after update (Safari issue?)",
+    "reddit_id": "1sbnvq4",
+    "category": "bugs",
+    "answer": "[HIGH] netdata v2.9.0: [ci skip] Update changelog and version for nightly build: v2 | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.95,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 34,
+    "query": "Android Chrome and Firefox have no sound",
+    "reddit_id": "1sbmlib",
+    "category": "general",
+    "answer": "[HIGH] Firefox v149.0.1: Memory safety bugs present in Firefox 149.0.1 and Thunderbir [CVE-2026-5735] | CVE: Free Audio Plugin Software - LumiMorph",
+    "rlaif_score": 1.0,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 35,
+    "query": "Upgrade my router?",
+    "reddit_id": "1sbkhfg",
+    "category": "releases",
+    "answer": "[HIGH] CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 1.0,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 36,
+    "query": "GTFS not polling properly anymore?",
+    "reddit_id": "1sbhotx",
+    "category": "general",
+    "answer": "[HIGH] Access v17.4.8: XWiki Platform is a generic wiki platform offering runtime s [CVE-2026-33229] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.7,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 37,
+    "query": "Extensions are gone as a result of new update.",
+    "reddit_id": "1sbg85l",
+    "category": "releases",
+    "answer": "[HIGH] GitHub v3.0.6: Cosign provides code signing and transparency for containers [CVE-2026-39395] | CVE: So many professional looking projects here. Hope this inspir",
+    "rlaif_score": 1.0,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 38,
+    "query": "LG SmartThinQ LGE sensor device integration error. any idea?",
+    "reddit_id": "1sbfggx",
+    "category": "bugs",
+    "answer": "[HIGH] Go v4.1.4: Go JOSE provides an implementation of the Javascript Object [CVE-2026-34986] | CVE: So many professional looking projects here. Hope this inspir",
+    "rlaif_score": 0.771,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 39,
+    "query": "Is it worth waiting for the next LTS to build a server?",
+    "reddit_id": "1sbdtv3",
+    "category": "general",
+    "answer": "[HIGH] WordPress v2.1.7: The Masteriyo LMS \u2013 Online Course Builder for eLearning, LMS [CVE-2026-5167] | CVE: Do I Really Need Custom Software or Am I Just Overthinking I",
+    "rlaif_score": 0.8,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 40,
+    "query": "Cloning an old tablet (android 5.1) with micro USB that controls a Sauna?",
+    "reddit_id": "1sbdbub",
+    "category": "general",
+    "answer": "[HIGH] browser-use v0.12.6: fix: prevent KeyError in load_from_dict and IndexError in fi | CVE: Need to print from XP machine",
+    "rlaif_score": 0.75,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 41,
+    "query": "Critical Software Update. Should I be worried?",
+    "reddit_id": "1sbcgde",
+    "category": "releases",
+    "answer": "[HIGH] SymCrypt v103.5.0: SymCrypt is the core cryptographic function library currentl [CVE-2026-35199] | CVE: Do I Really Need Custom Software or Am I Just Overthinking I",
+    "rlaif_score": 1.0,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 42,
+    "query": "How to find the reason for a kernel panic?",
+    "reddit_id": "1sbavwm",
+    "category": "general",
+    "answer": "[HIGH] linux v6.19.0: Merge tag 'ata-7.0-final' of git://git.kernel.org/pub/scm/li | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 1.0,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 43,
+    "query": "Is there a way to fix or automate a bandaid for this?",
+    "reddit_id": "1sb8jtx",
+    "category": "bugs",
+    "answer": "[HIGH] GitHub v1.13.2: Axios is a promise based HTTP client for the browser and Nod [CVE-2026-39865] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 1.0,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 44,
+    "query": "Why are my alarms going off completely silently?",
+    "reddit_id": "1sb8iwo",
+    "category": "general",
+    "answer": "[HIGH] GitHub v3.0.6: Cosign provides code signing and transparency for containers [CVE-2026-39395] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.76,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 45,
+    "query": "I don't understand how to update",
+    "reddit_id": "1sb6q74",
+    "category": "releases",
+    "answer": "[HIGH] 30-seconds-of-code v14.0.0: Bump defu from 6.1.4 to 6.1.6  Bumps [defu](https://github.c | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 1.0,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 46,
+    "query": "Is Debian stable too old for a developer laptop, or am I overthinking it?",
+    "reddit_id": "1sb6775",
+    "category": "community",
+    "answer": "[HIGH] Workbench v65.0.0: Workbench is a suite of tools for administrators and develop [CVE-2026-34951] | CVE: Do I Really Need Custom Software or Am I Just Overthinking I",
+    "rlaif_score": 0.943,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 47,
+    "query": "Linux mint overwrote boot key and grub is completely broken",
+    "reddit_id": "1sb5yfd",
+    "category": "bugs",
+    "answer": "[HIGH] Access v1.9.1: A path traversal vulnerability exists in mintplex-labs/anyth [CVE-2026-5627] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.8,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 48,
+    "query": "keyboard turns on and off occasionally with high cpu/gpu[?] usage",
+    "reddit_id": "1sb414z",
+    "category": "general",
+    "answer": "[HIGH] Access v17.4.8: XWiki Platform is a generic wiki platform offering runtime s [CVE-2026-33229] | CVE: Supply Chain Attacks, Hardening Your Dev Environmen",
+    "rlaif_score": 0.886,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 49,
+    "query": "Old iPad used as dashboard (iOS 16.7.15) menus are \u201cinvisible\u201d",
+    "reddit_id": "1saycdo",
+    "category": "general",
+    "answer": "[HIGH] CAN v4.12.12: Hono is a Web application framework that provides support fo [CVE-2026-39407] | CVE: So many professional looking projects here. Hope this inspir",
+    "rlaif_score": 0.75,
+    "rlaif_signal": "excellent"
+  },
+  {
+    "id": 50,
+    "query": "NginX LXC Container Hosts Unreachable?",
+    "reddit_id": "1sawjwq",
+    "category": "general",
+    "answer": "[HIGH] No direct match in verified sources.",
+    "rlaif_score": 0.68,
+    "rlaif_signal": "positive"
+  }
+]

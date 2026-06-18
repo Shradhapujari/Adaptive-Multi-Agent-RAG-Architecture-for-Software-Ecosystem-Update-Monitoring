@@ -7,3 +7,8 @@ evaluation_results.json
 .DS_Store
 *.log
 node_modules/
+
+# eval harness outputs (regenerable)
+results/
+_derename.py
+*.pyes

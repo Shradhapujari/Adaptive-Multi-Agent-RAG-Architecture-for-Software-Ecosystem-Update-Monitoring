@@ -1,0 +1,72 @@
+[
+  {
+    "id": 1,
+    "sub": "Ubiquiti",
+    "title": "G6 Bullet unstable?",
+    "url": "https://reddit.com/r/Ubiquiti/comments/1ske7g5/g6_bullet_unstable/",
+    "gt": "Hello!  Thanks for posting on r/Ubiquiti!  This subreddit is here to provide unofficial technical support to people who "
+  },
+  {
+    "id": 2,
+    "sub": "comfyui",
+    "title": "GGUF in latest versions? How to actually install nodes etc in latest versions?",
+    "url": "https://reddit.com/r/comfyui/comments/1skdt9y/gguf_in_latest_versions_how_to_actually_install/",
+    "gt": "Uh fixed the GGUF node not loading, the node installer doesn't even run the pip installer.  I assume this is because it'"
+  },
+  {
+    "id": 3,
+    "sub": "linuxquestions",
+    "title": "Updated to kernel 6.19.11 and now desktop doesnt load. Selected the previous version from grub menu and it works now. Should I just wait for the next version and will it fix it? Below is what i got from journalctl",
+    "url": "https://reddit.com/r/linuxquestions/comments/1skd07c/updated_to_kernel_61911_and_now_desktop_doesnt/",
+    "gt": "wait, sometimes those minor kernel updates don't work right. They will soon be corrected"
+  },
+  {
+    "id": 4,
+    "sub": "Fedora",
+    "title": "Updated to kernel 6.19.11 and now desktop doesnt load. Selected the previous version from grub menu and it works now. Should I just wait for the next version and will it fix it? Below is what i got from journalctl",
+    "url": "https://reddit.com/r/Fedora/comments/1skchnl/updated_to_kernel_61911_and_now_desktop_doesnt/",
+    "gt": "do you have nvidia graphics? probably driver modules might not be built "
+  },
+  {
+    "id": 5,
+    "sub": "comfyui",
+    "title": "I can't run Ace-Step 1.5 XL on Comfy!?",
+    "url": "https://reddit.com/r/comfyui/comments/1skchjl/i_cant_run_acestep_15_xl_on_comfy/",
+    "gt": "only the newest versions of comfyui support this. but I only succeeded after a complete reinstallation. the update didn'"
+  },
+  {
+    "id": 6,
+    "sub": "openclaw",
+    "title": "Ollama local model connection broken?",
+    "url": "https://reddit.com/r/openclaw/comments/1skc0k7/ollama_local_model_connection_broken/",
+    "gt": ""
+  },
+  {
+    "id": 7,
+    "sub": "openclaw",
+    "title": "if you're trying to run gemma 4 with openclaw and everything is broken, here's every bug and workaround i've found",
+    "url": "https://reddit.com/r/openclaw/comments/1skbtpj/if_youre_trying_to_run_gemma_4_with_openclaw_and/",
+    "gt": ""
+  },
+  {
+    "id": 8,
+    "sub": "applehelp",
+    "title": "What to do if phone lost forever, icloud password forgotten, email IS icloud",
+    "url": "https://reddit.com/r/applehelp/comments/1skb0ln/what_to_do_if_phone_lost_forever_icloud_password/",
+    "gt": "Nothing.  "
+  },
+  {
+    "id": 9,
+    "sub": "comfyui",
+    "title": "Queue limitations - is there a hard limit of 200 - even when I set it higher",
+    "url": "https://reddit.com/r/comfyui/comments/1sk6oh4/queue_limitations_is_there_a_hard_limit_of_200/",
+    "gt": "Settings -&gt; Comfy -&gt; Queue Button -&gt; Batch count limit  https://preview.redd.it/umni5qv9txug1.jpeg?width=1178&a"
+  },
+  {
+    "id": 10,
+    "sub": "homeassistant",
+    "title": "Was a homeassistant mistake ??",
+    "url": "https://reddit.com/r/homeassistant/comments/1sk4c2u/was_a_homeassistant_mistake/",
+    "gt": "So this is just a rant post and not an actual question right?"
+  }
+]

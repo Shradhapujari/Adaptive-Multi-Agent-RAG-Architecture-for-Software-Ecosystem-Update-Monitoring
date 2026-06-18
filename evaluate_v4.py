@@ -144,7 +144,7 @@ def run_baseline(qobj):
     qual=score(r,c,[],kw)
     return {"query":q,"system":"baseline","category":qobj["category"],"source":qobj["source"],"releases":len(r),"community":len(c),"community_src":src,"cve":0,"quality":qual,"signal":sig(qual)}
 
-def run_amara(qobj,mem):
+def run_marag(qobj,mem):
     q=qobj["query"]; kw=auto_keywords(q)
     rw=rewrite(q)
     best=sorted(mem.items(),key=lambda x:x[1],reverse=True)[:3]
@@ -158,20 +158,20 @@ def run_amara(qobj,mem):
         if q2>qual: r,c,src,qual,retried=r2,c2,src2,q2,True
     for t in set(rw.lower().split())-set(q.lower().split()):
         if len(t)>3 and t.isalpha(): mem[t]=mem.get(t,0.0)+(qual-0.3)
-    return {"query":q,"system":"amara","category":qobj["category"],"source":qobj["source"],"rewritten":rw[:80],"releases":len(r),"community":len(c),"community_src":src,"cve":len(cv),"quality":qual,"signal":sig(qual),"retried":retried}
+    return {"query":q,"system":"marag","category":qobj["category"],"source":qobj["source"],"rewritten":rw[:80],"releases":len(r),"community":len(c),"community_src":src,"cve":len(cv),"quality":qual,"signal":sig(qual),"retried":retried}
 
 def run_eval(queries):
-    print(f"\n{'='*64}\n  AMARA v4 — {len(queries)} Real Reddit Questions — {datetime.now().strftime('%H:%M')}\n{'='*64}")
+    print(f"\n{'='*64}\n  Multi-Agent RAG System v4 — {len(queries)} Real Reddit Questions — {datetime.now().strftime('%H:%M')}\n{'='*64}")
     br,ar,curve,mem=[],[],[],{}
     for i,q in enumerate(queries,1):
         print(f"\n  [{i:02d}/{len(queries)}] [{q['source'][:8]}] {q['query'][:55]}\n  {'-'*60}")
         b=run_baseline(q); br.append(b)
         print(f"  Baseline : {b['quality']:.3f} | {b['signal']:10} | r={b['releases']} c={b['community']}({b['community_src']})")
-        a=run_amara(q,mem); ar.append(a)
-        print(f"  AMARA    : {a['quality']:.3f} | {a['signal']:10} | r={a['releases']} c={a['community']}({a['community_src']}) cve={a['cve']}" + (" ↺" if a.get("retried") else ""))
+        a=run_marag(q,mem); ar.append(a)
+        print(f"  Multi-Agent RAG System    : {a['quality']:.3f} | {a['signal']:10} | r={a['releases']} c={a['community']}({a['community_src']}) cve={a['cve']}" + (" ↺" if a.get("retried") else ""))
         imp=round(a["quality"]-b["quality"],3)
         print(f"  Change   : {imp:+.3f}  {'✅' if imp>0.01 else '➖' if abs(imp)<=0.01 else '⚠️'}")
-        curve.append({"n":i,"query":q["query"],"category":q["category"],"source":q["source"],"baseline":b["quality"],"amara":a["quality"],"improvement":imp,"memory_size":len(mem)})
+        curve.append({"n":i,"query":q["query"],"category":q["category"],"source":q["source"],"baseline":b["quality"],"marag":a["quality"],"improvement":imp,"memory_size":len(mem)})
         time.sleep(0.2)
     return br,ar,curve,mem
 
@@ -183,13 +183,13 @@ def report(br,ar,curve,mem):
     cats=defaultdict(list)
     for b,a in zip(br,ar): cats[a["category"]].append((b["quality"],a["quality"]))
     early=curve[:max(len(curve)//3,1)]; late=curve[-max(len(curve)//3,1):]
-    ea=sum(c["amara"] for c in early)/len(early); la=sum(c["amara"] for c in late)/len(late)
+    ea=sum(c["marag"] for c in early)/len(early); la=sum(c["marag"] for c in late)/len(late)
     lc=round(((la-ea)/max(ea,0.001))*100,1)
     print(f"\n{'='*64}\n  RESULTS — Real Reddit Questions\n{'='*64}")
     print(f"  Total queries     : {len(br)}")
     print(f"  Source            : releasetrain.io/api/reddit/query/questions")
     print(f"  Baseline avg      : {b_avg:.3f} ({b_avg:.1%})")
-    print(f"  AMARA avg         : {a_avg:.3f} ({a_avg:.1%})")
+    print(f"  Multi-Agent RAG System avg         : {a_avg:.3f} ({a_avg:.1%})")
     print(f"  Improvement       : +{imp}%")
     print(f"  Queries improved  : {better}/{len(br)} ({round(better/len(br)*100)}%)")
     print(f"  RLAIF retries     : {retried}/{len(ar)} ({round(retried/len(ar)*100)}%)")
@@ -199,15 +199,15 @@ def report(br,ar,curve,mem):
     for cat,scores in sorted(cats.items()):
         ba=sum(s[0] for s in scores)/len(scores); aa=sum(s[1] for s in scores)/len(scores)
         i2=round(((aa-ba)/max(ba,0.001))*100,1)
-        print(f"    {cat:12} n={len(scores):2d} base={ba:.3f} amara={aa:.3f} +{i2}%  {'█'*int(aa*20)}")
+        print(f"    {cat:12} n={len(scores):2d} base={ba:.3f} marag={aa:.3f} +{i2}%  {'█'*int(aa*20)}")
     print(f"\n  Top learned terms:")
     for t,s in sorted(mem.items(),key=lambda x:x[1],reverse=True)[:6]:
         print(f"    {t:20} {s:+.3f}")
     print(f"\n{'='*64}\n  PAPER NUMBERS\n{'='*64}")
     print(f"  Dataset : {len(br)} real Reddit questions from releasetrain.io")
-    print(f"  Baseline: {b_avg:.1%} | AMARA: {a_avg:.1%} | +{imp}%")
+    print(f"  Baseline: {b_avg:.1%} | Multi-Agent RAG System: {a_avg:.1%} | +{imp}%")
     print(f"  {better}/{len(br)} improved | {round(retried/len(ar)*100)}% RLAIF retries | {len(mem)} Zero-HF terms")
-    return {"baseline_avg":round(b_avg,3),"amara_avg":round(a_avg,3),"improvement_pct":imp,"queries_improved":better,"rlaif_retry_rate":round(retried/len(ar)*100),"memory_terms":len(mem),"learning_gain":lc,"total_queries":len(br),"categories":{k:{"n":len(v),"baseline":round(sum(s[0] for s in v)/len(v),3),"amara":round(sum(s[1] for s in v)/len(v),3)} for k,v in cats.items()}}
+    return {"baseline_avg":round(b_avg,3),"marag_avg":round(a_avg,3),"improvement_pct":imp,"queries_improved":better,"rlaif_retry_rate":round(retried/len(ar)*100),"memory_terms":len(mem),"learning_gain":lc,"total_queries":len(br),"categories":{k:{"n":len(v),"baseline":round(sum(s[0] for s in v)/len(v),3),"marag":round(sum(s[1] for s in v)/len(v),3)} for k,v in cats.items()}}
 
 if __name__=="__main__":
     fetch_only="--fetch" in sys.argv; quick="--quick" in sys.argv
@@ -226,5 +226,5 @@ if __name__=="__main__":
     br,ar,curve,mem=run_eval(qs)
     s=report(br,ar,curve,mem)
     with open(RESULTS_FILE,"w") as f:
-        json.dump({"timestamp":datetime.now().isoformat(),"questions":qs,"summary":s,"baseline":br,"amara":ar,"curve":curve,"memory":mem},f,indent=2)
+        json.dump({"timestamp":datetime.now().isoformat(),"questions":qs,"summary":s,"baseline":br,"marag":ar,"curve":curve,"memory":mem},f,indent=2)
     print(f"\n  Saved → {RESULTS_FILE}")

@@ -1,5 +1,5 @@
 """
-AMARA — Adaptive Multi-Agent RAG Architecture
+Multi-Agent RAG System — Adaptive Multi-Agent RAG Architecture
 =============================================
 Streamlit web app for software ecosystem monitoring.
 Uses 4 live releasetrain.io API endpoints.
@@ -26,7 +26,7 @@ from datetime import datetime
 
 # ── PAGE CONFIG ──────────────────────────────────────────
 st.set_page_config(
-    page_title="AMARA — Software Ecosystem Monitor",
+    page_title="Multi-Agent RAG System — Software Ecosystem Monitor",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -278,7 +278,7 @@ def run_pipeline(query: str, show_steps: bool = True) -> dict:
 
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/en/b/bb/University_of_the_Pacific_seal.svg", width=80)
-    st.markdown("### AMARA")
+    st.markdown("### Multi-Agent RAG System")
     st.markdown("**Adaptive Multi-Agent RAG Architecture**")
     st.markdown("University of the Pacific · 2026")
     st.divider()
@@ -317,7 +317,7 @@ with st.sidebar:
 
 st.markdown("""
 <div class="main-header">
-    <h1>🤖 AMARA — Software Ecosystem Monitor</h1>
+    <h1>🤖 Multi-Agent RAG System — Software Ecosystem Monitor</h1>
     <p>Adaptive Multi-Agent RAG Architecture · University of the Pacific · releasetrain.io</p>
     <p style="font-size:0.9rem; opacity:0.8">
         4 agents · Live APIs · Llama 3.1 · RLAIF feedback · Self-improving
@@ -506,7 +506,7 @@ elif run_btn and not query:
 st.markdown("---")
 st.markdown("""
 <div style="text-align:center; color:#888; font-size:0.85rem;">
-    AMARA · Adaptive Multi-Agent RAG Architecture · University of the Pacific · 2026<br>
+    Multi-Agent RAG System · Adaptive Multi-Agent RAG Architecture · University of the Pacific · 2026<br>
     Shradha Devendra Pujari · Dr. Solomon Berhe · releasetrain.io
 </div>
 """, unsafe_allow_html=True)

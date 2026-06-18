@@ -2,7 +2,7 @@
   "timestamp": "2026-04-04T12:48:16.401196",
   "summary": {
     "baseline_avg": 0.755,
-    "amara_avg": 0.818,
+    "marag_avg": 0.818,
     "improvement_pct": 8.3,
     "rlaif_retry_rate": 0,
     "memory_terms": 27,
@@ -10,23 +10,23 @@
     "categories": {
       "security": {
         "baseline": 0.77,
-        "amara": 0.83
+        "marag": 0.83
       },
       "bugs": {
         "baseline": 0.786,
-        "amara": 0.85
+        "marag": 0.85
       },
       "releases": {
         "baseline": 0.717,
-        "amara": 0.74
+        "marag": 0.74
       },
       "community": {
         "baseline": 0.74,
-        "amara": 0.833
+        "marag": 0.833
       },
       "general": {
         "baseline": 0.75,
-        "amara": 0.85
+        "marag": 0.85
       }
     }
   },
@@ -182,10 +182,10 @@
       "signal": "excellent"
     }
   ],
-  "amara": [
+  "marag": [
     {
       "query": "Any critical Linux security patches today",
-      "system": "amara",
+      "system": "marag",
       "rewritten": "any critical security vulnerability CVE patch security fix hotfix update advisor",
       "releases": 8,
       "community": 5,
@@ -198,7 +198,7 @@
     },
     {
       "query": "CVE vulnerabilities in Python latest version",
-      "system": "amara",
+      "system": "marag",
       "rewritten": "cve vulnerabilities in python latest version release release notes changelog ver",
       "releases": 8,
       "community": 5,
@@ -211,7 +211,7 @@
     },
     {
       "query": "Critical security updates published today",
-      "system": "amara",
+      "system": "marag",
       "rewritten": "critical security vulnerability CVE patch security fix hotfix update advisory vu",
       "releases": 8,
       "community": 5,
@@ -224,7 +224,7 @@
     },
     {
       "query": "Windows security patch this week",
-      "system": "amara",
+      "system": "marag",
       "rewritten": "windows security vulnerability CVE patch security fix hotfix update advisory pat",
       "releases": 8,
       "community": 5,
@@ -237,7 +237,7 @@
     },
     {
       "query": "Any new CVE for nodejs",
-      "system": "amara",
+      "system": "marag",
       "rewritten": "any new release version update changelog cve for nodejs advisory vulnerability",
       "releases": 8,
       "community": 5,
@@ -250,7 +250,7 @@
     },
     {
       "query": "What bugs were fixed in the latest Python update",
-      "system": "amara",
+      "system": "marag",
       "rewritten": "what bug bug fix resolved patch security fix hotfix update hotfixes resolved def",
       "releases": 8,
       "community": 5,
@@ -263,7 +263,7 @@
     },
     {
       "query": "Chrome browser crash fix latest version",
-      "system": "amara",
+      "system": "marag",
       "rewritten": "chrome browser crash bug fix resolved patch security fix hotfix update hotfix la",
       "releases": 8,
       "community": 5,
@@ -276,7 +276,7 @@
     },
     {
       "query": "VSCode debugger bug fixed",
-      "system": "amara",
+      "system": "marag",
       "rewritten": "vscode debugger bug bug fix resolved patch security fix hotfix update hotfixed a",
       "releases": 8,
       "community": 5,
@@ -289,7 +289,7 @@
     },
     {
       "query": "Latest Grafana release notes",
-      "system": "amara",
+      "system": "marag",
       "rewritten": "latest version release release notes changelog version update changelog grafana ",
       "releases": 8,
       "community": 5,
@@ -302,7 +302,7 @@
     },
     {
       "query": "Ansible new version what changed",
-      "system": "amara",
+      "system": "marag",
       "rewritten": "ansible new release version update changelog version what changed advisory vulne",
       "releases": 8,
       "community": 5,
@@ -315,7 +315,7 @@
     },
     {
       "query": "Python 3.13 release notes",
-      "system": "amara",
+      "system": "marag",
       "rewritten": "python 3.13 release release notes changelog version update advisory vulnerabilit",
       "releases": 8,
       "community": 5,
@@ -328,7 +328,7 @@
     },
     {
       "query": "How do users feel about latest MacOS update",
-      "system": "amara",
+      "system": "marag",
       "rewritten": "how do users sentiment feedback community sentiment feedback opinion community o",
       "releases": 8,
       "community": 5,
@@ -341,7 +341,7 @@
     },
     {
       "query": "Community reaction to Windows 11 update",
-      "system": "amara",
+      "system": "marag",
       "rewritten": "community community sentiment feedback opinion to windows 11 software update rel",
       "releases": 8,
       "community": 5,
@@ -354,7 +354,7 @@
     },
     {
       "query": "Which software releases got negative feedback",
-      "system": "amara",
+      "system": "marag",
       "rewritten": "which software releases got negative community reaction complaint feedback advis",
       "releases": 8,
       "community": 5,
@@ -367,7 +367,7 @@
     },
     {
       "query": "Any critical software updates today",
-      "system": "amara",
+      "system": "marag",
       "rewritten": "any critical security vulnerability CVE patch security fix hotfix update advisor",
       "releases": 8,
       "community": 5,
@@ -385,7 +385,7 @@
       "query": "Any critical Linux security patches today",
       "category": "security",
       "baseline": 0.75,
-      "amara": 0.85,
+      "marag": 0.85,
       "improvement": 0.1,
       "memory_size": 9
     },
@@ -394,7 +394,7 @@
       "query": "CVE vulnerabilities in Python latest version",
       "category": "security",
       "baseline": 0.7,
-      "amara": 0.75,
+      "marag": 0.75,
       "improvement": 0.05,
       "memory_size": 12
     },
@@ -403,7 +403,7 @@
       "query": "Critical security updates published today",
       "category": "security",
       "baseline": 0.8,
-      "amara": 0.85,
+      "marag": 0.85,
       "improvement": 0.05,
       "memory_size": 14
     },
@@ -412,7 +412,7 @@
       "query": "Windows security patch this week",
       "category": "security",
       "baseline": 0.8,
-      "amara": 0.85,
+      "marag": 0.85,
       "improvement": 0.05,
       "memory_size": 14
     },
@@ -421,7 +421,7 @@
       "query": "Any new CVE for nodejs",
       "category": "security",
       "baseline": 0.8,
-      "amara": 0.85,
+      "marag": 0.85,
       "improvement": 0.05,
       "memory_size": 15
     },
@@ -430,7 +430,7 @@
       "query": "What bugs were fixed in the latest Python update",
       "category": "bugs",
       "baseline": 0.758,
-      "amara": 0.85,
+      "marag": 0.85,
       "improvement": 0.092,
       "memory_size": 21
     },
@@ -439,7 +439,7 @@
       "query": "Chrome browser crash fix latest version",
       "category": "bugs",
       "baseline": 0.8,
-      "amara": 0.85,
+      "marag": 0.85,
       "improvement": 0.05,
       "memory_size": 21
     },
@@ -448,7 +448,7 @@
       "query": "VSCode debugger bug fixed",
       "category": "bugs",
       "baseline": 0.8,
-      "amara": 0.85,
+      "marag": 0.85,
       "improvement": 0.05,
       "memory_size": 21
     },
@@ -457,7 +457,7 @@
       "query": "Latest Grafana release notes",
       "category": "releases",
       "baseline": 0.7,
-      "amara": 0.75,
+      "marag": 0.75,
       "improvement": 0.05,
       "memory_size": 21
     },
@@ -466,7 +466,7 @@
       "query": "Ansible new version what changed",
       "category": "releases",
       "baseline": 0.7,
-      "amara": 0.67,
+      "marag": 0.67,
       "improvement": -0.03,
       "memory_size": 21
     },
@@ -475,7 +475,7 @@
       "query": "Python 3.13 release notes",
       "category": "releases",
       "baseline": 0.75,
-      "amara": 0.8,
+      "marag": 0.8,
       "improvement": 0.05,
       "memory_size": 21
     },
@@ -484,7 +484,7 @@
       "query": "How do users feel about latest MacOS update",
       "category": "community",
       "baseline": 0.8,
-      "amara": 0.85,
+      "marag": 0.85,
       "improvement": 0.05,
       "memory_size": 25
     },
@@ -493,7 +493,7 @@
       "query": "Community reaction to Windows 11 update",
       "category": "community",
       "baseline": 0.75,
-      "amara": 0.85,
+      "marag": 0.85,
       "improvement": 0.1,
       "memory_size": 25
     },
@@ -502,7 +502,7 @@
       "query": "Which software releases got negative feedback",
       "category": "community",
       "baseline": 0.67,
-      "amara": 0.8,
+      "marag": 0.8,
       "improvement": 0.13,
       "memory_size": 27
     },
@@ -511,7 +511,7 @@
       "query": "Any critical software updates today",
       "category": "general",
       "baseline": 0.75,
-      "amara": 0.85,
+      "marag": 0.85,
       "improvement": 0.1,
       "memory_size": 27
     }

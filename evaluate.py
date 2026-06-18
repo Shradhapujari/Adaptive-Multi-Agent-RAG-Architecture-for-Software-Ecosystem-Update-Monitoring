@@ -98,7 +98,7 @@ def run_baseline(qobj):
     q=score(r,c,[],qobj["expected_keywords"])
     return {"query":qobj["query"],"system":"baseline","releases":len(r),"community":len(c),"cve":0,"quality":q,"signal":sig(q)}
 
-def run_amara(qobj,mem):
+def run_marag(qobj,mem):
     query=qobj["query"]
     best=sorted(mem.items(),key=lambda x:x[1],reverse=True)[:3]
     hint=f" Include: {' '.join(t for t,_ in best)}" if best else ""
@@ -113,50 +113,50 @@ def run_amara(qobj,mem):
         if q2>q: r,c,q,retried=r2,c2,q2,True
     for t in set(rw.lower().split())-set(query.lower().split()):
         if len(t)>3: mem[t]=mem.get(t,0.0)+(q-0.3)
-    return {"query":query,"system":"amara","rewritten":rw,"releases":len(r),"community":len(c),"cve":len(cv),"quality":q,"signal":sig(q),"retried":retried,"category":qobj["category"]}
+    return {"query":query,"system":"marag","rewritten":rw,"releases":len(r),"community":len(c),"cve":len(cv),"quality":q,"signal":sig(q),"retried":retried,"category":qobj["category"]}
 
 def run_eval(queries):
-    print(f"\n{'='*60}\n  AMARA Evaluation — {len(queries)} queries\n  {datetime.now().strftime('%Y-%m-%d %H:%M')}\n{'='*60}")
-    baseline_r,amara_r,curve,mem=[],[],[],{}
+    print(f"\n{'='*60}\n  Multi-Agent RAG System Evaluation — {len(queries)} queries\n  {datetime.now().strftime('%Y-%m-%d %H:%M')}\n{'='*60}")
+    baseline_r,marag_r,curve,mem=[],[],[],{}
     for i,q in enumerate(queries,1):
         print(f"\n  [{i:02d}/{len(queries)}] {q['query'][:55]}\n  {'-'*56}")
         b=run_baseline(q); baseline_r.append(b)
         print(f"  Baseline  quality={b['quality']:.3f} | {b['signal']}")
-        a=run_amara(q,mem); amara_r.append(a)
-        print(f"  AMARA     quality={a['quality']:.3f} | {a['signal']}" + (" [retried]" if a.get("retried") else ""))
-        curve.append({"n":i,"baseline":b["quality"],"amara":a["quality"],"improvement":round(a["quality"]-b["quality"],3)})
+        a=run_marag(q,mem); marag_r.append(a)
+        print(f"  Multi-Agent RAG System     quality={a['quality']:.3f} | {a['signal']}" + (" [retried]" if a.get("retried") else ""))
+        curve.append({"n":i,"baseline":b["quality"],"marag":a["quality"],"improvement":round(a["quality"]-b["quality"],3)})
         time.sleep(0.3)
-    return baseline_r,amara_r,curve,mem
+    return baseline_r,marag_r,curve,mem
 
-def report(baseline_r,amara_r,curve,mem):
+def report(baseline_r,marag_r,curve,mem):
     b_avg=sum(r["quality"] for r in baseline_r)/len(baseline_r)
-    a_avg=sum(r["quality"] for r in amara_r)/len(amara_r)
+    a_avg=sum(r["quality"] for r in marag_r)/len(marag_r)
     imp=round(((a_avg-b_avg)/max(b_avg,0.001))*100,1)
-    retried=sum(1 for r in amara_r if r.get("retried"))
+    retried=sum(1 for r in marag_r if r.get("retried"))
     cats=defaultdict(list)
-    for b,a in zip(baseline_r,amara_r): cats[a.get("category","general")].append((b["quality"],a["quality"]))
+    for b,a in zip(baseline_r,marag_r): cats[a.get("category","general")].append((b["quality"],a["quality"]))
     print(f"\n{'='*60}\n  RESULTS\n{'='*60}")
     print(f"  Baseline avg  : {b_avg:.3f}")
-    print(f"  AMARA avg     : {a_avg:.3f}")
+    print(f"  Multi-Agent RAG System avg     : {a_avg:.3f}")
     print(f"  Improvement   : +{imp}%")
-    print(f"  RLAIF retries : {retried}/{len(amara_r)} ({round(retried/len(amara_r)*100)}%)")
+    print(f"  RLAIF retries : {retried}/{len(marag_r)} ({round(retried/len(marag_r)*100)}%)")
     print(f"  Memory terms  : {len(mem)}")
     print(f"\n  Per category:")
     for cat,scores in sorted(cats.items()):
         ba=sum(s[0] for s in scores)/len(scores); aa=sum(s[1] for s in scores)/len(scores)
-        print(f"    {cat:12} baseline={ba:.3f} amara={aa:.3f} +{round(((aa-ba)/max(ba,0.001))*100,1)}%")
+        print(f"    {cat:12} baseline={ba:.3f} marag={aa:.3f} +{round(((aa-ba)/max(ba,0.001))*100,1)}%")
     print(f"\n  Top learned terms (Zero-HF memory):")
     for t,s in sorted(mem.items(),key=lambda x:x[1],reverse=True)[:8]:
         print(f"    {t:20} {s:+.3f}")
     print(f"\n{'='*60}\n  PAPER NUMBERS\n{'='*60}")
     print(f"  Queries evaluated : {len(baseline_r)}")
     print(f"  Baseline quality  : {b_avg:.1%}")
-    print(f"  AMARA quality     : {a_avg:.1%}")
+    print(f"  Multi-Agent RAG System quality     : {a_avg:.1%}")
     print(f"  Improvement       : +{imp}%")
-    print(f"  RLAIF auto-corrected {round(retried/len(amara_r)*100)}% of queries")
+    print(f"  RLAIF auto-corrected {round(retried/len(marag_r)*100)}% of queries")
     print(f"  Learned {len(mem)} terms with Zero Human Feedback")
     print(f"{'='*60}")
-    return {"baseline_avg":b_avg,"amara_avg":a_avg,"improvement_pct":imp,"rlaif_retry_rate":round(retried/len(amara_r)*100),"memory_terms":len(mem)}
+    return {"baseline_avg":b_avg,"marag_avg":a_avg,"improvement_pct":imp,"rlaif_retry_rate":round(retried/len(marag_r)*100),"memory_terms":len(mem)}
 
 if __name__=="__main__":
     quick="--quick" in sys.argv
@@ -165,5 +165,5 @@ if __name__=="__main__":
     b,a,curve,mem=run_eval(qs)
     s=report(b,a,curve,mem)
     with open(RESULTS_FILE,"w") as f:
-        json.dump({"timestamp":datetime.now().isoformat(),"summary":s,"baseline":b,"amara":a,"curve":curve,"memory":mem},f,indent=2)
+        json.dump({"timestamp":datetime.now().isoformat(),"summary":s,"baseline":b,"marag":a,"curve":curve,"memory":mem},f,indent=2)
     print(f"\n  Saved to {RESULTS_FILE}")

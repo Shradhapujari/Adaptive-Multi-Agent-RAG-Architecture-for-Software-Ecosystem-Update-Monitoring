@@ -152,7 +152,7 @@ def run_baseline(qobj):
     q=score(r,c,[],qobj["expected_keywords"])
     return {"query":qobj["query"],"system":"baseline","releases":len(r),"community":len(c),"community_src":src,"cve":0,"quality":q,"signal":sig(q)}
 
-def run_amara(qobj,mem):
+def run_marag(qobj,mem):
     query=qobj["query"]
     rw=query.lower()
     applied=[]
@@ -172,20 +172,20 @@ def run_amara(qobj,mem):
         if q2>q: r,c,src,q,retried=r2,c2,src2,q2,True
     for t in set(rw.lower().split())-set(query.lower().split()):
         if len(t)>3 and t.isalpha(): mem[t]=mem.get(t,0.0)+(q-0.3)
-    return {"query":query,"system":"amara","rewritten":rw[:80],"releases":len(r),"community":len(c),"community_src":src,"cve":len(cv),"quality":q,"signal":sig(q),"retried":retried,"category":qobj["category"]}
+    return {"query":query,"system":"marag","rewritten":rw[:80],"releases":len(r),"community":len(c),"community_src":src,"cve":len(cv),"quality":q,"signal":sig(q),"retried":retried,"category":qobj["category"]}
 
 def run_eval(queries):
-    print(f"\n{'='*62}\n  AMARA Evaluation v3 — {len(queries)} queries — {datetime.now().strftime('%H:%M:%S')}\n{'='*62}")
+    print(f"\n{'='*62}\n  Multi-Agent RAG System Evaluation v3 — {len(queries)} queries — {datetime.now().strftime('%H:%M:%S')}\n{'='*62}")
     br,ar,curve,mem=[],[],[],{}
     for i,q in enumerate(queries,1):
         print(f"\n  [{i:02d}/{len(queries)}] {q['query'][:58]}\n  {'─'*58}")
         b=run_baseline(q); br.append(b)
         print(f"  Baseline : {b['quality']:.3f} | {b['signal']:10} | r={b['releases']} c={b['community']}({b['community_src']})")
-        a=run_amara(q,mem); ar.append(a)
-        print(f"  AMARA    : {a['quality']:.3f} | {a['signal']:10} | r={a['releases']} c={a['community']}({a['community_src']}) cve={a['cve']}" + (" ↺" if a.get("retried") else ""))
+        a=run_marag(q,mem); ar.append(a)
+        print(f"  Multi-Agent RAG System    : {a['quality']:.3f} | {a['signal']:10} | r={a['releases']} c={a['community']}({a['community_src']}) cve={a['cve']}" + (" ↺" if a.get("retried") else ""))
         imp=round(a["quality"]-b["quality"],3)
         print(f"  Change   : {imp:+.3f}  {'✅ BETTER' if imp>0.01 else '➖ SAME' if abs(imp)<=0.01 else '⚠️  WORSE'}")
-        curve.append({"n":i,"query":q["query"],"category":q["category"],"baseline":b["quality"],"amara":a["quality"],"improvement":imp,"memory_size":len(mem)})
+        curve.append({"n":i,"query":q["query"],"category":q["category"],"baseline":b["quality"],"marag":a["quality"],"improvement":imp,"memory_size":len(mem)})
         time.sleep(0.3)
     return br,ar,curve,mem
 
@@ -197,12 +197,12 @@ def report(br,ar,curve,mem):
     cats=defaultdict(list)
     for b,a in zip(br,ar): cats[a.get("category","general")].append((b["quality"],a["quality"]))
     early=curve[:max(len(curve)//3,1)]; late=curve[-max(len(curve)//3,1):]
-    ea=sum(c["amara"] for c in early)/len(early); la=sum(c["amara"] for c in late)/len(late)
+    ea=sum(c["marag"] for c in early)/len(early); la=sum(c["marag"] for c in late)/len(late)
     lc=round(((la-ea)/max(ea,0.001))*100,1)
     print(f"\n{'='*62}\n  RESULTS\n{'='*62}")
     print(f"  Queries        : {len(br)}")
     print(f"  Baseline avg   : {b_avg:.3f} ({b_avg:.1%})")
-    print(f"  AMARA avg      : {a_avg:.3f} ({a_avg:.1%})")
+    print(f"  Multi-Agent RAG System avg      : {a_avg:.3f} ({a_avg:.1%})")
     print(f"  Improvement    : +{imp}%")
     print(f"  RLAIF retries  : {retried}/{len(ar)} ({round(retried/len(ar)*100)}%)")
     print(f"  Memory terms   : {len(mem)} (Zero Human Feedback)")
@@ -211,7 +211,7 @@ def report(br,ar,curve,mem):
     for cat,scores in sorted(cats.items()):
         ba=sum(s[0] for s in scores)/len(scores); aa=sum(s[1] for s in scores)/len(scores)
         i2=round(((aa-ba)/max(ba,0.001))*100,1)
-        print(f"    {cat:12} base={ba:.3f} amara={aa:.3f} +{i2}%  {'█'*int(aa*20)}")
+        print(f"    {cat:12} base={ba:.3f} marag={aa:.3f} +{i2}%  {'█'*int(aa*20)}")
     print(f"\n  Top learned terms:")
     for t,s in sorted(mem.items(),key=lambda x:x[1],reverse=True)[:6]:
         print(f"    {t:20} {s:+.3f}")
@@ -220,18 +220,18 @@ def report(br,ar,curve,mem):
   Evaluation dataset    : {len(br)} queries ({len(cats)} categories)
   Data source           : Live releasetrain.io APIs
   Baseline system       : No rewriting, 2 sources, no CVE
-  AMARA system          : Rewriting + 4 agents + RLAIF
+  Multi-Agent RAG System system          : Rewriting + 4 agents + RLAIF
 
   Baseline quality      : {b_avg:.1%}
-  AMARA quality         : {a_avg:.1%}
+  Multi-Agent RAG System quality         : {a_avg:.1%}
   Overall improvement   : +{imp}%
   RLAIF auto-corrected  : {round(retried/len(ar)*100)}% of queries
   Zero-HF terms learned : {len(mem)}
   Self-improvement gain : +{lc}% over session
     """)
-    return {"baseline_avg":round(b_avg,3),"amara_avg":round(a_avg,3),"improvement_pct":imp,
+    return {"baseline_avg":round(b_avg,3),"marag_avg":round(a_avg,3),"improvement_pct":imp,
             "rlaif_retry_rate":round(retried/len(ar)*100),"memory_terms":len(mem),"learning_gain":lc,
-            "categories":{k:{"baseline":round(sum(s[0] for s in v)/len(v),3),"amara":round(sum(s[1] for s in v)/len(v),3)} for k,v in cats.items()}}
+            "categories":{k:{"baseline":round(sum(s[0] for s in v)/len(v),3),"marag":round(sum(s[1] for s in v)/len(v),3)} for k,v in cats.items()}}
 
 if __name__=="__main__":
     quick="--quick" in sys.argv
@@ -240,5 +240,5 @@ if __name__=="__main__":
     b,a,curve,mem=run_eval(qs)
     s=report(b,a,curve,mem)
     with open(RESULTS_FILE,"w") as f:
-        json.dump({"timestamp":datetime.now().isoformat(),"summary":s,"baseline":b,"amara":a,"curve":curve,"memory":mem},f,indent=2)
+        json.dump({"timestamp":datetime.now().isoformat(),"summary":s,"baseline":b,"marag":a,"curve":curve,"memory":mem},f,indent=2)
     print(f"\n  Saved → {RESULTS_FILE}")
