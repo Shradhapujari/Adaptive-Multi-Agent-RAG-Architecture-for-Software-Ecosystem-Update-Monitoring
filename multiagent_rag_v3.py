@@ -11,6 +11,7 @@ Run:
 
 import json, os, re, time, sys, urllib.request
 from pathlib import Path
+from agent_rules import rules_block
 
 DATA_PATH = Path(__file__).parent / "data" / "enhanced_automated_sentiment_results.json"
 
@@ -1319,7 +1320,7 @@ def call_llama(prompt: str, model: str = "llama3.1") -> str:
     """Call LLM via Ollama REST API running locally."""
     payload = json.dumps({
         "model": model,
-        "prompt": prompt,
+        "prompt": rules_block() + prompt,
         "stream": False,
         "options": {"temperature": 0}
     }).encode()

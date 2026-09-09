@@ -32,9 +32,13 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Dict, List, Optional
 
+import guardrail
+import model_select
 import vendor
+from agent_rules import rules_block
 
 __all__ = [
     "Evidence",
@@ -177,7 +181,7 @@ def build_cited_prompt(query: str, evidence: List[Evidence],
                 "using ONLY the sources below.")
     ctx = "\n".join(e.line() for e in evidence) or "No documents retrieved."
     dated = f"\n\nTime frame asked about: {window_note}" if window_note else ""
-    return (f"{base}\n{CITATION_RULE}\n\nQuestion: {query}{dated}\n\n"
+    return (f"{rules_block()}{base}\n{CITATION_RULE}\n\nQuestion: {query}{dated}\n\n"
             f"Sources:\n{ctx}\n\nAnswer:")
 
 
@@ -280,11 +284,24 @@ class PresentedAnswer:
     evidence: List[Evidence] = field(default_factory=list)
 
 
+@lru_cache(maxsize=1)
+def _selected_spec() -> Optional[str]:
+    """Ask model_select what is reachable, once per process.
+
+    The probe is a network round trip and it is paid on the host that has no
+    model at all -- the one where it always fails -- so it is cached rather
+    than repeated per question. A restart is what picks up a model that came
+    up later, which is the same thing the env vars already require.
+    """
+    return model_select.select("present").spec
+
+
 def _resolve_spec(explicit: Optional[str]) -> Optional[str]:
-    """Which model to present with: caller > env > None (offline)."""
+    """Which model to present with: caller > env > whatever is reachable."""
     if explicit:
         return explicit
-    return os.getenv("PRESENTER_MODEL") or os.getenv("MARAG_LLM") or None
+    return (os.getenv("PRESENTER_MODEL") or os.getenv("MARAG_LLM")
+            or _selected_spec())
 
 
 def present_answer(query: str, results: Dict, model_spec: Optional[str] = None,
@@ -308,15 +325,26 @@ def present_answer(query: str, results: Dict, model_spec: Optional[str] = None,
                     temperature=0.0, max_tokens=400)
                 text = _strip_preamble(text)
                 if text:
-                    return PresentedAnswer(text, "llm", client.spec,
-                                           evidence=evidence)
-                note = "model returned an empty answer"
+                    # The model was given these sources and nothing else, so
+                    # anything it states outside them is invented. Failing the
+                    # check falls back to the rule-composed paragraph -- built
+                    # from the same evidence by code, so it cannot fail -- and
+                    # not to a refusal, which would throw away a real answer
+                    # over one bad span.
+                    verdict = guardrail.check(text, evidence)
+                    if verdict.ok:
+                        return PresentedAnswer(text, "llm", client.spec,
+                                               evidence=evidence)
+                    note = ("model output failed the guardrail — "
+                            + "; ".join(str(v) for v in verdict.violations))
+                else:
+                    note = "model returned an empty answer"
             else:
                 note = f"{client.spec} not reachable"
         except Exception as e:  # noqa: BLE001 — any import/transport failure
             note = f"presenter model unavailable ({e})"
     else:
-        note = "no presenter model configured"
+        note = "no presenter model configured or reachable"
 
     return PresentedAnswer(
         deterministic_paragraph(query, evidence, window_note),

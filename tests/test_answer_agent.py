@@ -46,6 +46,11 @@ def _no_env(monkeypatch):
         monkeypatch.delenv(k, raising=False)
 
 
+def _no_model(monkeypatch, spec=None):
+    """Stand in for model_select's probe -- these tests do not touch the network."""
+    monkeypatch.setattr(answer_agent, "_selected_spec", lambda: spec)
+
+
 def test_evidence_labels_carry_source_name_and_date():
     ev = collect_evidence(RESULTS)
     labels = [e.label for e in ev]
@@ -99,10 +104,11 @@ def test_empty_results_say_so_without_inventing():
 
 def test_offline_mode_is_labelled_rule_based(monkeypatch):
     _no_env(monkeypatch)
+    _no_model(monkeypatch)
     out = present_answer("Any critical Linux updates today?", RESULTS)
     assert out.mode == "rule-based"
     assert out.model == ""
-    assert out.note == "no presenter model configured"
+    assert out.note == "no presenter model configured or reachable"
     assert out.evidence
 
 
@@ -113,7 +119,7 @@ def test_prompt_names_the_bracket_rule_and_only_listed_sources():
     assert "square brackets" in prompt
     assert "ONLY the sources" in prompt
     assert "Time frame asked about: Aug 31, 2026" in prompt
-    assert "[Release Notes - Linux v6.18.21, 2026-08-28]" in prompt
+    assert "[Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28]" in prompt
 
 
 class _StubClient:
@@ -178,11 +184,53 @@ def test_empty_model_output_falls_back(monkeypatch):
     assert out.note == "model returned an empty answer"
 
 
+def test_unsupported_model_output_is_refused_and_falls_back(monkeypatch):
+    # Django 5.2.1 is in the pool; 5.9.9 is not, and neither is the label. The
+    # answer reads fine, which is the point -- this is the failure a reader
+    # cannot catch without the sources next to it.
+    _no_env(monkeypatch)
+    _patch_client(monkeypatch, _StubClient("Django 5.9.9 shipped [Release Notes - Django v5.9.9]."))
+    out = present_answer("q", RESULTS, model_spec="stub:model")
+    assert out.mode == "rule-based"
+    assert "guardrail" in out.note
+    assert "unsupported_version" in out.note and "unknown_citation" in out.note
+    assert "5.9.9" not in out.text
+    assert "[Release Notes - Django v5.2.1, 2026-08-20]" in out.text
+
+
+def test_grounded_model_output_passes_the_guardrail(monkeypatch):
+    # The check must not cost the LLM path: every fact here is in the pool.
+    _no_env(monkeypatch)
+    _patch_client(monkeypatch, _StubClient(
+        "Django 5.2.1 is a routine bugfix release [Release Notes - Django v5.2.1, 2026-08-20]."))
+    out = present_answer("q", RESULTS, model_spec="stub:model")
+    assert out.mode == "llm" and out.note == ""
+
+
 def test_env_supplies_the_spec_when_caller_does_not(monkeypatch):
     monkeypatch.setenv("PRESENTER_MODEL", "stub:model")
     _patch_client(monkeypatch, _StubClient("prose [Community - r/linux, 2026-08-31]"))
     out = present_answer("q", RESULTS)
     assert out.mode == "llm"
+
+
+def test_model_selection_supplies_the_spec_when_nothing_else_does(monkeypatch):
+    # No caller argument and no env var is the deployed default; the presenter
+    # now asks model_select what is reachable rather than going offline.
+    _no_env(monkeypatch)
+    _no_model(monkeypatch, "stub:model")
+    _patch_client(monkeypatch, _StubClient("prose [Community - r/linux, 2026-08-31]"))
+    out = present_answer("q", RESULTS)
+    assert out.mode == "llm" and out.model == "stub:model"
+
+
+def test_env_beats_model_selection(monkeypatch):
+    # An operator who names a model gets that model, reachable or not -- the
+    # probe is a fallback, not an override.
+    monkeypatch.setenv("PRESENTER_MODEL", "env:model")
+    _no_model(monkeypatch, "stub:model")
+    assert answer_agent._resolve_spec(None) == "env:model"
+    assert answer_agent._resolve_spec("caller:model") == "caller:model"
 
 
 def test_harness_synthesis_prompt_is_reused_not_rewritten():
@@ -223,12 +271,15 @@ def test_prompt_tells_the_model_an_in_window_source_is_an_answer():
     assert "no preamble" in prompt
 
 
+# The label below is the advisory one, not "Release Notes - Linux v6.18.21":
+# the guardrail rejects a citation that was never in the prompt, so a stub that
+# cites a label collect_evidence no longer emits now falls back to rule-based.
 @pytest.mark.parametrize("raw,expected_start", [
-    ('Here is a flowing paragraph:\n\n"Linux shipped a fix [Release Notes - Linux v6.18.21, 2026-08-28]."',
+    ('Here is a flowing paragraph:\n\n"Linux shipped a fix [Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28]."',
      "Linux shipped a fix"),
-    ('Answer: Linux shipped a fix [Release Notes - Linux v6.18.21, 2026-08-28].',
+    ('Answer: Linux shipped a fix [Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28].',
      "Linux shipped a fix"),
-    ('Linux shipped a fix [Release Notes - Linux v6.18.21, 2026-08-28].',
+    ('Linux shipped a fix [Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28].',
      "Linux shipped a fix"),
 ])
 def test_model_preamble_and_wrapping_quotes_are_stripped(monkeypatch, raw, expected_start):
