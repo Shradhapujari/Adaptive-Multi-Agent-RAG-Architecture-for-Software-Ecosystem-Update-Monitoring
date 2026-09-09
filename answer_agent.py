@@ -34,6 +34,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+import guardrail
 import vendor
 
 __all__ = [
@@ -308,9 +309,20 @@ def present_answer(query: str, results: Dict, model_spec: Optional[str] = None,
                     temperature=0.0, max_tokens=400)
                 text = _strip_preamble(text)
                 if text:
-                    return PresentedAnswer(text, "llm", client.spec,
-                                           evidence=evidence)
-                note = "model returned an empty answer"
+                    # The model was given these sources and nothing else, so
+                    # anything it states outside them is invented. Failing the
+                    # check falls back to the rule-composed paragraph -- built
+                    # from the same evidence by code, so it cannot fail -- and
+                    # not to a refusal, which would throw away a real answer
+                    # over one bad span.
+                    verdict = guardrail.check(text, evidence)
+                    if verdict.ok:
+                        return PresentedAnswer(text, "llm", client.spec,
+                                               evidence=evidence)
+                    note = ("model output failed the guardrail — "
+                            + "; ".join(str(v) for v in verdict.violations))
+                else:
+                    note = "model returned an empty answer"
             else:
                 note = f"{client.spec} not reachable"
         except Exception as e:  # noqa: BLE001 — any import/transport failure

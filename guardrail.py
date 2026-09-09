@@ -30,7 +30,9 @@ __all__ = ["Violation", "Verdict", "check", "guard", "REFUSAL"]
 REFUSAL = ("I cannot determine that from the sources retrieved, so I am not "
            "going to state it.")
 
-_CITE_RE = re.compile(r"\[([^\[\]\n]{1,40})\]")
+# Labels are long here on purpose -- "Release Notes - Django v5.2.1, 2026-08-20"
+# is the whole citation, so the span has to hold one.
+_CITE_RE = re.compile(r"\[([^\[\]\n]{1,120})\]")
 # Version extraction reads any bare integer as a version, so "2026-09-05" would
 # arrive as three of them. Dates are checked separately; cut them out first.
 _ISO_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
