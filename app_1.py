@@ -302,6 +302,44 @@ def fetch_community_feedback(query: str, limit: int = 5) -> list:
         } for p in posts[:limit]]
     return []
 
+# ── SINGLE-AGENT BASELINE ────────────────────────────────
+
+def run_single_agent(query: str, top_k: int = 4) -> dict:
+    """The paper's baseline arm, run from the UI on the user's own question.
+
+    Not a reimplementation: this is `eval_harness.generators.SingleAgentGenerator`,
+    the same object the published comparison scores. A demo that showed a
+    single-agent arm built here instead would be comparing the pipeline
+    against a strawman written to lose, and the measured numbers would no
+    longer describe the thing on screen.
+
+    Raw query straight to the retriever, one synthesis call, and nothing else:
+    no temporal grounding, no vendor/intent detection, no rewriting, no CVE
+    agent, no RLAIF, no survey weighting, no yes/no tally.
+
+    With no model reachable the generator's prose path returns a generation
+    error, which would read as the baseline failing rather than as the host
+    lacking Ollama. Its deterministic `template` rendering is used instead and
+    the caller is told which arm actually ran.
+    """
+    from eval_harness.generators import SingleAgentGenerator
+    from eval_harness.providers import make_client
+
+    spec = presenter_spec() or "ollama:mistral"
+    client = None
+    try:
+        client = make_client(spec)
+        prose = client.available()
+    except Exception:
+        prose = False
+    gen = (SingleAgentGenerator(client=client, top_k=top_k, render="prose")
+           if prose else SingleAgentGenerator(top_k=top_k, render="template"))
+    t0 = time.time()
+    out = gen.generate(query)
+    return {**out, "arm": gen.name, "model": spec if prose else "",
+            "elapsed": round(time.time() - t0, 1)}
+
+
 # ── AGENT 3: RELEASE NOTES AGENT ─────────────────────────
 
 def fetch_release_notes(query: str, limit: int = 5) -> list:
@@ -530,17 +568,20 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     if g.vendors:
         scoped = vendor.filter_by_vendor(results["releases"], g.vendors)
         results["releases"] = scoped or results["releases"]
-        scoped_com = vendor.filter_community(results["community"], g.vendors,
-                                             terms=g.terms)
-        results["community"] = scoped_com or results["community"]
+        # No `or results["community"]` fallback: when the subject filter finds
+        # nothing about this question in the feed, that is the finding. The
+        # fallback used to restore the pool it had just rejected, which is how
+        # "How to limit battery charge?" ended up cited as the community
+        # evidence for a question about a deleted kernel.
+        results["community"] = vendor.filter_community(results["community"],
+                                                       g.vendors, terms=g.terms)
 
     # The CVE feed is Reddit, not an advisory feed, so it gets the same vendor
     # scoping as the community pool and then has to prove it is about security
     # at all. Filters never empty a pool; a thin pool beats a false one.
     if g.vendors:
-        scoped_cve = vendor.filter_community(results["cve"], g.vendors,
-                                             terms=g.terms)
-        results["cve"] = scoped_cve or results["cve"]
+        results["cve"] = vendor.filter_community(results["cve"], g.vendors,
+                                                 terms=g.terms)
     on_topic = [r for r in results["cve"] if is_security_post(r)]
     results["cve_dropped"] = len(results["cve"]) - len(on_topic)
     results["cve"] = on_topic
@@ -685,23 +726,35 @@ with st.sidebar:
     st.divider()
 
     st.markdown("#### ⚙️ Settings")
+    mode = st.radio(
+        "Answering mode",
+        ["Multi-agent pipeline", "Single agent (paper baseline)"],
+        help="The baseline is the evaluation's own `single_agent` arm: raw "
+             "query to the retriever and one synthesis call, with every "
+             "coordinating agent removed. Same question, so the difference on "
+             "screen is the difference the paper measures.")
+    single_mode = mode.startswith("Single")
     result_limit = st.slider("Results per agent", 3, 10, 5)
     show_pipeline = st.toggle("Show pipeline steps", value=True)
     show_raw = st.toggle("Show raw API data", value=False)
-    yesno_on = st.toggle("Yes/No consensus", value=True,
+    yesno_on = st.toggle("Yes/No consensus", value=True, disabled=single_mode,
                          help="For questions that take a one-word answer, count how "
                               "the retrieved thread's commenters actually answered it.")
     unclear_as_no = st.toggle("Count non-committal comments as No", value=False,
-                              disabled=not yesno_on,
+                              disabled=single_mode or not yesno_on,
                               help="A commenter who neither confirms nor denies is "
                                    "read as a no. Defensible for “did this happen to "
                                    "you?” — someone it happened to says so — but it "
                                    "is an inference from silence, not from the comment.")
     survey_on = st.toggle(f"Survey-informed evaluator (n={survey.respondents()})",
-                          value=True,
+                          value=True, disabled=single_mode,
                           help="Blend the 2024 software-update survey's user "
                                "priorities into the quality score, and report which "
                                "of them these results address.")
+
+    if single_mode:
+        st.caption("Baseline arm selected — the agents above it are switched "
+                   "off, which is what makes it the baseline.")
 
     st.divider()
     st.markdown("#### 💡 Example queries")
@@ -772,7 +825,9 @@ query = st.text_input(
 
 col1, col2, col3 = st.columns([2, 1, 1])
 with col1:
-    run_btn = st.button("🚀 Run Multi-Agent Pipeline", type="primary", use_container_width=True)
+    run_btn = st.button("🚀 Run Single Agent" if single_mode
+                        else "🚀 Run Multi-Agent Pipeline",
+                        type="primary", use_container_width=True)
 with col2:
     if st.button("🔁 Clear", use_container_width=True):
         st.session_state["query_input"] = ""
@@ -780,7 +835,44 @@ with col2:
 
 # ── PIPELINE EXECUTION ────────────────────────────────────
 
-if run_btn and query:
+if run_btn and query and single_mode:
+    # ── SINGLE-AGENT BASELINE ─────────────────────────────
+    # Rendered before the pipeline branch and returning early: the sections
+    # below report what the coordinating agents did, and this arm has none of
+    # them. Showing their headings with "n/a" underneath would suggest the
+    # baseline attempted the work and failed at it.
+    st.markdown("---")
+    with st.spinner("🤖 Single agent — retrieve, then answer..."):
+        sa = run_single_agent(query, top_k=result_limit)
+
+    st.markdown("### 🤖 Single Agent (baseline)")
+    st.caption(f"Arm `{sa['arm']}`" + (f" · model `{sa['model']}`" if sa["model"]
+               else " · no model reachable, so the deterministic template "
+                    "rendering ran instead of prose synthesis")
+               + f" · {sa['elapsed']}s")
+    st.info("**Raw question → retriever → one answer.** No temporal grounding, "
+            "no vendor or intent detection, no query rewriting, no CVE agent, "
+            "no RLAIF evaluator, no survey weighting, no yes/no tally. This is "
+            "the arm the paper compares against, run on your question.")
+
+    st.markdown("#### ✅ Answer")
+    st.success(sa["answer"] or "_(the baseline returned nothing)_")
+
+    docs = sa.get("docs") or []
+    with st.expander(f"📄 Documents it retrieved ({len(docs)})"):
+        if not docs:
+            st.caption("None — the raw query matched nothing.")
+        for d in docs:
+            title = d.get("title") or d.get("product") or "(untitled)"
+            src = d.get("source") or d.get("kind") or "?"
+            st.markdown(f"• **{title}**  ·  `{src}`")
+            if d.get("url"):
+                st.caption(d["url"])
+
+    st.caption("Switch **Answering mode** in the sidebar to run the same "
+               "question through the multi-agent pipeline and compare.")
+
+elif run_btn and query:
 
     # Pipeline steps display
     if show_pipeline:
