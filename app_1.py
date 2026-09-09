@@ -530,17 +530,20 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     if g.vendors:
         scoped = vendor.filter_by_vendor(results["releases"], g.vendors)
         results["releases"] = scoped or results["releases"]
-        scoped_com = vendor.filter_community(results["community"], g.vendors,
-                                             terms=g.terms)
-        results["community"] = scoped_com or results["community"]
+        # No `or results["community"]` fallback: when the subject filter finds
+        # nothing about this question in the feed, that is the finding. The
+        # fallback used to restore the pool it had just rejected, which is how
+        # "How to limit battery charge?" ended up cited as the community
+        # evidence for a question about a deleted kernel.
+        results["community"] = vendor.filter_community(results["community"],
+                                                       g.vendors, terms=g.terms)
 
     # The CVE feed is Reddit, not an advisory feed, so it gets the same vendor
     # scoping as the community pool and then has to prove it is about security
     # at all. Filters never empty a pool; a thin pool beats a false one.
     if g.vendors:
-        scoped_cve = vendor.filter_community(results["cve"], g.vendors,
-                                             terms=g.terms)
-        results["cve"] = scoped_cve or results["cve"]
+        results["cve"] = vendor.filter_community(results["cve"], g.vendors,
+                                                 terms=g.terms)
     on_topic = [r for r in results["cve"] if is_security_post(r)]
     results["cve_dropped"] = len(results["cve"]) - len(on_topic)
     results["cve"] = on_topic

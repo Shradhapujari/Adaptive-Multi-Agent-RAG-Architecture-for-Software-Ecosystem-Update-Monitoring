@@ -190,6 +190,32 @@ def test_product_named_in_a_title_counts_even_off_topic_subreddit():
     assert filter_community(rows, [VendorMatch("chrome", "chrome")]) == rows
 
 
+def test_right_subreddit_wrong_subject_is_not_this_question_s_evidence():
+    # The reported bug: asked whether a Fedora update deleted a kernel and
+    # grub, r/linuxquestions' "How to limit battery charge?" survived on the
+    # subreddit alone and was cited as the community evidence.
+    rows = COMMUNITY + [{"title": "Fedora 44 update ate my grub",
+                         "subreddit": "linuxquestions"}]
+    kept = filter_community(rows, [VendorMatch("linux", "kernel", True),
+                                   VendorMatch("fedora", "fedora")],
+                            terms=["fedora", "update", "kernel", "delete", "grub"])
+    assert [r["title"] for r in kept] == ["Fedora 44 update ate my grub"]
+
+
+def test_subject_narrowing_may_empty_the_pool():
+    # Every product-matched row is off subject. Returning the battery post
+    # anyway is what put a wrong citation in the answer, so an empty pool is
+    # the right result: a thin pool beats a false one.
+    assert filter_community(COMMUNITY, [VendorMatch("linux", "linux")],
+                            terms=["grub", "kernel"]) == []
+
+
+def test_subject_narrowing_needs_terms_to_narrow_on():
+    # No terms supplied: the product match is all there is, and it stands.
+    kept = filter_community(COMMUNITY, [VendorMatch("linux", "linux")])
+    assert [r["subreddit"] for r in kept] == ["linuxquestions"]
+
+
 def test_community_falls_back_rather_than_returning_nothing():
     # No vendor, and no content term matches: a loose pool beats an empty one.
     assert filter_community(COMMUNITY, [], terms=["kubernetes"]) == COMMUNITY

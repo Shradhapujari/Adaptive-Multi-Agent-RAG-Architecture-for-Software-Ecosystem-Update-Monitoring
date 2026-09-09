@@ -433,6 +433,28 @@ def filter_community(rows: Iterable[Dict], vendors: Sequence[VendorMatch],
     in its title. With no vendor detected, `terms` (the question's content
     words) are used instead, and if those match nothing the rows pass through
     unfiltered -- an empty community pool is worse than a loose one.
+
+    A subreddit match says the post is about the right *product*. It says
+    nothing about whether it is about the right *subject*, and the two were
+    treated as one: asked whether a Fedora update deleted a kernel and grub,
+    the detected vendors were linux and fedora, and the single row that
+    survived the 50-row global feed was "How to limit battery charge?" from
+    r/linuxquestions -- kept because the subreddit is a Linux one, and then
+    cited in the answer as this question's community evidence. `terms` was
+    already being computed and passed in for exactly this, but it was read only
+    in the branch above, so the moment a vendor was detected the subject
+    dropped out of the decision entirely.
+
+    So the product match now narrows to the rows that also share a content
+    word with the question, and unlike the no-vendor branch above this
+    narrowing is allowed to empty the pool. The rule this file follows
+    elsewhere is the CVE pool's, not the fallback's: a thin pool beats a false
+    one. "No community posts matched" is a true statement about the feed and
+    costs the answer a sentence; handing the presenter an off-subject post
+    because something had to be returned costs it a citation that is wrong.
+    The vendor branch is where that distinction bites, because a subreddit
+    match guarantees a plausible-looking row is always available to fall back
+    to.
     """
     wanted = {v.name for v in vendors}
     rows = list(rows)
@@ -451,6 +473,11 @@ def filter_community(rows: Iterable[Dict], vendors: Sequence[VendorMatch],
         if (sub and sub in wanted) or any(
                 re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])", title) for w in wanted):
             out.append(r)
+
+    low_terms = [t.lower() for t in terms if len(t) > 2]
+    if low_terms:
+        return [r for r in out
+                if any(t in str(r.get("title", "")).lower() for t in low_terms)]
     return out
 
 
