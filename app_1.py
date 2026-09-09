@@ -37,6 +37,8 @@ from answer_agent import present_answer
 from store import open_store, caching_fetch
 from grounding import ground
 import vendor
+import yesno
+import survey
 
 # ── PAGE CONFIG ──────────────────────────────────────────
 st.set_page_config(
@@ -289,6 +291,7 @@ def fetch_community_feedback(query: str, limit: int = 5) -> list:
         posts = data.get("data", [])
         return [{
             "title":      p.get("title", ""),
+            "reddit_id":  p.get("redditId", ""),
             "subreddit":  p.get("subreddit", ""),
             "url":        p.get("url", ""),
             "score":      p.get("score", 0),
@@ -354,10 +357,24 @@ def fetch_cve_data(query: str, limit: int = 5) -> list:
 
 # ── RLAIF EVALUATOR ──────────────────────────────────────
 
-def evaluate_results(community: list, releases: list, cve: list, query: str) -> dict:
-    """Scores result quality and generates RLAIF signal."""
+def evaluate_results(community: list, releases: list, cve: list, query: str,
+                     survey_on: bool = True) -> dict:
+    """Scores result quality and generates RLAIF signal.
+
+    The count-based score says how much came back, not whether any of it is
+    what people wanted. With `survey_on`, the 52-respondent priority weights
+    (see survey.py) supply the second half: a run that returned five documents
+    none of which touch a stated priority scores below one that returned three
+    that do. Blended rather than substituted -- volume is still evidence, it is
+    just no longer the only evidence -- and the base score is kept alongside so
+    the effect of the toggle is visible instead of merely applied.
+    """
     total   = len(community) + len(releases) + len(cve)
     quality = min(total / 15.0, 1.0)
+    base    = quality
+    align   = survey.alignment(list(community) + list(releases) + list(cve))
+    if survey_on:
+        quality = 0.7 * quality + 0.3 * align["score"]
     signal  = "positive" if quality >= 0.3 else "negative"
 
     # Count relevant results
@@ -368,6 +385,9 @@ def evaluate_results(community: list, releases: list, cve: list, query: str) -> 
 
     return {
         "quality":        round(quality, 2),
+        "quality_base":   round(base, 2),
+        "survey_on":      survey_on,
+        "survey":         align,
         "signal":         signal,
         "total_results":  total,
         "community_count": len(community),
@@ -378,7 +398,9 @@ def evaluate_results(community: list, releases: list, cve: list, query: str) -> 
 
 # ── MANAGER AGENT — ORCHESTRATOR ─────────────────────────
 
-def run_pipeline(query: str, show_steps: bool = True, limit: int = 5) -> dict:
+def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
+                 yesno_on: bool = True, unclear_as_no: bool = False,
+                 survey_on: bool = True) -> dict:
     """Main orchestrator — runs all 4 agents and returns results."""
     results = {
         "original_query":  query,
@@ -537,10 +559,21 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5) -> dict:
     results["cve"] = results["cve"][:limit]
     results["timing"]["filter"] = round(time.time() - t0, 2)
 
+    # Step 4b — Yes/No consensus
+    # Only for questions phrased to take a one-word answer, and only off the
+    # comments of the thread that was retrieved for them: this counts what
+    # other people answered, it does not infer an answer from the documents.
+    results["yesno"] = None
+    if yesno_on and yesno.looks_yesno(query):
+        thread = yesno.find_thread(query)
+        if thread is not None:
+            results["yesno"] = {**yesno.tally(thread, unclear_as_no=unclear_as_no),
+                                "thread": thread}
+
     # Step 5 — RLAIF Evaluator
     results["evaluation"] = evaluate_results(
         results["community"], results["releases"],
-        results["cve"], grounded
+        results["cve"], grounded, survey_on=survey_on
     )
 
     return results
@@ -655,6 +688,20 @@ with st.sidebar:
     result_limit = st.slider("Results per agent", 3, 10, 5)
     show_pipeline = st.toggle("Show pipeline steps", value=True)
     show_raw = st.toggle("Show raw API data", value=False)
+    yesno_on = st.toggle("Yes/No consensus", value=True,
+                         help="For questions that take a one-word answer, count how "
+                              "the retrieved thread's commenters actually answered it.")
+    unclear_as_no = st.toggle("Count non-committal comments as No", value=False,
+                              disabled=not yesno_on,
+                              help="A commenter who neither confirms nor denies is "
+                                   "read as a no. Defensible for “did this happen to "
+                                   "you?” — someone it happened to says so — but it "
+                                   "is an inference from silence, not from the comment.")
+    survey_on = st.toggle(f"Survey-informed evaluator (n={survey.respondents()})",
+                          value=True,
+                          help="Blend the 2024 software-update survey's user "
+                               "priorities into the quality score, and report which "
+                               "of them these results address.")
 
     st.divider()
     st.markdown("#### 💡 Example queries")
@@ -666,6 +713,7 @@ with st.sidebar:
         "Any security vulnerabilities in Python?",
         "Latest Django release notes",
         "MacOS updates with negative community reaction",
+        "Did the latest Fedora 44 update delete your kernel and grub?",
     ]
     for ex in examples:
         if st.button(ex, use_container_width=True):
@@ -762,7 +810,9 @@ if run_btn and query:
         st.markdown("---")
 
     # Run the pipeline
-    results = run_pipeline(query, show_steps=show_pipeline, limit=result_limit)
+    results = run_pipeline(query, show_steps=show_pipeline, limit=result_limit,
+                           yesno_on=yesno_on, unclear_as_no=unclear_as_no,
+                           survey_on=survey_on)
 
     # ── TEMPORAL GROUNDING RESULT ─────────────────────────
     tr = results["temporal"]
@@ -859,15 +909,73 @@ if run_btn and query:
                    ". The plain phrasing and the product term find the documents; "
                    "the dated one lets the window rank them.")
 
+    # ── YES/NO CONSENSUS ──────────────────────────────────
+    # Shown above the evaluator because for this shape of question it *is*
+    # the answer, and a paragraph synthesised underneath it is elaboration.
+    yn = results.get("yesno")
+    if yn is not None:
+        st.markdown("### ✅ Yes/No Consensus")
+        line = yesno.verdict_line(yn)
+        (st.success if yn["answered"] else st.warning)(f"**{line}**")
+        st.caption(f"Counted off the comments of “{yn['thread']['title']}” "
+                   f"(r/{yn['thread'].get('subreddit','')}) — one vote per commenter, "
+                   f"the person who asked excluded.")
+        if yn["thread"].get("url"):
+            st.caption(f"🔗 {yn['thread']['url']}")
+        if yn["asker_report"]:
+            st.caption(f"The asker's own report: “{yn['asker_report'][:200]}”")
+        with st.expander(f"Show the {len(yn['votes'])} comment(s) behind this count"):
+            for v in yn["votes"]:
+                icon = {"yes": "🟥", "no": "🟩", "unclear": "⬜"}[v["stance"]]
+                st.markdown(f"{icon} **{v['stance'].upper()}** — {v['body'][:300]}")
+                if v["url"]:
+                    st.caption(v["url"])
+        st.markdown("---")
+
     # ── RLAIF EVALUATION METRICS ──────────────────────────
     st.markdown("### 📊 RLAIF Evaluator")
     ev = results["evaluation"]
-    m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("Quality Score", f"{ev['quality']:.2f}/1.0")
+    sv = ev.get("survey", {})
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1.metric("Quality Score", f"{ev['quality']:.2f}/1.0",
+              delta=(f"{ev['quality'] - ev['quality_base']:+.2f} vs. count only"
+                     if ev.get("survey_on") else None))
     m2.metric("RLAIF Signal", "✅ Positive" if ev["signal"]=="positive" else "⚠️ Retry")
-    m3.metric("Community Posts", ev["community_count"])
-    m4.metric("Release Notes", ev["release_count"])
-    m5.metric("CVE Results", ev["cve_count"])
+    m3.metric("User-Priority Fit", f"{sv.get('score', 0):.2f}/1.0")
+    m4.metric("Community Posts", ev["community_count"])
+    m5.metric("Release Notes", ev["release_count"])
+    m6.metric("CVE Results", ev["cve_count"])
+
+    # ── SURVEY-INFORMED PRIORITIES ────────────────────────
+    if sv:
+        n = sv["n"]
+        if ev.get("survey_on"):
+            st.caption(f"Quality blends retrieval volume with user-priority fit "
+                       f"(0.7 / 0.3). Count alone would score {ev['quality_base']:.2f}.")
+        else:
+            st.caption(f"Survey off — quality is retrieval volume alone. The fit "
+                       f"against {n} respondents' priorities is still reported, "
+                       f"it just does not move the score.")
+        cov = ", ".join(f"{c['label']} ({c['respondents']}/{n})" for c in sv["covered"])
+        miss = ", ".join(f"{m['label']} ({m['respondents']}/{n})" for m in sv["missing"])
+        if cov:
+            st.success(f"**Speaks to:** {cov}")
+        if miss:
+            st.warning(f"**Says nothing about:** {miss}")
+        with st.expander(f"What the {n} surveyed users said they care about"):
+            st.caption("Counts are respondents who raised the priority — by "
+                       "ticking it, writing about it, or both. Read from "
+                       "`data/SoftwareUpdateSurvey.csv` on every run.")
+            for pr in survey.priorities():
+                hit = any(c["key"] == pr["key"] for c in sv["covered"])
+                matched = next((", ".join(c["matched"]) for c in sv["covered"]
+                                if c["key"] == pr["key"]), "")
+                st.markdown(f"{'🟢' if hit else '⚪️'} **{pr['label']}** — "
+                            f"{pr['respondents']}/{n} respondents "
+                            f"({pr['share']:.0%})"
+                            + (f" · matched on _{matched}_" if matched else ""))
+                if pr["quote"]:
+                    st.caption(f"“{pr['quote'][:240]}”")
 
     timing = results["timing"]
     st.caption(f"⏱ Timing — Temporal: {timing.get('temporal',0)}s | Rewriter: {timing.get('rewriter',0)}s | Community: {timing.get('community',0)}s | Releases: {timing.get('releases',0)}s | CVE: {timing.get('cve',0)}s")
