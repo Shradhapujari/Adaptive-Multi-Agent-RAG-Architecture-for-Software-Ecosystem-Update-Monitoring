@@ -34,10 +34,11 @@ from typing import Dict, List, Optional
 from temporal import resolve_temporal, matches_window
 from fetch_union import union_fetch, product_terms
 from agent_rules import rules_block
-from answer_agent import present_answer
+from answer_agent import present_answer, _resolve_spec
 from store import open_store, caching_fetch
 from grounding import ground
 import vendor
+import xai
 import yesno
 import survey
 
@@ -625,6 +626,42 @@ def _n_shipped(rows) -> int:
     return sum(1 for r in (rows or []) if vendor.is_release_record(r))
 
 
+def _xai_panel(trace) -> str:
+    """The reasoning trace as markdown: why each source, then claim by claim.
+
+    The expander under the answer used to list the evidence and stop there,
+    which answers "what was cited" but not the two questions a reader actually
+    asks -- why did it look at *that* thread, and which sentence rests on it.
+    Both are already in the trace; this only formats them.
+
+    Markdown rather than st.* calls so it can be tested without a Streamlit
+    runtime, the same reason `_agent_table` returns a string.
+    """
+    out = ["**Why these sources**", ""]
+    for s in trace.sources:
+        link = f" · [open source]({s['url']})" if s["url"] else ""
+        used = "cited" if s["used"] else "retrieved, not cited"
+        out.append(f"- **[{s['label']}]** {s['title']}{link}")
+        out.append(f"  - {s['why_retrieved']} — *{used}*")
+    if not trace.sources:
+        out.append("- nothing was retrieved for this question")
+
+    out += ["", "**Claim by claim**", ""]
+    for s in trace.sentences:
+        cites = ", ".join(f"[{c}]" for c in s["cites"])
+        if s["grounded"]:
+            out.append(f"- {s['text']}\n  - {cites or 'no version or date stated'}")
+        else:
+            # Reached only when the guardrail let the text through, i.e. the
+            # facts check out but the sentence carries no label of its own.
+            out.append(f"- {s['text']}\n  - ⚠️ states {', '.join(s['facts'])} "
+                       f"without citing a source")
+
+    if trace.violations:
+        out += ["", "**Guardrail**", ""] + [f"- ⚠️ {v}" for v in trace.violations]
+    return "\n".join(out)
+
+
 def _agent_table(results=None, presented=None) -> str:
     """The sidebar's agent roster, reporting what each agent actually did.
 
@@ -720,10 +757,17 @@ with st.sidebar:
     # rather than an advertisement.
     agent_status_slot = st.empty()
     agent_status_slot.markdown(_agent_table())
-    spec = presenter_spec()
-    st.caption(f"Presenter model: `{spec}`" if spec
-               else "Presenter model: none configured — cited paragraph is "
-                    "composed rule-based.")
+    # Not `presenter_spec() or rule-based`: the presenter falls back to
+    # whatever model_select finds reachable, so on a host with Ollama running
+    # this caption promised rule-based prose and the run then used llama3.1.
+    configured = presenter_spec()
+    spec = _resolve_spec(configured or None)
+    if spec:
+        how = "configured" if configured else "selected as the cheapest reachable"
+        st.caption(f"Presenter model: `{spec}` — {how}.")
+    else:
+        st.caption("Presenter model: none reachable — cited paragraph is "
+                   "composed rule-based.")
     st.divider()
 
     st.markdown("#### ⚙️ Settings")
@@ -1224,12 +1268,10 @@ elif run_btn and query:
     st.caption(f"{src_label} · {len(presented.evidence)} evidence item(s) cited · {present_secs}s")
 
     if presented.evidence:
-        with st.expander("🔗 Evidence behind the bracketed citations"):
-            for e in presented.evidence:
-                line = f"**[{e.label}]** — {e.title}"
-                if e.url:
-                    line += f" · [open source]({e.url})"
-                st.markdown(line)
+        trace = xai.explain(results["original_query"], presented.text,
+                            presented.evidence)
+        with st.expander("🔎 Why these sources, and which claim rests on which"):
+            st.markdown(_xai_panel(trace))
 
     # ── LOG THE RUN ───────────────────────────────────────
     # Written after the answer exists, so the stored row is the whole run --
