@@ -46,6 +46,11 @@ def _no_env(monkeypatch):
         monkeypatch.delenv(k, raising=False)
 
 
+def _no_model(monkeypatch, spec=None):
+    """Stand in for model_select's probe -- these tests do not touch the network."""
+    monkeypatch.setattr(answer_agent, "_selected_spec", lambda: spec)
+
+
 def test_evidence_labels_carry_source_name_and_date():
     ev = collect_evidence(RESULTS)
     labels = [e.label for e in ev]
@@ -99,10 +104,11 @@ def test_empty_results_say_so_without_inventing():
 
 def test_offline_mode_is_labelled_rule_based(monkeypatch):
     _no_env(monkeypatch)
+    _no_model(monkeypatch)
     out = present_answer("Any critical Linux updates today?", RESULTS)
     assert out.mode == "rule-based"
     assert out.model == ""
-    assert out.note == "no presenter model configured"
+    assert out.note == "no presenter model configured or reachable"
     assert out.evidence
 
 
@@ -206,6 +212,25 @@ def test_env_supplies_the_spec_when_caller_does_not(monkeypatch):
     _patch_client(monkeypatch, _StubClient("prose [Community - r/linux, 2026-08-31]"))
     out = present_answer("q", RESULTS)
     assert out.mode == "llm"
+
+
+def test_model_selection_supplies_the_spec_when_nothing_else_does(monkeypatch):
+    # No caller argument and no env var is the deployed default; the presenter
+    # now asks model_select what is reachable rather than going offline.
+    _no_env(monkeypatch)
+    _no_model(monkeypatch, "stub:model")
+    _patch_client(monkeypatch, _StubClient("prose [Community - r/linux, 2026-08-31]"))
+    out = present_answer("q", RESULTS)
+    assert out.mode == "llm" and out.model == "stub:model"
+
+
+def test_env_beats_model_selection(monkeypatch):
+    # An operator who names a model gets that model, reachable or not -- the
+    # probe is a fallback, not an override.
+    monkeypatch.setenv("PRESENTER_MODEL", "env:model")
+    _no_model(monkeypatch, "stub:model")
+    assert answer_agent._resolve_spec(None) == "env:model"
+    assert answer_agent._resolve_spec("caller:model") == "caller:model"
 
 
 def test_harness_synthesis_prompt_is_reused_not_rewritten():

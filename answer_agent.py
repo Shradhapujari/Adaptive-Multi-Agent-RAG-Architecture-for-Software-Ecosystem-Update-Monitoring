@@ -32,9 +32,11 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Dict, List, Optional
 
 import guardrail
+import model_select
 import vendor
 from agent_rules import rules_block
 
@@ -282,11 +284,24 @@ class PresentedAnswer:
     evidence: List[Evidence] = field(default_factory=list)
 
 
+@lru_cache(maxsize=1)
+def _selected_spec() -> Optional[str]:
+    """Ask model_select what is reachable, once per process.
+
+    The probe is a network round trip and it is paid on the host that has no
+    model at all -- the one where it always fails -- so it is cached rather
+    than repeated per question. A restart is what picks up a model that came
+    up later, which is the same thing the env vars already require.
+    """
+    return model_select.select("present").spec
+
+
 def _resolve_spec(explicit: Optional[str]) -> Optional[str]:
-    """Which model to present with: caller > env > None (offline)."""
+    """Which model to present with: caller > env > whatever is reachable."""
     if explicit:
         return explicit
-    return os.getenv("PRESENTER_MODEL") or os.getenv("MARAG_LLM") or None
+    return (os.getenv("PRESENTER_MODEL") or os.getenv("MARAG_LLM")
+            or _selected_spec())
 
 
 def present_answer(query: str, results: Dict, model_spec: Optional[str] = None,
@@ -329,7 +344,7 @@ def present_answer(query: str, results: Dict, model_spec: Optional[str] = None,
         except Exception as e:  # noqa: BLE001 — any import/transport failure
             note = f"presenter model unavailable ({e})"
     else:
-        note = "no presenter model configured"
+        note = "no presenter model configured or reachable"
 
     return PresentedAnswer(
         deterministic_paragraph(query, evidence, window_note),
