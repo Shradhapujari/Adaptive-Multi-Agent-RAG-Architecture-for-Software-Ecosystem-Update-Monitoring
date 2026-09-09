@@ -36,6 +36,7 @@ from typing import Dict, List, Optional
 
 import guardrail
 import vendor
+from agent_rules import rules_block
 
 __all__ = [
     "Evidence",
@@ -178,7 +179,7 @@ def build_cited_prompt(query: str, evidence: List[Evidence],
                 "using ONLY the sources below.")
     ctx = "\n".join(e.line() for e in evidence) or "No documents retrieved."
     dated = f"\n\nTime frame asked about: {window_note}" if window_note else ""
-    return (f"{base}\n{CITATION_RULE}\n\nQuestion: {query}{dated}\n\n"
+    return (f"{rules_block()}{base}\n{CITATION_RULE}\n\nQuestion: {query}{dated}\n\n"
             f"Sources:\n{ctx}\n\nAnswer:")
 
 
