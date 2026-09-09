@@ -605,7 +605,9 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # comments of the thread that was retrieved for them: this counts what
     # other people answered, it does not infer an answer from the documents.
     results["yesno"] = None
-    if yesno_on and yesno.looks_yesno(query):
+    # `is_title=True`: what the user typed is the question itself, the same
+    # shape a post's title is, not prose with a question somewhere inside it.
+    if yesno_on and yesno.looks_yesno(query, is_title=True):
         thread = yesno.find_thread(query)
         if thread is not None:
             results["yesno"] = {**yesno.tally(thread, unclear_as_no=unclear_as_no),
