@@ -35,12 +35,31 @@ QUESTIONS_API = "https://releasetrain.io/api/reddit/query/questions"
 # few words of address are allowed in front of it. A wh-word opener is not a
 # yes/no question however it continues ("what version is this"), so it is cut
 # first.
-_WH_RE = re.compile(r"^\s*(what|which|how|why|when|where|who|whose)\b", re.I)
-_YESNO_RE = re.compile(
-    r"^\s*(\S+\s+){0,3}?(did|does|do|is|are|was|were|has|have|had|can|could|will|"
-    r"would|should|any\s?(one|body)(\s+else)?)\b",
-    re.I,
-)
+# The auxiliary has to open the text, after at most two of the ways people
+# address a forum before asking. The first version allowed any three words
+# there so that "guys did the latest update..." would match; measured over the
+# frozen 50-question feed (scripts/eval_yesno.py) that slack was half the
+# flags, because it also matches a declarative whose subject precedes its verb
+# -- "I have taken over responsibility...", "W32tm is making me lose my sleep"
+# -- and two of those went on to report a head-count for a troubleshooting
+# post, which is the worst thing this module can do.
+#
+# Scanning every sentence of the body instead was tried and measured worse
+# still (precision 0.50 -> 0.40): a long help post nearly always contains some
+# sentence that opens on an auxiliary.
+#
+# `(?![\w'])` is what stops `can` matching `can't` -- the apostrophe ends the
+# word, so every "Can't set Firefox as default" title used to read as a
+# question.
+_WH = r"(?:what|which|how|why|when|where|who|whose)"
+_FILLER = (r"(?:guys|hey|hi|hello|folks|everyone|all|so|ok|okay|well|also|but|"
+           r"and|edit|ps|quick\s+question|question)[,:]?\s+")
+_AUX = (r"(?:did|does|do|is|are|was|were|has|have|had|can|could|will|would|"
+        r"should|any\s?(?:one|body)(?:\s+else)?)")
+
+_WH_RE = re.compile(rf"^\s*{_WH}\b", re.I)
+_HAS_WH = re.compile(rf"\b{_WH}\b", re.I)
+_YESNO_RE = re.compile(rf"^\s*(?:{_FILLER}){{0,2}}{_AUX}(?![\w'])", re.I)
 
 # Checked in this order: a "no" phrase wins over a "yes" phrase in the same
 # comment, because the no-phrases are negations ("never had the same issue"
@@ -63,9 +82,20 @@ YES_MARKERS = (
 _SKIP_AUTHORS = {"automoderator", "[deleted]", "[removed]", ""}
 
 
-def looks_yesno(question: str) -> bool:
-    """True when the question is phrased to be answerable yes or no."""
-    q = question or ""
+def looks_yesno(question: str, is_title: bool = False) -> bool:
+    """True when the question is phrased to be answerable yes or no.
+
+    `is_title` adds the one rule that holds for titles only: a title ending in
+    a question mark with no wh-word in it is a yes/no question whatever its
+    verb ("No more synced groups for snapcast clients?"). Bodies are excluded
+    from it because a body's trailing fragment ("Especially the Samsung
+    ecosystem with it?") is a continuation of the post, not its question.
+    """
+    q = (question or "").strip()
+    if not q:
+        return False
+    if is_title and q.endswith("?") and not _HAS_WH.search(q):
+        return True
     return not _WH_RE.match(q) and bool(_YESNO_RE.match(q))
 
 
@@ -202,6 +232,19 @@ def _demo() -> None:
     assert looks_yesno("guys did the latest fedora 44 update cause your kernel to delete")
     assert looks_yesno("Anyone else losing grub after the update?")
     assert not looks_yesno("what changed in the fedora 44 update")
+    # Both measured false positives, and both harmful: each went on to report a
+    # head-count for a help request. A contraction is not an auxiliary...
+    assert not looks_yesno("Can't set Firefox as default on Fedora 44 KDE")
+    assert not looks_yesno("Can't quit Chrome on Mac")
+    # ...and a subject in front of the verb makes it a statement.
+    assert not looks_yesno("W32tm is making me lose my sleep")
+    assert not looks_yesno("I have this sensor configured in my zigbee2mqtt setup")
+    assert not looks_yesno("My laptop is repeatedly crashing whenever i play game")
+    # A title that ends in a question mark and names no wh-word is a yes/no
+    # question whatever its verb; the same fragment inside a body is not.
+    assert looks_yesno("No more synced groups for snapcast clients?", is_title=True)
+    assert not looks_yesno("Especially the Samsung ecosystem with it?")
+    assert not looks_yesno("How to get Home Assistant more reliable?", is_title=True)
     assert stance("no issues here, works fine") == "no"
     assert stance("same here, had to reinstall") == "yes"
     print("ok —", verdict_line(t))
