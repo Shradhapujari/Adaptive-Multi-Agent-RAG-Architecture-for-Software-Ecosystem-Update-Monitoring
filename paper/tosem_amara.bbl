@@ -56,11 +56,10 @@
         {adimulam2026}
 \bibfield{author}{\bibinfo{person}{A. Adimulam}, \bibinfo{person}{R. Gupta},
   {and} \bibinfo{person}{S. Kumar}.} \bibinfo{year}{2026}\natexlab{}.
-\newblock \showarticletitle{The Orchestration of Multi-Agent Systems:
+\newblock \bibinfo{title}{The Orchestration of Multi-Agent Systems:
   Architectures, Protocols, and Enterprise Adoption}.
-\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2601.13671}}
-  (\bibinfo{year}{2026}).
 \newblock
+\showeprint[arxiv]{2601.13671}
 \urldef\tempurl%
 \url{https://arxiv.org/abs/2601.13671}
 \showURL{%
@@ -76,7 +75,8 @@
   Relevant: Best Caf{\'e} Near Me; This Paper Is Perfectly Relevant}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 2024 Annual International {ACM}
   {SIGIR} Conference on Research and Development in Information Retrieval in
-  the Asia Pacific Region ({SIGIR-AP})}}. \bibinfo{pages}{32--41}.
+  the Asia Pacific Region ({SIGIR-AP})}}. \bibinfo{publisher}{ACM},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{32--41}.
 \newblock
 \href{https://doi.org/10.1145/3673791.3698431}{doi:\nolinkurl{10.1145/3673791.3698431}}
 
@@ -88,7 +88,8 @@
 \newblock \showarticletitle{Query Difficulty, Robustness, and Selective
   Application of Query Expansion}. In \bibinfo{booktitle}{\emph{Advances in
   Information Retrieval ({ECIR} 2004)}} \emph{(\bibinfo{series}{Lecture Notes
-  in Computer Science})}. \bibinfo{pages}{127--137}.
+  in Computer Science})}. \bibinfo{publisher}{Springer},
+  \bibinfo{address}{Berlin, Heidelberg}, \bibinfo{pages}{127--137}.
 \newblock
 \href{https://doi.org/10.1007/978-3-540-24752-4_10}{doi:\nolinkurl{10.1007/978-3-540-24752-4_10}}
 
@@ -115,15 +116,16 @@
 \newblock \showarticletitle{Improvements that Don't Add Up: Ad-Hoc Retrieval
   Results since 1998}. In \bibinfo{booktitle}{\emph{Proceedings of the 18th
   {ACM} Conference on Information and Knowledge Management ({CIKM})}}.
+  \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
   \bibinfo{pages}{601--610}.
 \newblock
 \href{https://doi.org/10.1145/1645953.1646031}{doi:\nolinkurl{10.1145/1645953.1646031}}
 
 
-\bibitem[Asai et~al\mbox{.}(0000)]%
+\bibitem[Asai et~al\mbox{.}(2023)]%
         {selfrag2023repo}
 \bibfield{author}{\bibinfo{person}{A. Asai} {et~al\mbox{.}}}
-  \bibinfo{year}{[n.\,d.]}\natexlab{}.
+  \bibinfo{year}{2023}\natexlab{}.
 \newblock \bibinfo{title}{{Self-RAG}: Reference Implementation}.
 \newblock
 \urldef\tempurl%
@@ -168,11 +170,10 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{person}{D. Amodei}, \bibinfo{person}{N. Joseph}, \bibinfo{person}{S.
   McCandlish}, \bibinfo{person}{T. Brown}, {and} \bibinfo{person}{J. Kaplan}.}
   \bibinfo{year}{2022}\natexlab{}.
-\newblock \showarticletitle{Constitutional {AI}: Harmlessness from {AI}
+\newblock \bibinfo{title}{Constitutional {AI}: Harmlessness from {AI}
   Feedback}.
-\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2212.08073}}
-  (\bibinfo{year}{2022}).
 \newblock
+\showeprint[arxiv]{2212.08073}
 \urldef\tempurl%
 \url{https://arxiv.org/abs/2212.08073}
 \showURL{%
@@ -226,7 +227,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Retrieval Evaluation with Incomplete Information}.
   In \bibinfo{booktitle}{\emph{Proceedings of the 27th Annual International
   {ACM} {SIGIR} Conference on Research and Development in Information
-  Retrieval}}. \bibinfo{pages}{25--32}.
+  Retrieval}}. \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
+  \bibinfo{pages}{25--32}.
 \newblock
 \href{https://doi.org/10.1145/1008992.1009000}{doi:\nolinkurl{10.1145/1008992.1009000}}
 
@@ -280,7 +282,9 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{{MAIN-RAG}: Multi-Agent Filtering
   Retrieval-Augmented Generation}. In \bibinfo{booktitle}{\emph{Proceedings of
   the 63rd Annual Meeting of the Association for Computational Linguistics
-  (Volume 1: Long Papers)}}. \bibinfo{pages}{2607--2622}.
+  (Volume 1: Long Papers)}}. \bibinfo{publisher}{Association for Computational
+  Linguistics}, \bibinfo{address}{Stroudsburg, PA, USA},
+  \bibinfo{pages}{2607--2622}.
 \newblock
 \href{https://doi.org/10.18653/v1/2025.acl-long.131}{doi:\nolinkurl{10.18653/v1/2025.acl-long.131}}
 
@@ -289,11 +293,10 @@ Retrieved August 2026 from \tempurl}
         {clarke2024cannot}
 \bibfield{author}{\bibinfo{person}{C.~L.~A. Clarke} {and} \bibinfo{person}{L.
   Dietz}.} \bibinfo{year}{2024}\natexlab{}.
-\newblock \showarticletitle{{LLM}-Based Relevance Assessment Still Can't
-  Replace Human Relevance Assessment}.
-\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2412.17156}}
-  (\bibinfo{year}{2024}).
+\newblock \bibinfo{title}{{LLM}-Based Relevance Assessment Still Can't Replace
+  Human Relevance Assessment}.
 \newblock
+\showeprint[arxiv]{2412.17156}
 \urldef\tempurl%
 \url{https://arxiv.org/abs/2412.17156}
 \showURL{%
@@ -316,7 +319,8 @@ Retrieved August 2026 from \tempurl}
 \bibfield{author}{\bibinfo{person}{J. Cohen}.} \bibinfo{year}{1988}\natexlab{}.
 \newblock \bibinfo{booktitle}{\emph{Statistical Power Analysis for the
   Behavioral Sciences} (\bibinfo{edition}{2nd} ed.)}.
-\newblock \bibinfo{publisher}{Lawrence Erlbaum Associates}.
+\newblock \bibinfo{publisher}{Lawrence Erlbaum Associates},
+  \bibinfo{address}{Hillsdale, NJ, USA}.
 \newblock
 \href{https://doi.org/10.4324/9780203771587}{doi:\nolinkurl{10.4324/9780203771587}}
 
@@ -328,6 +332,7 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Reducing the Risk of Query Expansion via Robust
   Constrained Optimization}. In \bibinfo{booktitle}{\emph{Proceedings of the
   18th {ACM} Conference on Information and Knowledge Management ({CIKM})}}.
+  \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
   \bibinfo{pages}{837--846}.
 \newblock
 \href{https://doi.org/10.1145/1645953.1646059}{doi:\nolinkurl{10.1145/1645953.1646059}}
@@ -355,7 +360,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Reciprocal Rank Fusion Outperforms Condorcet and
   Individual Rank Learning Methods}. In \bibinfo{booktitle}{\emph{Proceedings
   of the 32nd International {ACM} {SIGIR} Conference on Research and
-  Development in Information Retrieval}}. \bibinfo{pages}{758--759}.
+  Development in Information Retrieval}}. \bibinfo{publisher}{ACM},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{758--759}.
 \newblock
 \href{https://doi.org/10.1145/1571941.1572114}{doi:\nolinkurl{10.1145/1571941.1572114}}
 
@@ -406,7 +412,9 @@ Retrieved August 2026 from \tempurl}
   Zhang}, {and} \bibinfo{person}{G. Wang}.} \bibinfo{year}{2019}\natexlab{}.
 \newblock \showarticletitle{Towards the Detection of Inconsistencies in Public
   Security Vulnerability Reports}. In \bibinfo{booktitle}{\emph{Proceedings of
-  the 28th {USENIX} Security Symposium}}. \bibinfo{pages}{869--885}.
+  the 28th {USENIX} Security Symposium}}. \bibinfo{publisher}{USENIX
+  Association}, \bibinfo{address}{Berkeley, CA, USA},
+  \bibinfo{pages}{869--885}.
 \newblock
 
 
@@ -418,7 +426,9 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{{RAGAs}: Automated Evaluation of Retrieval
   Augmented Generation}. In \bibinfo{booktitle}{\emph{Proceedings of the 18th
   Conference of the European Chapter of the Association for Computational
-  Linguistics: System Demonstrations}}. \bibinfo{pages}{150--158}.
+  Linguistics: System Demonstrations}}. \bibinfo{publisher}{Association for
+  Computational Linguistics}, \bibinfo{address}{Stroudsburg, PA, USA},
+  \bibinfo{pages}{150--158}.
 \newblock
 \href{https://doi.org/10.18653/v1/2024.eacl-demo.16}{doi:\nolinkurl{10.18653/v1/2024.eacl-demo.16}}
 
@@ -434,6 +444,7 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Perspectives on Large Language Models for Relevance
   Judgment}. In \bibinfo{booktitle}{\emph{Proceedings of the 2023 {ACM} {SIGIR}
   International Conference on Theory of Information Retrieval}}.
+  \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
   \bibinfo{pages}{39--50}.
 \newblock
 \href{https://doi.org/10.1145/3578337.3605136}{doi:\nolinkurl{10.1145/3578337.3605136}}
@@ -461,7 +472,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Are We Really Making Much Progress? A Worrying
   Analysis of Recent Neural Recommendation Approaches}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 13th {ACM} Conference on
-  Recommender Systems ({RecSys})}}. \bibinfo{pages}{101--109}.
+  Recommender Systems ({RecSys})}}. \bibinfo{publisher}{ACM},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{101--109}.
 \newblock
 \href{https://doi.org/10.1145/3298689.3347058}{doi:\nolinkurl{10.1145/3298689.3347058}}
 
@@ -487,7 +499,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Precise Zero-Shot Dense Retrieval without Relevance
   Labels}. In \bibinfo{booktitle}{\emph{Proceedings of the 61st Annual Meeting
   of the Association for Computational Linguistics (Volume 1: Long Papers)}}.
-  \bibinfo{pages}{1762--1777}.
+  \bibinfo{publisher}{Association for Computational Linguistics},
+  \bibinfo{address}{Stroudsburg, PA, USA}, \bibinfo{pages}{1762--1777}.
 \newblock
 \href{https://doi.org/10.18653/v1/2023.acl-long.99}{doi:\nolinkurl{10.18653/v1/2023.acl-long.99}}
 
@@ -499,11 +512,10 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{person}{Y. Bi}, \bibinfo{person}{Y. Dai}, \bibinfo{person}{J. Sun},
   \bibinfo{person}{M. Wang}, {and} \bibinfo{person}{H. Wang}.}
   \bibinfo{year}{2023}\natexlab{b}.
-\newblock \showarticletitle{Retrieval-Augmented Generation for Large Language
+\newblock \bibinfo{title}{Retrieval-Augmented Generation for Large Language
   Models: A Survey}.
-\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2312.10997}}
-  (\bibinfo{year}{2023}).
 \newblock
+\showeprint[arxiv]{2312.10997}
 \urldef\tempurl%
 \url{https://arxiv.org/abs/2312.10997}
 \showURL{%
@@ -516,11 +528,10 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{person}{F. Meng}, \bibinfo{person}{C. Xin}, \bibinfo{person}{Y. Lu},
   \bibinfo{person}{H. Lin}, \bibinfo{person}{X. Han}, \bibinfo{person}{L. Sun},
   {and} \bibinfo{person}{J. Zhou}.} \bibinfo{year}{2025}\natexlab{}.
-\newblock \showarticletitle{{DeepRAG}: Thinking to Retrieve Step by Step for
+\newblock \bibinfo{title}{{DeepRAG}: Thinking to Retrieve Step by Step for
   Large Language Models}.
-\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2502.01142}}
-  (\bibinfo{year}{2025}).
 \newblock
+\showeprint[arxiv]{2502.01142}
 \urldef\tempurl%
 \url{https://arxiv.org/abs/2502.01142}
 \showURL{%
@@ -667,11 +678,9 @@ Retrieved August 2026 from \tempurl}
 \bibfield{author}{\bibinfo{person}{R. Jagerman}, \bibinfo{person}{H. Zhuang},
   \bibinfo{person}{Z. Qin}, \bibinfo{person}{X. Wang}, {and}
   \bibinfo{person}{M. Bendersky}.} \bibinfo{year}{2023}\natexlab{}.
-\newblock \showarticletitle{Query Expansion by Prompting Large Language
-  Models}.
-\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2305.03653}}
-  (\bibinfo{year}{2023}).
+\newblock \bibinfo{title}{Query Expansion by Prompting Large Language Models}.
 \newblock
+\showeprint[arxiv]{2305.03653}
 \urldef\tempurl%
 \url{https://arxiv.org/abs/2305.03653}
 \showURL{%
@@ -687,7 +696,9 @@ Retrieved August 2026 from \tempurl}
   Retrieval-Augmented Large Language Models through Question Complexity}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 2024 Conference of the North
   American Chapter of the Association for Computational Linguistics: Human
-  Language Technologies (Volume 1: Long Papers)}}. \bibinfo{pages}{7036--7050}.
+  Language Technologies (Volume 1: Long Papers)}}.
+  \bibinfo{publisher}{Association for Computational Linguistics},
+  \bibinfo{address}{Stroudsburg, PA, USA}, \bibinfo{pages}{7036--7050}.
 \newblock
 \href{https://doi.org/10.18653/v1/2024.naacl-long.389}{doi:\nolinkurl{10.18653/v1/2024.naacl-long.389}}
 
@@ -701,7 +712,9 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{year}{2023}\natexlab{}.
 \newblock \showarticletitle{Active Retrieval Augmented Generation}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 2023 Conference on Empirical
-  Methods in Natural Language Processing}}. \bibinfo{pages}{7969--7992}.
+  Methods in Natural Language Processing}}. \bibinfo{publisher}{Association for
+  Computational Linguistics}, \bibinfo{address}{Stroudsburg, PA, USA},
+  \bibinfo{pages}{7969--7992}.
 \newblock
 \href{https://doi.org/10.18653/v1/2023.emnlp-main.495}{doi:\nolinkurl{10.18653/v1/2023.emnlp-main.495}}
 
@@ -728,7 +741,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{{FlashRAG}: A Modular Toolkit for Efficient
   Retrieval-Augmented Generation Research}. In
   \bibinfo{booktitle}{\emph{Companion Proceedings of the {ACM} Web Conference
-  2025 ({WWW} '25), Resource Track}}. \bibinfo{pages}{737--740}.
+  2025 ({WWW} '25), Resource Track}}. \bibinfo{publisher}{ACM},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{737--740}.
 \newblock
 \href{https://doi.org/10.1145/3701716.3715313}{doi:\nolinkurl{10.1145/3701716.3715313}}
 
@@ -754,7 +768,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Are Mutants a Valid Substitute for Real Faults in
   Software Testing?}. In \bibinfo{booktitle}{\emph{Proceedings of the 22nd
   {ACM} {SIGSOFT} International Symposium on Foundations of Software
-  Engineering ({FSE})}}. \bibinfo{pages}{654--665}.
+  Engineering ({FSE})}}. \bibinfo{publisher}{ACM}, \bibinfo{address}{New York,
+  NY, USA}, \bibinfo{pages}{654--665}.
 \newblock
 \href{https://doi.org/10.1145/2635868.2635929}{doi:\nolinkurl{10.1145/2635868.2635929}}
 
@@ -767,7 +782,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Is {Stack} {Overflow} Obsolete? An Empirical Study
   of the Characteristics of {ChatGPT} Answers to {Stack} {Overflow} Questions}.
   In \bibinfo{booktitle}{\emph{Proceedings of the {CHI} Conference on Human
-  Factors in Computing Systems}}. \bibinfo{pages}{1--17}.
+  Factors in Computing Systems}}. \bibinfo{publisher}{ACM},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{1--17}.
 \newblock
 \href{https://doi.org/10.1145/3613904.3642596}{doi:\nolinkurl{10.1145/3613904.3642596}}
 
@@ -781,7 +797,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Dense Passage Retrieval for Open-Domain Question
   Answering}. In \bibinfo{booktitle}{\emph{Proceedings of the 2020 Conference
   on Empirical Methods in Natural Language Processing ({EMNLP})}}.
-  \bibinfo{pages}{6769--6781}.
+  \bibinfo{publisher}{Association for Computational Linguistics},
+  \bibinfo{address}{Stroudsburg, PA, USA}, \bibinfo{pages}{6769--6781}.
 \newblock
 \href{https://doi.org/10.18653/v1/2020.emnlp-main.550}{doi:\nolinkurl{10.18653/v1/2020.emnlp-main.550}}
 
@@ -794,6 +811,7 @@ Retrieved August 2026 from \tempurl}
   via Contextualized Late Interaction over {BERT}}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 43rd International {ACM} {SIGIR}
   Conference on Research and Development in Information Retrieval}}.
+  \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
   \bibinfo{pages}{39--48}.
 \newblock
 \href{https://doi.org/10.1145/3397271.3401075}{doi:\nolinkurl{10.1145/3397271.3401075}}
@@ -852,11 +870,9 @@ Retrieved August 2026 from \tempurl}
   Chen}, \bibinfo{person}{J. Du}, \bibinfo{person}{Y. Zhang},
   \bibinfo{person}{F. Zhang}, \bibinfo{person}{D. Zhang}, {and}
   \bibinfo{person}{Y. Liu}.} \bibinfo{year}{2024}\natexlab{}.
-\newblock \showarticletitle{{DMQR-RAG}: Diverse Multi-Query Rewriting for
-  {RAG}}.
-\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2411.13154}}
-  (\bibinfo{year}{2024}).
+\newblock \bibinfo{title}{{DMQR-RAG}: Diverse Multi-Query Rewriting for {RAG}}.
 \newblock
+\showeprint[arxiv]{2411.13154}
 \urldef\tempurl%
 \url{https://arxiv.org/abs/2411.13154}
 \showURL{%
@@ -934,7 +950,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Query Rewriting in Retrieval-Augmented Large
   Language Models}. In \bibinfo{booktitle}{\emph{Proceedings of the 2023
   Conference on Empirical Methods in Natural Language Processing}}.
-  \bibinfo{pages}{5303--5315}.
+  \bibinfo{publisher}{Association for Computational Linguistics},
+  \bibinfo{address}{Stroudsburg, PA, USA}, \bibinfo{pages}{5303--5315}.
 \newblock
 \href{https://doi.org/10.18653/v1/2023.emnlp-main.322}{doi:\nolinkurl{10.18653/v1/2023.emnlp-main.322}}
 
@@ -960,7 +977,9 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{person}{N. Zhang}.} \bibinfo{year}{2024}\natexlab{}.
 \newblock \showarticletitle{{RaFe}: Ranking Feedback Improves Query Rewriting
   for {RAG}}. In \bibinfo{booktitle}{\emph{Findings of the Association for
-  Computational Linguistics: {EMNLP} 2024}}. \bibinfo{pages}{884--901}.
+  Computational Linguistics: {EMNLP} 2024}}. \bibinfo{publisher}{Association
+  for Computational Linguistics}, \bibinfo{address}{Stroudsburg, PA, USA},
+  \bibinfo{pages}{884--901}.
 \newblock
 \href{https://doi.org/10.18653/v1/2024.findings-emnlp.49}{doi:\nolinkurl{10.18653/v1/2024.findings-emnlp.49}}
 
@@ -985,6 +1004,7 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Improving Automatic Query Expansion}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 21st Annual International {ACM}
   {SIGIR} Conference on Research and Development in Information Retrieval}}.
+  \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
   \bibinfo{pages}{206--214}.
 \newblock
 \href{https://doi.org/10.1145/290941.290995}{doi:\nolinkurl{10.1145/290941.290995}}
@@ -1021,21 +1041,19 @@ Retrieved August 2026 from \tempurl}
         {nguyen2025marag}
 \bibfield{author}{\bibinfo{person}{T. Nguyen}, \bibinfo{person}{P. Chin}, {and}
   \bibinfo{person}{Y.-W. Tai}.} \bibinfo{year}{2025}\natexlab{}.
-\newblock \showarticletitle{{MA-RAG}: Multi-Agent Retrieval-Augmented
-  Generation via Collaborative Chain-of-Thought Reasoning}.
-\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2505.20096}}
-  (\bibinfo{year}{2025}).
+\newblock \bibinfo{title}{{MA-RAG}: Multi-Agent Retrieval-Augmented Generation
+  via Collaborative Chain-of-Thought Reasoning}.
 \newblock
+\showeprint[arxiv]{2505.20096}
 
 
 \bibitem[Nogueira and Cho(2019)]%
         {nogueira2019monobert}
 \bibfield{author}{\bibinfo{person}{R. Nogueira} {and} \bibinfo{person}{K.
   Cho}.} \bibinfo{year}{2019}\natexlab{}.
-\newblock \showarticletitle{Passage Re-ranking with {BERT}}.
-\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:1901.04085}}
-  (\bibinfo{year}{2019}).
+\newblock \bibinfo{title}{Passage Re-ranking with {BERT}}.
 \newblock
+\showeprint[arxiv]{1901.04085}
 \urldef\tempurl%
 \url{https://arxiv.org/abs/1901.04085}
 \showURL{%
@@ -1050,7 +1068,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Document Ranking with a Pretrained
   Sequence-to-Sequence Model}. In \bibinfo{booktitle}{\emph{Findings of the
   Association for Computational Linguistics: {EMNLP} 2020}}.
-  \bibinfo{pages}{708--718}.
+  \bibinfo{publisher}{Association for Computational Linguistics},
+  \bibinfo{address}{Stroudsburg, PA, USA}, \bibinfo{pages}{708--718}.
 \newblock
 \href{https://doi.org/10.18653/v1/2020.findings-emnlp.63}{doi:\nolinkurl{10.18653/v1/2020.findings-emnlp.63}}
 
@@ -1093,7 +1112,9 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{{KILT}: A Benchmark for Knowledge Intensive
   Language Tasks}. In \bibinfo{booktitle}{\emph{Proceedings of the 2021
   Conference of the North American Chapter of the Association for Computational
-  Linguistics}}. \bibinfo{pages}{2523--2544}.
+  Linguistics}}. \bibinfo{publisher}{Association for Computational
+  Linguistics}, \bibinfo{address}{Stroudsburg, PA, USA},
+  \bibinfo{pages}{2523--2544}.
 \newblock
 \href{https://doi.org/10.18653/v1/2021.naacl-main.200}{doi:\nolinkurl{10.18653/v1/2021.naacl-main.200}}
 
@@ -1109,7 +1130,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{{ChatDev}: Communicative Agents for Software
   Development}. In \bibinfo{booktitle}{\emph{Proceedings of the 62nd Annual
   Meeting of the Association for Computational Linguistics (Volume 1: Long
-  Papers)}}. \bibinfo{pages}{15174--15186}.
+  Papers)}}. \bibinfo{publisher}{Association for Computational Linguistics},
+  \bibinfo{address}{Stroudsburg, PA, USA}, \bibinfo{pages}{15174--15186}.
 \newblock
 \href{https://doi.org/10.18653/v1/2024.acl-long.810}{doi:\nolinkurl{10.18653/v1/2024.acl-long.810}}
 
@@ -1121,7 +1143,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Know What You Don't Know: Unanswerable Questions
   for {SQuAD}}. In \bibinfo{booktitle}{\emph{Proceedings of the 56th Annual
   Meeting of the Association for Computational Linguistics (Volume 2: Short
-  Papers)}}. \bibinfo{pages}{784--789}.
+  Papers)}}. \bibinfo{publisher}{Association for Computational Linguistics},
+  \bibinfo{address}{Stroudsburg, PA, USA}, \bibinfo{pages}{784--789}.
 \newblock
 \href{https://doi.org/10.18653/v1/P18-2124}{doi:\nolinkurl{10.18653/v1/P18-2124}}
 
@@ -1145,7 +1168,9 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Multilingual Retrieval-Augmented Generation for
   Knowledge-Intensive Question Answering Task}. In
   \bibinfo{booktitle}{\emph{Findings of the Association for Computational
-  Linguistics: {EACL} 2026}}. \bibinfo{pages}{697--716}.
+  Linguistics: {EACL} 2026}}. \bibinfo{publisher}{Association for Computational
+  Linguistics}, \bibinfo{address}{Stroudsburg, PA, USA},
+  \bibinfo{pages}{697--716}.
 \newblock
 \href{https://doi.org/10.18653/v1/2026.findings-eacl.35}{doi:\nolinkurl{10.18653/v1/2026.findings-eacl.35}}
 
@@ -1159,7 +1184,9 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{year}{2025}\natexlab{}.
 \newblock \showarticletitle{Towards Reliable Retrieval in {RAG} Systems for
   Large Legal Datasets}. In \bibinfo{booktitle}{\emph{Proceedings of the
-  Natural Legal Language Processing Workshop 2025}}. \bibinfo{pages}{17--30}.
+  Natural Legal Language Processing Workshop 2025}}.
+  \bibinfo{publisher}{Association for Computational Linguistics},
+  \bibinfo{address}{Stroudsburg, PA, USA}, \bibinfo{pages}{17--30}.
 \newblock
 \href{https://doi.org/10.18653/v1/2025.nllp-1.3}{doi:\nolinkurl{10.18653/v1/2025.nllp-1.3}}
 
@@ -1194,21 +1221,20 @@ Retrieved August 2026 from \tempurl}
         {roman2026}
 \bibfield{author}{\bibinfo{person}{A. Roman} {and} \bibinfo{person}{J. Roman}.}
   \bibinfo{year}{2026}\natexlab{}.
-\newblock \showarticletitle{Orchestral {AI}: A Framework for Agent
+\newblock \bibinfo{title}{Orchestral {AI}: A Framework for Agent
   Orchestration}.
-\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2601.02577}}
-  (\bibinfo{year}{2026}).
 \newblock
+\showeprint[arxiv]{2601.02577}
 \urldef\tempurl%
 \url{https://arxiv.org/abs/2601.02577}
 \showURL{%
 \tempurl}
 
 
-\bibitem[{RUC-NLPIR}(0000)]%
+\bibitem[{RUC-NLPIR}(2024)]%
         {flashrag2025repo}
 \bibfield{author}{\bibinfo{person}{{RUC-NLPIR}}.}
-  \bibinfo{year}{[n.\,d.]}\natexlab{}.
+  \bibinfo{year}{2024}\natexlab{}.
 \newblock \bibinfo{title}{{FlashRAG}: Reference Implementation ({MIT}
   License)}.
 \newblock
@@ -1227,7 +1253,8 @@ Retrieved August 2026 from \tempurl}
   Retrieval-Augmented Generation Systems}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 2024 Conference of the North
   American Chapter of the Association for Computational Linguistics}}.
-  \bibinfo{pages}{338--354}.
+  \bibinfo{publisher}{Association for Computational Linguistics},
+  \bibinfo{address}{Stroudsburg, PA, USA}, \bibinfo{pages}{338--354}.
 \newblock
 \href{https://doi.org/10.18653/v1/2024.naacl-long.20}{doi:\nolinkurl{10.18653/v1/2024.naacl-long.20}}
 
@@ -1240,7 +1267,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{{Reflexion}: Language Agents with Verbal
   Reinforcement Learning}. In \bibinfo{booktitle}{\emph{Advances in Neural
   Information Processing Systems 36 ({NeurIPS} 2023)}}.
-  \bibinfo{pages}{8634--8652}.
+  \bibinfo{publisher}{Curran Associates, Inc.}, \bibinfo{address}{Red Hook, NY,
+  USA}, \bibinfo{pages}{8634--8652}.
 \newblock
 
 
@@ -1302,7 +1330,8 @@ Retrieved August 2026 from \tempurl}
   Mixed-Methods Study of Developers' Use of {GitHub} {Copilot} and {ChatGPT}}.
   In \bibinfo{booktitle}{\emph{Companion Proceedings of the 33rd {ACM}
   International Conference on the Foundations of Software Engineering
-  ({FSE})}}. \bibinfo{pages}{1325--1332}.
+  ({FSE})}}. \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
+  \bibinfo{pages}{1325--1332}.
 \newblock
 \href{https://doi.org/10.1145/3696630.3730566}{doi:\nolinkurl{10.1145/3696630.3730566}}
 
@@ -1316,7 +1345,9 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Is {ChatGPT} Good at Search? Investigating Large
   Language Models as Re-Ranking Agents}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 2023 Conference on Empirical
-  Methods in Natural Language Processing}}. \bibinfo{pages}{14918--14937}.
+  Methods in Natural Language Processing}}. \bibinfo{publisher}{Association for
+  Computational Linguistics}, \bibinfo{address}{Stroudsburg, PA, USA},
+  \bibinfo{pages}{14918--14937}.
 \newblock
 \href{https://doi.org/10.18653/v1/2023.emnlp-main.923}{doi:\nolinkurl{10.18653/v1/2023.emnlp-main.923}}
 
@@ -1330,6 +1361,8 @@ Retrieved August 2026 from \tempurl}
   Evaluation of Information Retrieval Models}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 35th Conference on Neural
   Information Processing Systems, Datasets and Benchmarks Track}}.
+  \bibinfo{publisher}{Curran Associates, Inc.}, \bibinfo{address}{Red Hook, NY,
+  USA}.
 \newblock
 
 
@@ -1341,7 +1374,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Large Language Models Can Accurately Predict
   Searcher Preferences}. In \bibinfo{booktitle}{\emph{Proceedings of the 47th
   International {ACM} {SIGIR} Conference on Research and Development in
-  Information Retrieval}}. \bibinfo{pages}{1930--1940}.
+  Information Retrieval}}. \bibinfo{publisher}{ACM}, \bibinfo{address}{New
+  York, NY, USA}, \bibinfo{pages}{1930--1940}.
 \newblock
 \href{https://doi.org/10.1145/3626772.3657707}{doi:\nolinkurl{10.1145/3626772.3657707}}
 
@@ -1364,11 +1398,10 @@ Retrieved August 2026 from \tempurl}
 \bibfield{author}{\bibinfo{person}{S. Upadhyay}, \bibinfo{person}{R. Pradeep},
   \bibinfo{person}{N. Thakur}, \bibinfo{person}{N. Craswell}, {and}
   \bibinfo{person}{J. Lin}.} \bibinfo{year}{2024}\natexlab{}.
-\newblock \showarticletitle{{UMBRELA}: {UMbrela} is the (Open-Source
-  Reproduction of the) {Bing} {RELevance} Assessor}.
-\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2406.06519}}
-  (\bibinfo{year}{2024}).
+\newblock \bibinfo{title}{{UMBRELA}: {UMbrela} is the (Open-Source Reproduction
+  of the) {Bing} {RELevance} Assessor}.
 \newblock
+\showeprint[arxiv]{2406.06519}
 \urldef\tempurl%
 \url{https://arxiv.org/abs/2406.06519}
 \showURL{%
@@ -1399,7 +1432,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{{FreshLLMs}: Refreshing Large Language Models with
   Search Engine Augmentation}. In \bibinfo{booktitle}{\emph{Findings of the
   Association for Computational Linguistics: {ACL} 2024}}.
-  \bibinfo{pages}{13697--13720}.
+  \bibinfo{publisher}{Association for Computational Linguistics},
+  \bibinfo{address}{Stroudsburg, PA, USA}, \bibinfo{pages}{13697--13720}.
 \newblock
 \href{https://doi.org/10.18653/v1/2024.findings-acl.813}{doi:\nolinkurl{10.18653/v1/2024.findings-acl.813}}
 
@@ -1411,7 +1445,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{{Query2doc}: Query Expansion with Large Language
   Models}. In \bibinfo{booktitle}{\emph{Proceedings of the 2023 Conference on
   Empirical Methods in Natural Language Processing}}.
-  \bibinfo{pages}{9414--9423}.
+  \bibinfo{publisher}{Association for Computational Linguistics},
+  \bibinfo{address}{Stroudsburg, PA, USA}, \bibinfo{pages}{9414--9423}.
 \newblock
 \href{https://doi.org/10.18653/v1/2023.emnlp-main.585}{doi:\nolinkurl{10.18653/v1/2023.emnlp-main.585}}
 
@@ -1453,7 +1488,9 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{When Do Generative Query and Document Expansions
   Fail? A Comprehensive Study Across Methods, Retrievers, and Datasets}. In
   \bibinfo{booktitle}{\emph{Findings of the Association for Computational
-  Linguistics: {EACL} 2024}}. \bibinfo{pages}{1987--2003}.
+  Linguistics: {EACL} 2024}}. \bibinfo{publisher}{Association for Computational
+  Linguistics}, \bibinfo{address}{Stroudsburg, PA, USA},
+  \bibinfo{pages}{1987--2003}.
 \newblock
 \href{https://doi.org/10.18653/v1/2024.findings-eacl.134}{doi:\nolinkurl{10.18653/v1/2024.findings-eacl.134}}
 
@@ -1479,11 +1516,10 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{person}{A.~H. Awadallah}, \bibinfo{person}{R.~W. White},
   \bibinfo{person}{D. Burger}, {and} \bibinfo{person}{C. Wang}.}
   \bibinfo{year}{2023}\natexlab{}.
-\newblock \showarticletitle{{AutoGen}: Enabling Next-Gen {LLM} Applications via
+\newblock \bibinfo{title}{{AutoGen}: Enabling Next-Gen {LLM} Applications via
   Multi-Agent Conversation}.
-\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2308.08155}}
-  (\bibinfo{year}{2023}).
 \newblock
+\showeprint[arxiv]{2308.08155}
 \urldef\tempurl%
 \url{https://arxiv.org/abs/2308.08155}
 \showURL{%
@@ -1525,7 +1561,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Query Expansion Using Local and Global Document
   Analysis}. In \bibinfo{booktitle}{\emph{Proceedings of the 19th Annual
   International {ACM} {SIGIR} Conference on Research and Development in
-  Information Retrieval}}. \bibinfo{pages}{4--11}.
+  Information Retrieval}}. \bibinfo{publisher}{ACM}, \bibinfo{address}{New
+  York, NY, USA}, \bibinfo{pages}{4--11}.
 \newblock
 \href{https://doi.org/10.1145/243199.243202}{doi:\nolinkurl{10.1145/243199.243202}}
 
@@ -1535,10 +1572,9 @@ Retrieved August 2026 from \tempurl}
 \bibfield{author}{\bibinfo{person}{S.-Q. Yan}, \bibinfo{person}{J.-C. Gu},
   \bibinfo{person}{Y. Zhu}, {and} \bibinfo{person}{Z.-H. Ling}.}
   \bibinfo{year}{2024}\natexlab{}.
-\newblock \showarticletitle{Corrective Retrieval Augmented Generation}.
-\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2401.15884}}
-  (\bibinfo{year}{2024}).
+\newblock \bibinfo{title}{Corrective Retrieval Augmented Generation}.
 \newblock
+\showeprint[arxiv]{2401.15884}
 \urldef\tempurl%
 \url{https://arxiv.org/abs/2401.15884}
 \showURL{%
@@ -1561,7 +1597,8 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{person}{X.~L. Dong}.} \bibinfo{year}{2024}\natexlab{}.
 \newblock \showarticletitle{{CRAG} --- Comprehensive {RAG} Benchmark}. In
   \bibinfo{booktitle}{\emph{Advances in Neural Information Processing Systems
-  37 ({NeurIPS} 2024)}}. \bibinfo{pages}{10470--10490}.
+  37 ({NeurIPS} 2024)}}. \bibinfo{publisher}{Curran Associates, Inc.},
+  \bibinfo{address}{Red Hook, NY, USA}, \bibinfo{pages}{10470--10490}.
 \newblock
 
 
@@ -1585,11 +1622,10 @@ Retrieved August 2026 from \tempurl}
 \bibfield{author}{\bibinfo{person}{Z. Yang}, \bibinfo{person}{X. Han},
   \bibinfo{person}{Q. Ma}, \bibinfo{person}{J. Chen}, {and} \bibinfo{person}{A.
   Shrivastava}.} \bibinfo{year}{2026}\natexlab{}.
-\newblock \showarticletitle{Superintelligent Retrieval Agent: The Next Frontier
+\newblock \bibinfo{title}{Superintelligent Retrieval Agent: The Next Frontier
   of Agentic Retrieval}.
-\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2605.06647}}
-  (\bibinfo{year}{2026}).
 \newblock
+\showeprint[arxiv]{2605.06647}
 \urldef\tempurl%
 \url{https://arxiv.org/abs/2605.06647}
 \showURL{%
@@ -1609,10 +1645,10 @@ Retrieved August 2026 from \tempurl}
 \href{https://doi.org/10.1145/3180155.3180260}{doi:\nolinkurl{10.1145/3180155.3180260}}
 
 
-\bibitem[Zhang et~al\mbox{.}(0000)]%
+\bibitem[Zhang et~al\mbox{.}(2024a)]%
         {raglab2024repo}
 \bibfield{author}{\bibinfo{person}{X. Zhang} {et~al\mbox{.}}}
-  \bibinfo{year}{[n.\,d.]}\natexlab{}.
+  \bibinfo{year}{2024}\natexlab{a}.
 \newblock \bibinfo{title}{{RAGLAB}: Reference Implementation}.
 \newblock
 \urldef\tempurl%
@@ -1621,31 +1657,33 @@ Retrieved August 2026 from \tempurl}
 Retrieved August 2026 from \tempurl}
 
 
-\bibitem[Zhang et~al\mbox{.}(2024b)]%
+\bibitem[Zhang et~al\mbox{.}(2024c)]%
         {zhang2024raglab}
 \bibfield{author}{\bibinfo{person}{X. Zhang}, \bibinfo{person}{Y. Song},
   \bibinfo{person}{Y. Wang}, \bibinfo{person}{S. Tang}, \bibinfo{person}{X.
   Li}, \bibinfo{person}{Z. Zeng}, \bibinfo{person}{Z. Wu}, \bibinfo{person}{W.
   Ye}, \bibinfo{person}{W. Xu}, \bibinfo{person}{Y. Zhang}, \bibinfo{person}{X.
   Dai}, \bibinfo{person}{S. Zhang}, {and} \bibinfo{person}{Q. Wen}.}
-  \bibinfo{year}{2024}\natexlab{b}.
+  \bibinfo{year}{2024}\natexlab{c}.
 \newblock \showarticletitle{{RAGLAB}: A Modular and Research-Oriented Unified
   Framework for Retrieval-Augmented Generation}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 2024 Conference on Empirical
   Methods in Natural Language Processing: System Demonstrations}}.
-  \bibinfo{pages}{408--418}.
+  \bibinfo{publisher}{Association for Computational Linguistics},
+  \bibinfo{address}{Stroudsburg, PA, USA}, \bibinfo{pages}{408--418}.
 \newblock
 \href{https://doi.org/10.18653/v1/2024.emnlp-demo.43}{doi:\nolinkurl{10.18653/v1/2024.emnlp-demo.43}}
 
 
-\bibitem[Zhang et~al\mbox{.}(2024a)]%
+\bibitem[Zhang et~al\mbox{.}(2024b)]%
         {zhang2024autocoderover}
 \bibfield{author}{\bibinfo{person}{Y. Zhang}, \bibinfo{person}{H. Ruan},
   \bibinfo{person}{Z. Fan}, {and} \bibinfo{person}{A. Roychoudhury}.}
-  \bibinfo{year}{2024}\natexlab{a}.
+  \bibinfo{year}{2024}\natexlab{b}.
 \newblock \showarticletitle{{AutoCodeRover}: Autonomous Program Improvement}.
   In \bibinfo{booktitle}{\emph{Proceedings of the 33rd {ACM} {SIGSOFT}
   International Symposium on Software Testing and Analysis ({ISSTA})}}.
+  \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
   \bibinfo{pages}{1592--1604}.
 \newblock
 \href{https://doi.org/10.1145/3650212.3680384}{doi:\nolinkurl{10.1145/3650212.3680384}}
@@ -1674,11 +1712,10 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{person}{Y. Wu}, \bibinfo{person}{T. Xu}, \bibinfo{person}{B. Dong},
   \bibinfo{person}{H. Zhu}, \bibinfo{person}{R. Huang}, {and}
   \bibinfo{person}{G. Yu}.} \bibinfo{year}{2026}\natexlab{}.
-\newblock \showarticletitle{{SkillRouter}: Skill Routing for {LLM} Agents at
+\newblock \bibinfo{title}{{SkillRouter}: Skill Routing for {LLM} Agents at
   Scale}.
-\newblock \bibinfo{journal}{\emph{arXiv preprint arXiv:2603.22455}}
-  (\bibinfo{year}{2026}).
 \newblock
+\showeprint[arxiv]{2603.22455}
 \urldef\tempurl%
 \url{https://arxiv.org/abs/2603.22455}
 \showURL{%
@@ -1712,7 +1749,7 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{year}{2025}\natexlab{}.
 \newblock \showarticletitle{Agent-as-a-Judge: Evaluate Agents with Agents}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 42nd International Conference on
-  Machine Learning ({ICML})}}.
+  Machine Learning ({ICML})}}. \bibinfo{publisher}{PMLR}.
 \newblock
 
 
@@ -1723,7 +1760,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Query-Drift Prevention for Robust Query Expansion}.
   In \bibinfo{booktitle}{\emph{Proceedings of the 31st Annual International
   {ACM} {SIGIR} Conference on Research and Development in Information
-  Retrieval}}. \bibinfo{pages}{825--826}.
+  Retrieval}}. \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
+  \bibinfo{pages}{825--826}.
 \newblock
 \href{https://doi.org/10.1145/1390334.1390524}{doi:\nolinkurl{10.1145/1390334.1390524}}
 
@@ -1734,7 +1772,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{How Reliable are the Results of Large-Scale
   Information Retrieval Experiments?}. In \bibinfo{booktitle}{\emph{Proceedings
   of the 21st Annual International {ACM} {SIGIR} Conference on Research and
-  Development in Information Retrieval}}. \bibinfo{pages}{307--314}.
+  Development in Information Retrieval}}. \bibinfo{publisher}{ACM},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{307--314}.
 \newblock
 \href{https://doi.org/10.1145/290941.291014}{doi:\nolinkurl{10.1145/290941.291014}}
 
