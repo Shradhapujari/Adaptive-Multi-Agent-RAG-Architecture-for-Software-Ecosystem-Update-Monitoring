@@ -5,9 +5,10 @@ Living handoff note. Anyone (or any session) starting work reads this first, the
 what you're picking up. **Update this file at the end of a work session**, not
 just the code.
 
-Last updated: **2026-09-03** (Week 2 update — see §10, appended at the end; the
-sections above it are the 2026-08-31 snapshot from the infra/eval-side session
-and are kept verbatim so the record of what was believed when stays readable).
+Last updated: **2026-09-09** (Week 3 update — see §11, appended at the end;
+§10 is the Week 2 update and the sections above it are the 2026-08-31 snapshot
+from the infra/eval-side session, all kept verbatim so the record of what was
+believed when stays readable).
 The paper-side session should re-check `HANDOFF.md`'s own "Last updated" line
 separately — the two docs are drifting apart and someone should merge or
 clearly split them.
@@ -377,3 +378,235 @@ labelling of the rule-based path is working as `docs/Deployment.md` describes.
    asset and none of them are archived. `corpus_snapshot_b300_full_0901` is 84
    MB / 7,899 files.
 4. **`HANDOFF.md` vs this file.** Still drifting. Merge or split them.
+
+
+---
+
+## 11. Week 3 update — 2026-09-09 (COMP 291 Week 3, Sep 7 – 11)
+
+Written for the Thursday 09-10 implementation review; deck at
+`slides/2026-09-10-review.pptx` (outside git, per §10.5). Everything below is
+checked against a merge commit or a command output, per §6. Main is at
+**`d43b4ef`**, four PRs merged this week (#18, #19, #20, #21), test suite
+**642 passed, 1 skipped** from a fresh worktree — the skip is
+`test_run_artifacts.py`, which needs run directories a clean checkout has none
+of.
+
+The through-line: the pipeline retrieved competently and answered badly. Every
+item below is about that gap.
+
+### 11.1 The demo now answers a yes/no question with a count
+
+A large share of the update questions in the lake take a one-word answer.
+*"guys did the latest fedora 44 update ... cause your kernel to delete and also
+grub?"* (r/Fedora `1w0n4ik`) does not want a synthesised paragraph; it wants a
+count of how many other people had it happen.
+
+`yesno.py` retrieves that thread off `/api/reddit/query/questions` — which
+returns comments inline, so one call is the whole retrieval — ranks the pool
+with the BM25 reranker the pipeline already uses, and tallies the commenters
+one vote each. The asker is never counted among the answers: the question is
+theirs and their follow-ups are the report being checked, so they are reported
+separately. Answer on that thread: **No — No (2 users) · Yes (0 users)**.
+
+Classification is rule-based, not LLM, for the same reason the presenter
+degrades (§10.4): the deployed host has no Ollama, and a stance tally that
+returns "unclear" everywhere on the host the demo actually runs on is not a
+feature. Every count traces to the comment and the phrase that produced it,
+and the UI shows both.
+
+Silence is not a no. A commenter who neither confirms nor denies is `unclear`,
+and reading that as a no is a claim about what a comment does *not* say — so
+it is a sidebar switch, off by default. With it on the same thread reads
+No (4 users) and the verdict line says how many of the no's came from silence.
+
+### 11.2 The 52-user survey now weights the evaluator
+
+The evaluator scored how many documents came back and how well their words
+overlapped the question. Nothing in it knew what people want out of an update
+notice. The 2024 study (SE4CPS/SDIoTSec25, n=52) does. `survey.py` folds its
+three multi-select columns and its free text into six priorities, counted from
+the CSV on every run rather than hardcoded:
+
+| Priority | Respondents |
+|---|---:|
+| Update size & install time | 47/52 |
+| Performance | 40/52 |
+| Security & urgency | 38/52 |
+| Stability & bug fixes | 35/52 |
+| New features | 35/52 |
+| Knowing what changed | 23/52 |
+
+A run is scored by how much of that *weight* its documents address —
+respondent-weighted, not a flat fraction of six buckets. Blended 0.7 volume /
+0.3 fit, with the count-only score kept alongside so the toggle's effect is
+visible rather than merely applied. On the Fedora question, quality **0.13 →
+0.30** with fit 0.68.
+
+Hand-written is only the map from a survey option to the vocabulary documents
+use for it (`"Size"` → `download`, `MB`); no amount of survey data supplies
+that, so it sits in one dict per priority where it can be argued with. The CSV
+is vendored under `data/` — a run should not depend on a GitHub raw URL, and a
+fixed file is what makes the number reproducible.
+
+### 11.3 The single-agent baseline runs from the UI
+
+"Multi-agent helps" was a claim the audience had to take on trust while looking
+at a screen with nothing to compare against. A sidebar **Answering mode**
+picker now runs either arm on the same question. The baseline is
+`eval_harness.generators.SingleAgentGenerator` — the object §10.1's comparison
+already scores — not a reimplementation, which would be a strawman written to
+lose and would make the demo describe something other than the measured
+system. On the Fedora question:
+
+  * `single_agent` — "The sources provided do not indicate that the latest
+    Fedora 44 update caused a kernel or GRUB deletion."
+  * multi-agent — **No — No (2 users) · Yes (0 users)**, off the thread's own
+    comments, with the four commenters shown.
+
+Both are honest about their evidence; only one answers the question.
+
+### 11.4 A wrong citation, and the fallback that manufactured it
+
+Asked whether a Fedora update deleted a kernel and grub, the answer cited
+**"How to limit battery charge?" [Community – r/linuxquestions]** as its
+community evidence.
+
+`/api/reddit/query/positive` ignores its `q` parameter — re-confirmed
+2026-09-09 across `q`, `search`, `title` and `where`, all returning the same
+50-row global feed — so `vendor.filter_community` is the only thing between
+that feed and a citation. It kept a post on its subreddit's product or a
+product name in its title. Both are statements about the *product*; neither is
+about the *subject*. The question's content words were already computed and
+passed in as `terms`, but read only in the no-vendor branch, so once a vendor
+was detected the subject left the decision entirely and `r/linuxquestions`
+matched `linux` whatever the post was about.
+
+The product match now narrows to rows sharing a content word with the
+question. What makes it a fix rather than a tightening: the narrowing may
+return nothing. Two pool-preserving `or` fallbacks — one inside the filter, one
+at the call site — were each restoring the rows the filter had just rejected.
+This file's own CVE section already states the right rule: *a thin pool beats a
+false one.* Community rows per question, before → after:
+
+| Question | Before | After |
+|---|---:|---:|
+| Any critical Linux updates today? | 1 | 0 |
+| What bugs were fixed in Chrome recently? | 15 | 9 |
+| Any security vulnerabilities in Python? | 50 | 0 |
+| Latest Django release notes | 50 | 0 |
+| MacOS updates with negative community reaction | 6 | 2 |
+
+The two 50s are the failure at full size: no row in the feed mentioned Python
+or Django, so the fallback handed the presenter the entire unrelated feed as
+that question's evidence. Chrome and macOS keep real matches, which is what
+distinguishes this from filtering harder. Same function filters the CVE pool,
+so both agents were fixed at once. Two regression tests added.
+
+### 11.5 The yes/no feature, measured
+
+Shipped with an anecdote and no number; now measured against a frozen snapshot
+of the 50-question feed (`data/yesno_questions_50/snapshot.json`, sha
+`063c751fed95`, fetched 2026-09-09 — the live endpoint reorders daily, so
+re-fetching would silently measure a different set). Ground truth is
+hand-labelled and lives in `scripts/eval_yesno.py` beside the numbers it
+produces, so a reader can disagree with a specific label rather than with the
+result. Reproduce with `python3 scripts/eval_yesno.py`.
+
+Nine of the fifty are genuine yes/no questions. Labels come from reading each
+post's full body, not its title: six of the fifty read as questions in the
+title and as help requests in the body.
+
+| | Before | After |
+|---|---:|---:|
+| Detection precision | 0.50 | **0.80** |
+| Detection recall | 0.78 | **0.89** |
+| Help requests answered with a head-count | 2 | **0** |
+
+The two harmful failures — `"Can't set Firefox as default on Fedora 44 KDE"`
+reported as "Yes (1 user)", and `"W32tm is making me lose my sleep"` as
+"Yes (2 users)" — had two causes, both fixed: `can` matched the `can't` in a
+title (the apostrophe ends the word, so `\b` was satisfied), and any three
+words were allowed in front of the auxiliary so that "guys did the latest
+update..." would match, which also matches a declarative whose subject
+precedes its verb.
+
+Verdicts, unchanged by the fix: of the nine, **seven are answerable from their
+comments at all**; the tally called **6 of 7** and all **6 agreed with the
+labeller**. It abstained on both threads whose comments do not answer the
+question, which is correct behaviour rather than a miss.
+
+**A negative result, recorded in `yesno.py` so it is not retried.** Scanning
+every sentence of a body — on the theory that a post's question is often its
+third sentence — measured *worse*: precision 0.50 → 0.40, with three false
+positives answering instead of two. A long help post nearly always contains
+some sentence that opens on an auxiliary.
+
+**Two caveats the numbers do not carry, and which belong in any write-up that
+quotes them.** n=9 is a count, not a rate: no confidence interval on nine items
+would mean anything and none is reported. And the labeller was the same agent
+that wrote the classifier, so the after-figures are in-sample — both fixes were
+derived from these specific failures. A fresh 50 is the real test.
+
+### 11.6 Also landed: guardrails, model selection, and a reasoning trace
+
+PR #21, from the parallel session: `guardrail.py` (refuse an answer the
+documents do not support), `xai.py` plus the `_xai_panel` renderer (why each
+source was retrieved, then which claim rests on which), `model_select.py`
+(pick the presenter model by role and reachability, so the sidebar no longer
+promises rule-based prose on a host where llama3.1 is running), and
+`agent_rules.py` / `AGENT_RULES.md`. Not written by this session; recorded here
+because it is the same week's work on the same deliverable and the interim
+report will need it.
+
+### 11.7 Process: §1's one-writer rule was broken, and it cost real time
+
+Two sessions worked in the same clone for most of 09-09. §1 exists precisely
+for this and was not followed. Two concrete failures, both worth knowing about
+before it happens again:
+
+1. **`git commit --only <path>` is not a safe partial commit under concurrency.**
+   It commits the file as it is in the *working tree*, not the hunks you wrote.
+   Two of the other session's in-progress lines (`from agent_rules import
+   rules_block` and a `rules_block()` prompt prefix) were swept into a commit
+   about the retrieval filter, and rode into PR #18.
+2. **It was caught by the test suite, not by review** — three tests failed to
+   collect with `ModuleNotFoundError: No module named 'agent_rules'` when the
+   branch was rebuilt from a clean base. Without that rebuild it would have
+   merged silently.
+
+PR #18 was also merged while it still carried only its first commit, so #19 had
+to be rebased onto the new main and the rest re-applied.
+
+**What worked, and is the rule going forward:** build every commit in a
+separate `git worktree` checked out from `origin/main`, copy in only your own
+files, run the suite there, and push from there. The main clone is then only
+ever the other session's. Two branches were built this way (#19, #20) and
+neither carried foreign content.
+
+### 11.8 Open, in priority order
+
+1. **Phase 4, independent judge.** Still blocked on `OPENAI_API_KEY` since
+   08-31, now ten days. Unchanged from §10.6 item 1 and still the largest live
+   threat to every number in this file. If it is not resolvable, the honest
+   move is to write the limitation into the paper rather than keep listing it
+   as pending.
+2. **Re-run the yes/no eval on a fresh 50.** The only way to know whether 0.80
+   precision survives out-of-sample. The script and the labelling protocol both
+   exist, so the cost is the labelling hour.
+3. **Documentation currency — half done in this commit.** The test counts in
+   README, `docs/Overview.md` and `docs/Running-the-System.md` read **629** and
+   now read **643**, verified from a clean worktree at `d43b4ef` (642 passed, 1
+   skipped; 643 collected, which is the count the docs quote and the same
+   convention §10.5 used for 629). Still outstanding: none of the new modules
+   (`yesno.py`, `survey.py`, `guardrail.py`, `xai.py`, `model_select.py`)
+   appear in `specs/pipeline.md`, and that is due with the Friday push.
+4. **The RLAIF signal argues with the answer.** The Fedora run scored 0.30 and
+   reported "⚠️ Retry" while a correct, sourced yes/no answer sat directly
+   above it on the page. The threshold is volume-shaped and the score is now
+   partly quality-shaped; they no longer mean the same thing.
+5. **Mid-body questions are missed.** "592 Updates" asks its question in the
+   middle of the body. Sentence-scanning made things worse (§11.5); a
+   title-plus-last-sentence rule is the next thing worth measuring.
+6. **Frozen n=300, artifact packaging, `HANDOFF.md` drift.** Unchanged from
+   §10.6 items 2–4.
