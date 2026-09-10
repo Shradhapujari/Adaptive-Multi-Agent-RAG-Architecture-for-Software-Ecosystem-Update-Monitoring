@@ -985,22 +985,32 @@ elif run_btn and query:
                            yesno_on=yesno_on, unclear_as_no=unclear_as_no,
                            survey_on=survey_on)
 
-    # ── TEMPORAL GROUNDING RESULT ─────────────────────────
+    # `show_pipeline` is the "Show pipeline steps" switch. Only the plan strip
+    # above consulted it, so unchecking the box left every per-agent section on
+    # the page and the toggle stopped meaning what its label says. The feed-outage
+    # warning and the yes/no verdict are deliberately outside these guards: an
+    # outage is an error the reader has to see, and for a yes/no question the
+    # tally is the answer, not narration about how it was reached.
+    # Read outside the guard: the results tabs, the raw-data payload and the
+    # answer's window note all use `tr`, and they render either way.
     tr = results["temporal"]
-    st.markdown("### 📅 Temporal Grounder Agent")
-    if tr is not None and tr.changed:
-        tg1, tg2 = st.columns(2)
-        with tg1:
-            st.info(f"**As asked:** {tr.original}")
-        with tg2:
-            st.success(f"**Grounded:** {tr.query}")
-        st.caption(f"Resolved {tr.describe()} — relative words are rewritten to "
-                   f"absolute dates before retrieval, because no document "
-                   f"contains the word “today”, only a date.")
-    else:
-        st.caption("No relative time expression in this query — nothing to ground. "
-                   "(Version words like “latest” are left alone on purpose: they "
-                   "are ordinal over releases, not a date.)")
+
+    if show_pipeline:
+        # ── TEMPORAL GROUNDING RESULT ─────────────────────────
+        st.markdown("### 📅 Temporal Grounder Agent")
+        if tr is not None and tr.changed:
+            tg1, tg2 = st.columns(2)
+            with tg1:
+                st.info(f"**As asked:** {tr.original}")
+            with tg2:
+                st.success(f"**Grounded:** {tr.query}")
+            st.caption(f"Resolved {tr.describe()} — relative words are rewritten to "
+                       f"absolute dates before retrieval, because no document "
+                       f"contains the word “today”, only a date.")
+        else:
+            st.caption("No relative time expression in this query — nothing to ground. "
+                       "(Version words like “latest” are left alone on purpose: they "
+                       "are ordinal over releases, not a date.)")
 
     # ── FEED OUTAGES ──────────────────────────────────────
     # Named explicitly. The alternative this replaced was a document whose
@@ -1011,74 +1021,76 @@ elif run_btn and query:
                      "No documents from this feed are included below, and "
                      "nothing is cited from it.")
 
-    # ── VENDOR + INTENT GROUNDING RESULT ──────────────────
-    gq = results.get("grounding")
-    if gq is not None:
-        st.markdown("### 🏷 Vendor & Intent Grounder")
-        vg1, vg2 = st.columns(2)
-        with vg1:
-            if gq.vendors:
-                st.success("**Products:** " + ", ".join(
-                    f"“{v.matched}” → `{v.name}`" for v in gq.vendors))
-            else:
-                st.warning("**Products:** none matched the catalog — "
-                           "retrieval is not vendor-scoped for this question.")
-        with vg2:
-            if gq.intent and gq.intent.confident:
-                st.success(f"**Intent:** {gq.intent.describe()}")
-            else:
-                st.warning(f"**Intent:** {gq.intent.describe() if gq.intent else 'not classified'}")
-        if gq.rewritten != gq.original:
-            st.info(f"**Question as grounded:** {gq.rewritten}")
-        excluded = results.get("advisories_excluded", 0)
-        if excluded:
-            st.caption(
-                f"{excluded} CVE advisory row(s) excluded from the release pool. "
-                "A CVE record's version field is the *affected* version, not a "
-                "version that shipped — citing one as a release is what produced "
-                "answers like “Linux v25.642087.0”.")
-        elif gq.intent and gq.intent.label == "security":
-            st.caption("Security question — advisories are kept and cited as "
-                       "advisories, named by their CVE id rather than by the "
-                       "affected-version string.")
-        else:
-            # Reached when no intent was confident enough to route on. Saying
-            # "security question" here contradicted the line directly above it,
-            # which had just reported no clear intent.
-            st.caption("No intent was confident enough to narrow the search, so "
-                       "every source is searched and advisories are cited as "
-                       "advisories rather than as releases.")
-        if gq.needs_clarification:
-            st.error("No product and no clear intent were found in this "
-                     "question. The answer below is drawn from an unscoped "
-                     "search — naming a product would make it specific.")
+    gq = results.get("grounding")        # same: read by the raw-data payload
 
-    # ── QUERY REWRITING RESULT ────────────────────────────
-    st.markdown("### 🔄 Query Rewriter Agent")
-    rw_col1, rw_col2 = st.columns(2)
-    with rw_col1:
-        st.info(f"**Grounded input:** {results['grounded_query']}")
-    with rw_col2:
-        rw = results.get("rewrite")
-        text = results['rewritten_query'] or results['original_query']
-        if rw is not None and rw.mode == "llm":
-            st.success(f"**Rewritten** by {rw.model}: {text}")
-        elif rw is not None:
-            # Never shown as model output. On a host with no reachable Ollama
-            # -- Streamlit Community Cloud, for one -- this is every run, and
-            # the heading above still reads "Llama 3.1 local".
-            st.warning(f"**Rewritten** by rule: {text}")
-            st.caption(f"Rule-based keyword expansion — {rw.note}. "
-                       "The rewrite is blunter than a model's; retrieval still "
-                       "runs on the grounded product term alongside it.")
-        else:
-            st.success(f"**Rewritten:** {text}")
-    fetched_on = results.get("release_phrasings") or results.get("fetch_phrasings", [])
-    if len(fetched_on) > 1:
-        st.caption("Fetched on every phrasing and unioned — " +
-                   " · ".join(f"“{p}”" for p in fetched_on) +
-                   ". The plain phrasing and the product term find the documents; "
-                   "the dated one lets the window rank them.")
+    if show_pipeline:
+        # ── VENDOR + INTENT GROUNDING RESULT ──────────────────
+        if gq is not None:
+            st.markdown("### 🏷 Vendor & Intent Grounder")
+            vg1, vg2 = st.columns(2)
+            with vg1:
+                if gq.vendors:
+                    st.success("**Products:** " + ", ".join(
+                        f"“{v.matched}” → `{v.name}`" for v in gq.vendors))
+                else:
+                    st.warning("**Products:** none matched the catalog — "
+                               "retrieval is not vendor-scoped for this question.")
+            with vg2:
+                if gq.intent and gq.intent.confident:
+                    st.success(f"**Intent:** {gq.intent.describe()}")
+                else:
+                    st.warning(f"**Intent:** {gq.intent.describe() if gq.intent else 'not classified'}")
+            if gq.rewritten != gq.original:
+                st.info(f"**Question as grounded:** {gq.rewritten}")
+            excluded = results.get("advisories_excluded", 0)
+            if excluded:
+                st.caption(
+                    f"{excluded} CVE advisory row(s) excluded from the release pool. "
+                    "A CVE record's version field is the *affected* version, not a "
+                    "version that shipped — citing one as a release is what produced "
+                    "answers like “Linux v25.642087.0”.")
+            elif gq.intent and gq.intent.label == "security":
+                st.caption("Security question — advisories are kept and cited as "
+                           "advisories, named by their CVE id rather than by the "
+                           "affected-version string.")
+            else:
+                # Reached when no intent was confident enough to route on. Saying
+                # "security question" here contradicted the line directly above it,
+                # which had just reported no clear intent.
+                st.caption("No intent was confident enough to narrow the search, so "
+                           "every source is searched and advisories are cited as "
+                           "advisories rather than as releases.")
+            if gq.needs_clarification:
+                st.error("No product and no clear intent were found in this "
+                         "question. The answer below is drawn from an unscoped "
+                         "search — naming a product would make it specific.")
+
+        # ── QUERY REWRITING RESULT ────────────────────────────
+        st.markdown("### 🔄 Query Rewriter Agent")
+        rw_col1, rw_col2 = st.columns(2)
+        with rw_col1:
+            st.info(f"**Grounded input:** {results['grounded_query']}")
+        with rw_col2:
+            rw = results.get("rewrite")
+            text = results['rewritten_query'] or results['original_query']
+            if rw is not None and rw.mode == "llm":
+                st.success(f"**Rewritten** by {rw.model}: {text}")
+            elif rw is not None:
+                # Never shown as model output. On a host with no reachable Ollama
+                # -- Streamlit Community Cloud, for one -- this is every run, and
+                # the heading above still reads "Llama 3.1 local".
+                st.warning(f"**Rewritten** by rule: {text}")
+                st.caption(f"Rule-based keyword expansion — {rw.note}. "
+                           "The rewrite is blunter than a model's; retrieval still "
+                           "runs on the grounded product term alongside it.")
+            else:
+                st.success(f"**Rewritten:** {text}")
+        fetched_on = results.get("release_phrasings") or results.get("fetch_phrasings", [])
+        if len(fetched_on) > 1:
+            st.caption("Fetched on every phrasing and unioned — " +
+                       " · ".join(f"“{p}”" for p in fetched_on) +
+                       ". The plain phrasing and the product term find the documents; "
+                       "the dated one lets the window rank them.")
 
     # ── YES/NO CONSENSUS ──────────────────────────────────
     # Shown above the evaluator because for this shape of question it *is*
@@ -1103,53 +1115,54 @@ elif run_btn and query:
                     st.caption(v["url"])
         st.markdown("---")
 
-    # ── RLAIF EVALUATION METRICS ──────────────────────────
-    st.markdown("### 📊 RLAIF Evaluator")
-    ev = results["evaluation"]
-    sv = ev.get("survey", {})
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
-    m1.metric("Quality Score", f"{ev['quality']:.2f}/1.0",
-              delta=(f"{ev['quality'] - ev['quality_base']:+.2f} vs. count only"
-                     if ev.get("survey_on") else None))
-    m2.metric("RLAIF Signal", "✅ Positive" if ev["signal"]=="positive" else "⚠️ Retry")
-    m3.metric("User-Priority Fit", f"{sv.get('score', 0):.2f}/1.0")
-    m4.metric("Community Posts", ev["community_count"])
-    m5.metric("Release Notes", ev["release_count"])
-    m6.metric("CVE Results", ev["cve_count"])
+    if show_pipeline:
+        # ── RLAIF EVALUATION METRICS ──────────────────────────
+        st.markdown("### 📊 RLAIF Evaluator")
+        ev = results["evaluation"]
+        sv = ev.get("survey", {})
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        m1.metric("Quality Score", f"{ev['quality']:.2f}/1.0",
+                  delta=(f"{ev['quality'] - ev['quality_base']:+.2f} vs. count only"
+                         if ev.get("survey_on") else None))
+        m2.metric("RLAIF Signal", "✅ Positive" if ev["signal"]=="positive" else "⚠️ Retry")
+        m3.metric("User-Priority Fit", f"{sv.get('score', 0):.2f}/1.0")
+        m4.metric("Community Posts", ev["community_count"])
+        m5.metric("Release Notes", ev["release_count"])
+        m6.metric("CVE Results", ev["cve_count"])
 
-    # ── SURVEY-INFORMED PRIORITIES ────────────────────────
-    if sv:
-        n = sv["n"]
-        if ev.get("survey_on"):
-            st.caption(f"Quality blends retrieval volume with user-priority fit "
-                       f"(0.7 / 0.3). Count alone would score {ev['quality_base']:.2f}.")
-        else:
-            st.caption(f"Survey off — quality is retrieval volume alone. The fit "
-                       f"against {n} respondents' priorities is still reported, "
-                       f"it just does not move the score.")
-        cov = ", ".join(f"{c['label']} ({c['respondents']}/{n})" for c in sv["covered"])
-        miss = ", ".join(f"{m['label']} ({m['respondents']}/{n})" for m in sv["missing"])
-        if cov:
-            st.success(f"**Speaks to:** {cov}")
-        if miss:
-            st.warning(f"**Says nothing about:** {miss}")
-        with st.expander(f"What the {n} surveyed users said they care about"):
-            st.caption("Counts are respondents who raised the priority — by "
-                       "ticking it, writing about it, or both. Read from "
-                       "`data/SoftwareUpdateSurvey.csv` on every run.")
-            for pr in survey.priorities():
-                hit = any(c["key"] == pr["key"] for c in sv["covered"])
-                matched = next((", ".join(c["matched"]) for c in sv["covered"]
-                                if c["key"] == pr["key"]), "")
-                st.markdown(f"{'🟢' if hit else '⚪️'} **{pr['label']}** — "
-                            f"{pr['respondents']}/{n} respondents "
-                            f"({pr['share']:.0%})"
-                            + (f" · matched on _{matched}_" if matched else ""))
-                if pr["quote"]:
-                    st.caption(f"“{pr['quote'][:240]}”")
+        # ── SURVEY-INFORMED PRIORITIES ────────────────────────
+        if sv:
+            n = sv["n"]
+            if ev.get("survey_on"):
+                st.caption(f"Quality blends retrieval volume with user-priority fit "
+                           f"(0.7 / 0.3). Count alone would score {ev['quality_base']:.2f}.")
+            else:
+                st.caption(f"Survey off — quality is retrieval volume alone. The fit "
+                           f"against {n} respondents' priorities is still reported, "
+                           f"it just does not move the score.")
+            cov = ", ".join(f"{c['label']} ({c['respondents']}/{n})" for c in sv["covered"])
+            miss = ", ".join(f"{m['label']} ({m['respondents']}/{n})" for m in sv["missing"])
+            if cov:
+                st.success(f"**Speaks to:** {cov}")
+            if miss:
+                st.warning(f"**Says nothing about:** {miss}")
+            with st.expander(f"What the {n} surveyed users said they care about"):
+                st.caption("Counts are respondents who raised the priority — by "
+                           "ticking it, writing about it, or both. Read from "
+                           "`data/SoftwareUpdateSurvey.csv` on every run.")
+                for pr in survey.priorities():
+                    hit = any(c["key"] == pr["key"] for c in sv["covered"])
+                    matched = next((", ".join(c["matched"]) for c in sv["covered"]
+                                    if c["key"] == pr["key"]), "")
+                    st.markdown(f"{'🟢' if hit else '⚪️'} **{pr['label']}** — "
+                                f"{pr['respondents']}/{n} respondents "
+                                f"({pr['share']:.0%})"
+                                + (f" · matched on _{matched}_" if matched else ""))
+                    if pr["quote"]:
+                        st.caption(f"“{pr['quote'][:240]}”")
 
-    timing = results["timing"]
-    st.caption(f"⏱ Timing — Temporal: {timing.get('temporal',0)}s | Rewriter: {timing.get('rewriter',0)}s | Community: {timing.get('community',0)}s | Releases: {timing.get('releases',0)}s | CVE: {timing.get('cve',0)}s")
+        timing = results["timing"]
+        st.caption(f"⏱ Timing — Temporal: {timing.get('temporal',0)}s | Rewriter: {timing.get('rewriter',0)}s | Community: {timing.get('community',0)}s | Releases: {timing.get('releases',0)}s | CVE: {timing.get('cve',0)}s")
 
     st.markdown("---")
 
