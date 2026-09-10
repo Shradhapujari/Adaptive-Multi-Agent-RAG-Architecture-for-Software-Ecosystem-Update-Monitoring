@@ -134,15 +134,67 @@ SYNTHESIS_INSTRUCTION = (
 )
 
 
+from agent_rules import RULES_ENV
+
+
+def _rules_on() -> bool:
+    return os.environ.get(RULES_ENV, "off").strip().lower() in ("on", "1", "true", "yes")
+
+
+def rules_prefix() -> str:
+    """AGENT_RULES.md as a prompt prefix, and only when asked for by name.
+
+    Off unless MARAG_RULES says otherwise. The published answer numbers were
+    produced without the file, so a rule someone adds to it must not move them
+    without an arm that says it did. On, this is the same block the app
+    prepends -- the ablation measures the deployed rules, not a copy of them.
+
+    An arm that asked to be on and could not be is not an off arm, it is a
+    broken one, so a missing or empty file raises here rather than quietly
+    handing back the bare prompt and reporting a rules run.
+    """
+    if not _rules_on():
+        return ""
+    from agent_rules import rules_block
+    block = rules_block()
+    if not block:
+        raise RuntimeError(
+            f"{RULES_ENV} asked for the agent rules, but AGENT_RULES.md is "
+            "missing or has no '## ' section to read.")
+    return block
+
+
+def rules_arm() -> Dict:
+    """What the rules factor actually was, asked rather than assumed.
+
+    Same reason `rerank_spec` is read back off the reranker instead of the
+    environment: the run artifact has to record the arm that ran. The digest
+    is what makes two runs comparable -- an edit to AGENT_RULES.md between
+    arms changes it, and the pair is no longer an ablation of one factor.
+    """
+    block = rules_prefix()
+    return {
+        "rules_requested": os.environ.get(RULES_ENV, "off"),
+        "rules_active": bool(block),
+        "rules_sha": hashlib.sha256(block.encode()).hexdigest()[:12] if block else "",
+        "rules_chars": len(block),
+    }
+
+
 def build_synthesis_prompt(query: str, docs: List[dict], top_k: int) -> str:
-    """The one synthesis prompt, shared by every doc-grounded arm."""
+    """The one synthesis prompt, shared by every doc-grounded arm.
+
+    `rules_prefix()` is empty unless MARAG_RULES asks for it, so the two arms
+    of the rules ablation differ by that block and nothing else -- the same
+    guarantee the comment above makes about the rest of this prompt.
+    """
     ctx = "\n".join(
         f"- [{d.get('source','?')}] {d.get('title','')}: "
         f"{(d.get('detail') or d.get('text') or '')[:200]}"
         for d in docs[:top_k]
     ) or "No documents retrieved."
     return (
-        f"{SYNTHESIS_INSTRUCTION}\n\n"
+        f"{rules_prefix()}{SYNTHESIS_INSTRUCTION}\n\n"
         f"Question: {query}\n\nSources:\n{ctx}\n\nAnswer:"
     )
 

@@ -4,8 +4,9 @@ Rules every agent in this app follows. Edit this file to change agent
 behaviour — no code change needed. The text below is prepended to every
 prompt the app sends to a model.
 
-The eval harness (`eval_harness/`) deliberately ignores this file: its
-published numbers were produced with a fixed prompt.
+The eval harness (`eval_harness/`) runs without these rules by default, so
+its published numbers stay reproducible; `MARAG_RULES=on` is the ablation arm
+that measures them (`scripts/phase_rules_ablation.sh`).
 
 ## Grounding
 

@@ -17,9 +17,10 @@ It reuses the existing layers rather than adding a parallel stack:
   * `eval_harness.generators.SYNTHESIS_INSTRUCTION` — the shared grounding
     instruction, extended here with a citation rule rather than rewritten.
 
-`build_synthesis_prompt` in the harness is deliberately NOT modified: the
-published answer-quality numbers were produced with that exact prompt, and
-changing it would silently invalidate them.
+`build_synthesis_prompt` in the harness carries the agent rules only when
+`MARAG_RULES=on` asks for them: the published answer-quality numbers were
+produced without any, so moving that prompt by default would silently
+invalidate them.
 
 No model reachable (the deployed Streamlit host has no Ollama and may hold no
 API key) degrades to `deterministic_paragraph`, which composes the same prose
