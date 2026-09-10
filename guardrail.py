@@ -21,7 +21,8 @@ import re
 from dataclasses import dataclass, field
 from typing import List, Sequence, Tuple
 
-from eval_harness.benchmarks import extract_dates, extract_versions, is_abstention
+from eval_harness.benchmarks import (_CONTENT_STOPWORDS, extract_dates,
+                                     extract_versions, is_abstention)
 
 __all__ = ["Violation", "Verdict", "check", "guard", "REFUSAL"]
 
@@ -81,10 +82,33 @@ def _lines(evidence: Sequence) -> Tuple[str, set]:
     return "\n".join(parts), labels
 
 
+def _looks_like_year(n: str) -> bool:
+    """A four-digit number in calendar range is a date, not a major version.
+
+    Digits only: a dotted "13.2" is four characters and is not a year.
+    """
+    return n.isdigit() and len(n) == 4 and 1900 <= int(n) <= 2100
+
+
 def _named_versions(text: str) -> List[Tuple[str, str]]:
-    """(product, version) pairs as prose states them: "Fedora 45" -> ("fedora", "45")."""
-    return [(m.group(1).lower(), m.group(2))
-            for m in _NAMED_VERSION_RE.finditer(text or "")]
+    """(product, version) pairs as prose states them: "Fedora 45" -> ("fedora", "45").
+
+    The word before the number has to be capable of being a product name. It is
+    not enough that some source put a word next to a digit: a kernel note
+    reading "on 32-bit systems" made "on" a product versioned 32, and the
+    presenter's own "released on Sep 10, 2026" was then refused as "on 2026 is
+    in no source". The stopword list is the one the benchmark scorer already
+    uses for the same purpose -- words that carry no product identity -- and it
+    covers the prepositions, the articles and "version"/"release"/"build",
+    which are the words that actually precede numbers in this domain.
+    """
+    out = []
+    for m in _NAMED_VERSION_RE.finditer(text or ""):
+        product, version = m.group(1).lower(), m.group(2)
+        if product in _CONTENT_STOPWORDS or _looks_like_year(version):
+            continue
+        out.append((product, version))
+    return out
 
 
 def check(answer: str, evidence: Sequence) -> Verdict:
@@ -190,6 +214,16 @@ def _demo() -> None:
     assert "sources have 44" in v.violations[0].detail, v.violations[0].detail
     # Products the sources do not version are not version claims at all.
     assert check("Debian 13 is unaffected [R1].", ev).ok
+
+    # Regression, from run #12 in the demo store: a kernel note reading "on
+    # 32-bit systems" made "on" a product versioned 32, and the presenter's own
+    # "released on Sep 10, 2026" came back as "on 2026 is in no source". Both
+    # halves are covered -- the stopword and the year.
+    noisy = ev + [Evidence(label="R3", kind="release", title="linux v7.2.0",
+                           date="2026-09-09",
+                           detail="fixes a use-after-free on 32-bit systems")]
+    dated = "The feed returned 1 release, released on Sep 10, 2026: linux v7.2.0 [R3]."
+    assert check(dated, noisy).ok, check(dated, noisy).violations
 
     # One weak marker used to skip every check below it. UNKNOWN is a literal
     # security-type value in this domain's release rows, so a model echoing it
