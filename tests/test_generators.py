@@ -336,3 +336,44 @@ def test_the_ladder_specs_build_distinctly_named_arms():
 def test_an_unknown_render_mode_is_rejected():
     with pytest.raises(ValueError):
         G.SingleAgentGenerator(CapturingClient(), render="bullets")
+
+
+# ---------------------------------------------------------------- rules arm
+# AGENT_RULES.md is prepended by the app on every prompt and by the harness on
+# none, so its effect was never measured. MARAG_RULES makes it a factor. Off is
+# the default because the published answer numbers were produced without it.
+
+def test_rules_are_off_unless_asked_for(monkeypatch):
+    monkeypatch.delenv(G.RULES_ENV, raising=False)
+    assert G.rules_prefix() == ""
+    assert G.build_synthesis_prompt(QUERY, DOCS, 2).startswith(G.SYNTHESIS_INSTRUCTION)
+
+
+def test_rules_arm_prepends_the_block_and_nothing_else(monkeypatch):
+    monkeypatch.delenv(G.RULES_ENV, raising=False)
+    off = G.build_synthesis_prompt(QUERY, DOCS, 2)
+    monkeypatch.setenv(G.RULES_ENV, "on")
+    on = G.build_synthesis_prompt(QUERY, DOCS, 2)
+    # The whole difference between the two arms, and it is a prefix.
+    assert on.endswith(off) and on != off
+    assert on.startswith("# Agent Rules")
+
+
+def test_the_run_records_which_arm_it_actually_was(monkeypatch):
+    monkeypatch.delenv(G.RULES_ENV, raising=False)
+    arm = G.rules_arm()
+    assert arm["rules_active"] is False and arm["rules_sha"] == ""
+    monkeypatch.setenv(G.RULES_ENV, "on")
+    arm = G.rules_arm()
+    # The digest is what makes two arms comparable: an edit between them shows.
+    assert arm["rules_active"] is True and len(arm["rules_sha"]) == 12
+    assert arm["rules_chars"] > 0
+
+
+def test_an_arm_that_cannot_be_on_fails_instead_of_running_off(monkeypatch):
+    # Silently handing back the bare prompt would report a rules run that never
+    # had any rules in it -- the arm would be mislabelled, not merely empty.
+    monkeypatch.setenv(G.RULES_ENV, "on")
+    monkeypatch.setattr("agent_rules.rules_block", lambda: "")
+    with pytest.raises(RuntimeError, match="AGENT_RULES.md"):
+        G.rules_prefix()

@@ -50,7 +50,8 @@ import rerank
 from .config import EvalConfig
 from .dataset import load_dataset, dataset_hash
 from . import benchmarks as bench_mod
-from .generators import build_generators
+from agent_rules import RULES_ENV
+from .generators import build_generators, rules_arm
 from .judge import Judge
 from .metrics import retrieval_metrics, mean_ci
 from . import report as report_mod
@@ -212,6 +213,14 @@ def _compact(run_dir: str, rows: List[dict]) -> None:
 def run(cfg: EvalConfig) -> str:
     random.seed(cfg.seed)
     os.makedirs(cfg.results_dir, exist_ok=True)
+
+    # Default the whole process to no agent rules, before a generator is built.
+    # AGENT_RULES.md is prepended by every prompt path that calls
+    # `agent_rules.rules_block()` -- which includes multiagent_rag_v3.call_llama,
+    # so the rules reached this harness's query rewriter the day the file
+    # landed, silently, on a prompt the published numbers were produced without.
+    # An arm that wants them says so; a plain run reproduces what was published.
+    os.environ.setdefault(RULES_ENV, "off")
 
     # Freeze the corpus before a single system is built. An ablation whose
     # sources move between arms measures the sources, not the arms.
@@ -454,6 +463,11 @@ def run(cfg: EvalConfig) -> str:
     cfg_dict["rerank_requested"] = os.environ.get("MARAG_RERANK", rerank.DEFAULT_SPEC)
     cfg_dict["rerank_spec"] = _rr.spec
     cfg_dict["rerank_degraded"] = bool(_rr.degraded)
+    # Same rule for the rules factor: ask the generator what it used. The sha
+    # is the part that matters across arms -- AGENT_RULES.md is a file anyone
+    # can edit between two passes, and two arms built from different rule text
+    # are not an ablation of one factor.
+    cfg_dict.update(rules_arm())
     cfg_dict["corpus"] = snap.stats() if snap is not None else {"mode": "live",
                                                                 "frozen": False}
     if snap is not None:
