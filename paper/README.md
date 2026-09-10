@@ -2,8 +2,10 @@
 
 ```bash
 cd paper
-tectonic tosem_amara.tex --outdir /tmp/build
+mkdir -p /tmp/build && tectonic tosem_amara.tex --outdir /tmp/build
 ```
+
+`--outdir` must already exist; tectonic will not create it.
 
 `tectonic` fetches what it needs on first run; no TeX install required. Any
 LaTeX toolchain works, but the sequence has to be
@@ -26,6 +28,7 @@ To change a reference:
 
 ```bash
 cd paper
+mkdir -p /tmp/build
 mv tosem_amara.bbl /tmp/                       # force bibtex to run
 tectonic tosem_amara.tex --outdir /tmp/build --keep-intermediates
 cp /tmp/build/tosem_amara.bbl tosem_amara.bbl  # commit the result
