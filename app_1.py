@@ -640,10 +640,13 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     thread = yesno.fetch_thread(reddit_id) if reddit_id else None
     # `is_title=True`: what the user typed is the question itself, the same
     # shape a post's title is, not prose with a question somewhere inside it.
-    # A picked thread is judged by its own title; a searched one by the query
-    # that found it -- the thread's title may be a bare "fedora update".
-    yesno_shaped = yesno.looks_yesno(thread.get("title", "") if thread else query,
-                                     is_title=True)
+    # A picked thread is judged by its title or body -- "fedora update" carries
+    # the question in the body; a searched one by the query that found it.
+    if thread:
+        yesno_shaped = (yesno.looks_yesno(thread.get("title", ""), is_title=True)
+                        or yesno.looks_yesno(thread.get("author_description") or ""))
+    else:
+        yesno_shaped = yesno.looks_yesno(query, is_title=True)
     if thread is None and yesno_on and yesno_shaped:
         thread = yesno.find_thread(query)
     if thread is not None:
