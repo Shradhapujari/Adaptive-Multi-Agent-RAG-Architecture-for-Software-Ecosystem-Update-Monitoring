@@ -19,12 +19,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 pytest.importorskip("streamlit")
 import app_1  # noqa: E402
-from app_1 import Rewrite, _agent_table  # noqa: E402
+from app_1 import Rewrite, _agent_table, _presenter_caption  # noqa: E402
 
 
 class _Presented:
-    def __init__(self, mode, model=""):
-        self.mode, self.model = mode, model
+    def __init__(self, mode, model="", note=""):
+        self.mode, self.model, self.note = mode, model, note
 
 
 def _results(**over):
@@ -87,3 +87,33 @@ def test_roster_is_a_markdown_table():
     t = _agent_table(_results())
     assert t.splitlines()[0].startswith("| Agent")
     assert t.splitlines()[1].startswith("|---")
+
+
+# The presenter caption used to name a model from a probe taken while the
+# sidebar rendered, and that probe is cached for the life of the process: an
+# Ollama that stopped answering after the first page load left the caption
+# naming llama3.1 above rule-based prose. It now states intent before the run
+# and reports what actually answered after it.
+
+def test_caption_before_a_run_names_a_configured_model():
+    assert "`ollama:mistral`" in _presenter_caption("ollama:mistral")
+    assert "configured" in _presenter_caption("ollama:mistral")
+
+
+def test_caption_before_a_run_promises_nothing_it_has_not_probed():
+    c = _presenter_caption("")
+    assert "chosen when you ask" in c
+    # No backend is named, because none has been asked yet.
+    assert "ollama" not in c and "`" not in c
+
+
+def test_caption_after_a_run_reports_the_model_that_answered():
+    c = _presenter_caption("", _Presented("llm", "ollama:llama3.1"))
+    assert "`ollama:llama3.1`" in c and "cheapest reachable" in c
+    c = _presenter_caption("env:model", _Presented("llm", "env:model"))
+    assert "configured" in c
+
+
+def test_caption_after_a_rule_based_run_says_why():
+    c = _presenter_caption("", _Presented("rule-based", note="no presenter model configured or reachable"))
+    assert "rule-based" in c and "no presenter model configured or reachable" in c
