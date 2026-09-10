@@ -143,6 +143,11 @@ Retrieved August 2026 from \tempurl}
   Critique through Self-Reflection}. In \bibinfo{booktitle}{\emph{The Twelfth
   International Conference on Learning Representations}}.
 \newblock
+\showeprint[arxiv]{2310.11511}
+\urldef\tempurl%
+\url{https://arxiv.org/abs/2310.11511}
+\showURL{%
+\tempurl}
 
 
 \bibitem[Bai et~al\mbox{.}(2022)]%
