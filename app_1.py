@@ -950,8 +950,15 @@ if query and (baseline_btn or (run_btn and single_mode)):
             if d.get("url"):
                 st.caption(d["url"])
 
-    st.caption("Switch **Answering mode** in the sidebar to run the same "
-               "question through the multi-agent pipeline and compare.")
+    # Two ways in, two different next steps: reached by the button the picker
+    # is already where it needs to be, and telling the reader to go move it
+    # sends them to change a setting that is already correct.
+    if single_mode:
+        st.caption("Switch **Answering mode** in the sidebar to run the same "
+                   "question through the multi-agent pipeline and compare.")
+    else:
+        st.caption("Press **🚀 Run Multi-Agent Pipeline** to answer the same "
+                   "question with the full pipeline and compare.")
 
 elif run_btn and query:
 
