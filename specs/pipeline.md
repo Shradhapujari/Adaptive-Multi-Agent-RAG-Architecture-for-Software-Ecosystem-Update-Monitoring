@@ -199,14 +199,24 @@ the demo prints and leave the published faithfulness numbers alone:
   dates and citation labels that appear in the answer must appear in the
   evidence. Rule-based, for the same reason `yesno` is: the deployed host may
   have no model, and a checker that needs one is off exactly when the fallback
-  prose is showing. An abstention is in bounds by construction — declining to
-  answer can never be a grounding violation — but only as far as
-  `benchmarks.is_abstention` recognises one: "The sources do not answer this
-  question." passes, "I could not find anything in the sources that answers
-  this." does not, and is then judged as an assertion. That recognition is
-  narrow and is being widened on `fix/guardrail-bare-integers-and-weak-abstention`;
-  until it lands, a refusal phrased outside the pattern is scored as a
-  violation. Every violation names its offending span.
+  prose is showing. Versions are compared in dotted form only
+  (`extract_versions(..., multipart_only=True)`): a bare integer in an answer
+  is a count, a year or a major number, not a version to check against the
+  pool — reading it as one refused "Chrome 155" against a `v155.0.8047` row
+  and every "fixed 3 bugs". The trade is that an invented
+  bare major ("Fedora 45") is not caught; a prefix rule is the upgrade path,
+  named at the call site.
+
+  Abstention is recognised by `benchmarks.is_abstention(..., strong_only=True)`
+  — an unambiguous refusal phrase, not the weak markers, because one of those
+  is "unknown" and this domain's release rows carry a literal UNKNOWN security
+  type, so a model echoing it used to abstain by accident and skip every check
+  below. Declining excuses the *citation* requirement and nothing else: an
+  answer that declines and then states a version, a date or a label is
+  asserting, and the assertion is checked. Recognition is correspondingly
+  narrow — "The sources do not answer this question." passes, "I could not
+  find anything in the sources that answers this." does not, and is then
+  judged as an assertion. Every violation names its offending span.
 - **`model_select.select(role) -> Choice`** — probes reachability rather than
   trusting a configured spec, and can exclude a model family so a judge does not
   share one with a system under test (threat T2, `evaluation-protocol.md`). The
