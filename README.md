@@ -80,7 +80,7 @@
 | **Live demo** | <https://software-update-questions.streamlit.app/> — public, no key required |
 | **Paper** | Retargeted from the AgenticSE '26 workshop version and submitted to **TOSEM**, special section on Human–AI Collaboration in Software Engineering (1 September 2026). Source: `paper/tosem_amara.tex` |
 | **Framing** | A negative result plus its remedy, not an improvement claim |
-| **Tests** | 629 offline tests, no network required |
+| **Tests** | 643 offline tests, no network required |
 
 ---
 
@@ -310,7 +310,7 @@ run is incomplete and no results are reported from it.**
 ### Tests
 
 ```bash
-python -m pytest tests/ -q      # 629 offline tests, no network required
+python -m pytest tests/ -q      # 643 offline tests, no network required
 ```
 
 Offline in the strict sense: clocks, fetch functions and model clients are all

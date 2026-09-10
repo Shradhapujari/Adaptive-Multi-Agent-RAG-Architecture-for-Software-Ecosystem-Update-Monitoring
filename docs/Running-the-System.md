@@ -47,7 +47,7 @@ python -m eval_harness.run_eval --dataset validation_gt.json \
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 629 offline tests
+python -m pytest tests/ -q      # 643 offline tests
 ```
 
 Offline in the strict sense: clocks, fetch functions and model clients are

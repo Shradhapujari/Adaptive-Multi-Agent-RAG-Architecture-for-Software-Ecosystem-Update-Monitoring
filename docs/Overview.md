@@ -51,7 +51,7 @@ be reintroduced.
 - **Paper** — retargeted from the AgenticSE '26 workshop version and submitted to
   **TOSEM**, special section on Human–AI Collaboration in Software Engineering
   (1 September 2026). Source in `paper/tosem_amara.tex`.
-- **Tests** — 629 offline tests; no network, no fixed date required.
+- **Tests** — 643 offline tests; no network, no fixed date required.
 - **Open** — whether decomposition into agents is worth its cost is still
   unproven. At parity and twice the latency, that is the research question.
 
