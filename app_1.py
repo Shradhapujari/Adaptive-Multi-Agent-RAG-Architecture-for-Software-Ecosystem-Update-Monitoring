@@ -1265,13 +1265,21 @@ elif run_btn and query:
     # rewrite came from a model, how many advisories were separated out.
     agent_status_slot.markdown(_agent_table(results, presented))
 
+    # The trace is what knows which sources the answer actually cited, so it is
+    # built before the caption rather than inside the expander below: the
+    # caption used to read `len(presented.evidence)` and call all of it "cited",
+    # which on a ten-source run announced ten citations above a panel showing
+    # two.
+    trace = xai.explain(results["original_query"], presented.text,
+                        presented.evidence)
+    cited = [s for s in trace.sources if s["used"]]
+
     src_label = (f"Presented by {presented.model}" if presented.mode == "llm"
                  else f"Presented rule-based ({presented.note})")
-    st.caption(f"{src_label} · {len(presented.evidence)} evidence item(s) cited · {present_secs}s")
+    st.caption(f"{src_label} · {len(cited)} of {len(presented.evidence)} "
+               f"source(s) cited · {present_secs}s")
 
     if presented.evidence:
-        trace = xai.explain(results["original_query"], presented.text,
-                            presented.evidence)
         with st.expander("🔎 Why these sources, and which claim rests on which"):
             st.markdown(_xai_panel(trace))
 
@@ -1292,7 +1300,10 @@ elif run_btn and query:
         _offline = any("_last_seen" in d for d in _served if isinstance(d, dict))
         _run_id = _db_run.record_run(
             dict(results,
-                 cited_keys=[e.url for e in presented.evidence if e.url]),
+                 # Same correction as the caption: `_cited` in the store is
+                 # meant to mark the documents the answer used, and passing
+                 # every retrieved url made the column true for all of them.
+                 cited_keys=[s["url"] for s in cited if s["url"]]),
             answer=presented.text, offline=_offline)
         if _offline:
             st.warning("Some sources were unreachable — the documents above "

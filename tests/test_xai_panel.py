@@ -44,7 +44,10 @@ def test_every_source_says_why_it_was_retrieved():
     md = _panel()
     assert "matches '44', 'fedora'" in md
     assert "flagged SECURITY" in md
-    assert "negative sentiment" in md
+    # Not "negative sentiment": the value is the source feed's label for the
+    # post, and the panel must not present it as this system's analysis.
+    assert "negative per the source feed" in md
+    assert "sentiment" not in md
 
 
 def test_a_retrieved_source_the_answer_ignored_is_labelled_as_such():
