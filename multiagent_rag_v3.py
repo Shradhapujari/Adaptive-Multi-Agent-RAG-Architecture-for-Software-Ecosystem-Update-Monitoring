@@ -359,84 +359,7 @@ import xml.etree.ElementTree as ET
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search"
 GITHUB_TAGS_API = "https://api.github.com/search/repositories"
 
-def fetch_google_news(query, limit=5):
-    """Fetch real news articles from Google News RSS — verified press sources."""
-    try:
-        import requests as req
-        r = req.get(
-            GOOGLE_NEWS_RSS,
-            params={"q": query + " software update security", "hl": "en", "gl": "US", "ceid": "US:en"},
-            timeout=15
-        )
-        root = ET.fromstring(r.content)
-        items = root.findall(".//item")
-        results = []
-        for item in items[:limit]:
-            title  = item.find("title")
-            link   = item.find("link")
-            pubdate= item.find("pubDate")
-            source = item.find("source")
-            if title is not None:
-                results.append({
-                    "title":     title.text or "",
-                    "subreddit": source.text if source is not None else "Google News",
-                    "sentiment": "Negative" if any(w in (title.text or "").lower()
-                                 for w in ["vulnerability","breach","hack","exploit","critical","attack"]) else "Neutral",
-                    "score":     0,
-                    "divergence": 0.0,
-                    "source":    "google_news",
-                    "url":       link.text if link is not None else "",
-                    "date":      (pubdate.text or "")[:16] if pubdate is not None else "",
-                })
-        return results
-    except Exception as e:
-        return []
 
-def fetch_github_releases(query, limit=4):
-    """Fetch GitHub release info for software matching the query."""
-    try:
-        import requests as req
-        # Extract main software name from query
-        software_terms = [w for w in query.lower().split()
-                         if len(w) > 3 and w not in
-                         {"what","when","where","which","latest","update","release","version","security","patch","bug","fix"}]
-        if not software_terms:
-            return []
-        search_term = software_terms[0]
-        r = req.get(
-            "https://api.github.com/search/repositories",
-            params={"q": search_term, "sort": "updated", "per_page": 3},
-            timeout=15
-        )
-        repos = r.json().get("items", [])
-        results = []
-        for repo in repos[:2]:
-            # Get latest release for each repo
-            owner = repo.get("owner", {}).get("login", "")
-            name  = repo.get("name", "")
-            try:
-                rel_r = req.get(
-                    f"https://api.github.com/repos/{owner}/{name}/releases/latest",
-                    timeout=10
-                )
-                if rel_r.status_code == 200:
-                    rel = rel_r.json()
-                    results.append({
-                        "title":     f"{name} {rel.get('tag_name','')} — {rel.get('name','')}",
-                        "subreddit": "GitHub",
-                        "sentiment": "Positive",
-                        "score":     0,
-                        "divergence": 0.0,
-                        "source":    "github",
-                        "url":       rel.get("html_url",""),
-                        "date":      rel.get("published_at","")[:10],
-                        "detail":    (rel.get("body","") or "")[:150],
-                    })
-            except:
-                pass
-        return results
-    except Exception as e:
-        return []
 
 
 def fetch_google_news(query, limit=5):
@@ -1955,77 +1878,19 @@ def run_demo(query: str):
     bar("═")
 
 
-def auto_mode(limit=5):
-    """AUTO MODE — fetch live Reddit questions and answer each one automatically."""
-    print("\n" + "="*58)
-    print("  AUTO MODE — Fetching latest Reddit questions...")
-    print("="*58)
+
+def _pause(prompt: str) -> str:
+    """Pause that is a no-op when stdin is not a terminal.
+
+    run_all.sh and any other pipe give the process no tty, so a bare pause
+    here raises EOFError mid-demo. Nobody is waiting to press Enter there.
+    """
+    if not sys.stdin.isatty():
+        return ""
     try:
-        # Fetch page 1 + page 2 = 200 live questions
-        questions = []
-        for page in [1, 2]:
-            r = requests.get(
-                "https://releasetrain.io/api/reddit/query/questions",
-                params={"page": page, "limit": 100},
-                timeout=15
-            )
-            data = r.json()
-            batch = data if isinstance(data, list) else data.get("data", [])
-            questions.extend(batch)
-    except Exception as e:
-        print(f"  Could not fetch questions: {e}")
-        return
-    if not questions:
-        print("  No questions returned from API.")
-        return
-    # ── MOD B: Score and rank by trending/usefulness ─────────────────
-    from datetime import datetime, timedelta
-    TOPIC_KW = ["update","version","broken","fix","install","upgrade",
-                "crash","not working","after update","latest","error",
-                "bug","fail","issue","stopped","missing","slow"]
-    cutoff_7d = (datetime.now() - timedelta(days=7)).isoformat()
-
-    def question_score(q):
-        title   = q.get("title","").lower()
-        upr     = float(q.get("upvote_ratio", 0) or 0)
-        nc      = int(q.get("num_comments", 0) or 0)
-        sc      = int(q.get("score", 0) or 0)
-        created = q.get("created_utc","")
-        sub     = q.get("subreddit","")
-        s = (upr * 10) + (nc * 0.5) + (sc * 0.1)
-        if any(kw in title for kw in TOPIC_KW): s += 5
-        if nc > 5:                               s += 3
-        if created and created >= cutoff_7d:     s += 2
-        v = extract_vendor(q.get("title",""), _subreddit_hint=sub)
-        if not v and sc < 5:                     s -= 5
-        return round(s, 2)
-
-    for q in questions:
-        q["_trend_score"] = question_score(q)
-    questions.sort(key=lambda x: x.get("_trend_score", 0), reverse=True)
-    questions = [q for q in questions if q.get("_trend_score", 0) > 0]
-
-    print(f"  Ranked {len(questions)} questions by trending score — showing top {limit}:")
-    print(f"  (sorted by: upvotes + comments + topic relevance + recency)")
-    for i, q in enumerate(questions[:limit], 1):
-        title = q.get("title", q.get("query", ""))
-        sub   = q.get("subreddit", "")
-        url   = q.get("url", "")
-        if not title:
-            continue
-        print("\n" + "-"*58)
-        print(f"  [{i}/{limit}]  r/{sub} [trend={q.get('_trend_score',0)}] ↑{q.get('score',0)} 💬{q.get('num_comments',0)}")
-        print(f"  Q: {title}")
-        if url:
-            print(f"  Reddit: {url}")
-        print("-"*58)
-        run_demo(title)
-        ans = input("\n  Press Enter for next (or q to quit auto mode): ")
-        if ans.strip().lower() == "q":
-            break
-    print("\n" + "="*58)
-    print("  Auto mode complete.")
-    print("="*58)
+        return input(prompt)
+    except EOFError:
+        return ""
 
 def interactive():
     print()
@@ -2053,7 +1918,7 @@ def interactive():
         elif user_input.lower() == "demo":
             for q in DEMO_QUERIES:
                 run_demo(q)
-                input("\n  Press Enter for next query...")
+                _pause("\n  Press Enter for next query...")
         elif user_input.lower() in ("auto", "auto mode"):
             try:
                 n = input("  How many questions to answer? (default 5): ").strip()
@@ -2100,9 +1965,46 @@ def auto_mode(limit=5):
         print("  ❌ No questions returned from API.")
         return
 
-    print(f"  Found {len(questions)} live questions — answering top {limit}:\n")
+    # ── Rank by trending/usefulness ──────────────────────────────────
+    # The endpoint returns questions newest-first, which buries the ones worth
+    # demonstrating under whatever happened to be posted last. Scoring them
+    # puts the interesting ones on screen: engaged with, on-topic for software
+    # updates, recent, and about a product the vendor detector can resolve.
+    from datetime import datetime, timedelta
+    TOPIC_KW = ["update","version","broken","fix","install","upgrade",
+                "crash","not working","after update","latest","error",
+                "bug","fail","issue","stopped","missing","slow"]
+    cutoff_7d = (datetime.now() - timedelta(days=7)).isoformat()
 
-    for i, q in enumerate(questions[:limit], 1):
+    def question_score(q):
+        title   = q.get("title","").lower()
+        upr     = float(q.get("upvote_ratio", 0) or 0)
+        nc      = int(q.get("num_comments", 0) or 0)
+        sc      = int(q.get("score", 0) or 0)
+        created = q.get("created_utc","")
+        sub     = q.get("subreddit","")
+        s = (upr * 10) + (nc * 0.5) + (sc * 0.1)
+        if any(kw in title for kw in TOPIC_KW): s += 5
+        if nc > 5:                               s += 3
+        if created and created >= cutoff_7d:     s += 2
+        v = extract_vendor(q.get("title",""), _subreddit_hint=sub)
+        if not v and sc < 5:                     s -= 5
+        return round(s, 2)
+
+    for q in questions:
+        q["_trend_score"] = question_score(q)
+    questions.sort(key=lambda x: x.get("_trend_score", 0), reverse=True)
+    ranked = [q for q in questions if q.get("_trend_score", 0) > 0]
+    # Never show nothing: if everything scored at or below zero, fall back to
+    # the unranked feed rather than reporting an empty auto mode.
+    if not ranked:
+        print("  No question scored above zero — showing the feed unranked.")
+        ranked = questions
+
+    print(f"  Ranked {len(ranked)} of {len(questions)} live questions "
+          f"(upvotes + comments + topic relevance + recency) — top {limit}:\n")
+
+    for i, q in enumerate(ranked[:limit], 1):
         title = q.get("title", q.get("query", ""))
         sub   = q.get("subreddit", "")
         url   = q.get("url", "")
@@ -2111,7 +2013,8 @@ def auto_mode(limit=5):
             continue
 
         print(f"\n" + "─"*58)
-        print(f"  [{i}/{limit}]  r/{sub}")
+        print(f"  [{i}/{limit}]  r/{sub}  trend={q.get('_trend_score', 0)} "
+              f"↑{q.get('score', 0)} 💬{q.get('num_comments', 0)}")
         print(f"  ❓  {title}")
         if url:
             print(f"  🔗  Reddit: {url}")
@@ -2122,7 +2025,7 @@ def auto_mode(limit=5):
         query_with_context = f"[r/{sub}] {title}" if sub else title
         run_demo(query_with_context)
 
-        ans = input("\n  Press Enter for next question (or q to quit): ")
+        ans = _pause("\n  Press Enter for next question (or q to quit): ")
         if ans.strip().lower() == "q":
             break
 
