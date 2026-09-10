@@ -513,7 +513,7 @@ Key entry points:
 | `test_apis.py` | Standalone test of the underlying data-source APIs |
 | `run_all.sh` | Shell script to run the full evaluation pipeline |
 | `eval_harness/` | IR + judge evaluation harness — generators, metrics, benchmarks, providers, findings |
-| `paper/` | TOSEM manuscript source (`tosem_amara.tex`) and its figures |
+| `paper/` | TOSEM manuscript source (`tosem_amara.tex`) and its figures — see [`paper/README.md`](paper/README.md) before editing the bibliography |
 | `docs/` | Working documentation — architecture, findings, running, benchmarks, deployment, roadmap |
 
 Data and results:
