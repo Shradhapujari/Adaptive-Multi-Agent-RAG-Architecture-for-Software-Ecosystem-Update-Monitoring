@@ -156,3 +156,85 @@ Per question, arm `embed`, measured on the reference machine.
 
 Union fetch roughly doubles the fan-out. That cost is the price of C2 and belongs in
 the paper next to the gain.
+
+
+## 7. Modules added since the n=300 run
+
+Five modules landed in Week 3 (PRs #18–#21). Grouped by the only distinction that
+matters for this file: whether a change to one can move a published number.
+
+| Module | Imported by | On the measured path | What it does |
+|---|---|:--:|---|
+| `yesno.py` | `app_1.py`, `scripts/eval_yesno.py` | no | Counts a thread's commenters for a question that takes a one-word answer |
+| `survey.py` | `app_1.py` | no | Weights the app's quality score by the n=52 survey's user priorities |
+| `xai.py` | `app_1.py` | no | Reasoning trace: why each source was retrieved, which claim rests on which |
+| `guardrail.py` | `answer_agent.py`, `xai.py` | no | Refuses a presented answer the evidence does not carry |
+| `model_select.py` | `answer_agent.py` | no | Picks the presenter model by role and reachability |
+| `agent_rules.py` | `multiagent_rag_v3.py`, `answer_agent.py`, `app_1.py` | **yes** | Prepends `AGENT_RULES.md` to every prompt |
+
+### 7.1 Demo-only stages
+
+`yesno`, `survey` and `xai` run inside `app_1.py` only. No generator in
+`eval_harness` imports them, so they cannot move a retrieval or faithfulness
+number, and a change to one needs no re-run. `app_1`'s own graph — temporal
+grounder, vendor/intent grounder, three source agents, presenter — is not the
+graph in §1; §1 is the harness's path through `multiagent_rag_v3`. The two
+share `grounding.ground` and `rerank`, and nothing else.
+
+The yes/no stage has its own retrieval: `/api/reddit/query/questions`, which
+returns comments inline, ranked with the same `BM25Reranker` §1 uses. It is
+gated on `looks_yesno(query, is_title=True)` and reports a count, never a
+synthesised claim. Measured in `scripts/eval_yesno.py` against a frozen
+snapshot — see `specs/status.md` §11.5 for the figures and their two caveats.
+
+### 7.2 Presenter path
+
+`answer_agent.present_answer` is imported by `app_1.py` and by nothing in
+`eval_harness`. The harness scores `build_synthesis_prompt`, which is
+deliberately unmodified (see the module docstring). So both of these change what
+the demo prints and leave the published faithfulness numbers alone:
+
+- **`guardrail.check(answer, evidence) -> Verdict`** — checks the generated
+  paragraph against the same evidence list the prompt was built from: versions,
+  dates and citation labels that appear in the answer must appear in the
+  evidence. Rule-based, for the same reason `yesno` is: the deployed host may
+  have no model, and a checker that needs one is off exactly when the fallback
+  prose is showing. An abstention is in bounds by construction — declining to
+  answer can never be a grounding violation — but only as far as
+  `benchmarks.is_abstention` recognises one: "The sources do not answer this
+  question." passes, "I could not find anything in the sources that answers
+  this." does not, and is then judged as an assertion. That recognition is
+  narrow and is being widened on `fix/guardrail-bare-integers-and-weak-abstention`;
+  until it lands, a refusal phrased outside the pattern is scored as a
+  violation. Every violation names its offending span.
+- **`model_select.select(role) -> Choice`** — probes reachability rather than
+  trusting a configured spec, and can exclude a model family so a judge does not
+  share one with a system under test (threat T2, `evaluation-protocol.md`). The
+  registry is a literal table; costs only break ties.
+
+### 7.3 `AGENT_RULES.md` is a prompt input, and it *is* on the measured path
+
+`agent_rules.rules_block()` is prepended inside `multiagent_rag_v3.call_llama`,
+which both `QueryRewriterAgent` and `EvaluatorAgent` call. The harness's marag
+arms use both agents, and `render_template` runs `EvaluatorAgent.run`. So a
+markdown file outside the code is now part of the prompt of every measured arm
+that calls a model.
+
+That is a deliberate feature — behaviour changes with no code change — and it is
+also a new way for a comparison to go silently wrong. Three consequences:
+
+1. **The published n=300 numbers (§10.1 of `status.md`) predate it.** They were
+   produced with prompts that carried no rules block. Any new run is not
+   comparable to them on the answer-quality metrics without saying so.
+2. **A run's provenance must record the file.** `results/PROVENANCE.md` records
+   corpus, models and reranker; it has no field for prompt inputs. Until it
+   does, the hash of `AGENT_RULES.md` at run time is unrecorded and a run cannot
+   be reproduced from the artifacts alone.
+3. **Replay keyed on prompt text will miss** on every model call after the file
+   changes, and per §4 a model-host miss is counted but does not void the run —
+   so this failure is quiet by design. That policy was written for arms that
+   legitimately differ; a rules edit is not that.
+
+Editing `AGENT_RULES.md` between two runs is therefore an experimental change,
+not a documentation change, and belongs in the same commit as this file per the
+contract note at the top.
