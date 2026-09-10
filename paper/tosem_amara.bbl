@@ -206,7 +206,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{An {LLM}-Based Agent-Oriented Approach for
   Automated Code Design Issue Localization}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 47th {IEEE/ACM} International
-  Conference on Software Engineering ({ICSE})}}. \bibinfo{pages}{1320--1332}.
+  Conference on Software Engineering ({ICSE})}}. \bibinfo{publisher}{IEEE},
+  \bibinfo{address}{Piscataway, NJ, USA}, \bibinfo{pages}{1320--1332}.
 \newblock
 \href{https://doi.org/10.1109/ICSE55347.2025.00100}{doi:\nolinkurl{10.1109/ICSE55347.2025.00100}}
 
@@ -257,7 +258,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Reformulate, Retrieve, Localize: Agents for
   Repository-Level Bug Localization}. In \bibinfo{booktitle}{\emph{Proceedings
   of the 7th International Workshop on Bots and Agents in Software Engineering
-  ({BotSE})}}. \bibinfo{pages}{39--45}.
+  ({BotSE})}}. \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
+  \bibinfo{pages}{39--45}.
 \newblock
 \href{https://doi.org/10.1145/3786161.3788460}{doi:\nolinkurl{10.1145/3786161.3788460}}
 
@@ -352,6 +354,7 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Retrieval Augmented Generation ({RAG}) for Fintech:
   Agentic Design and Evaluation}. In \bibinfo{booktitle}{\emph{2025 3rd
   International Conference on Foundation and Large Language Models ({FLLM})}}.
+  \bibinfo{publisher}{IEEE}, \bibinfo{address}{Piscataway, NJ, USA},
   \bibinfo{pages}{93--100}.
 \newblock
 \href{https://doi.org/10.1109/FLLM67465.2025.11391155}{doi:\nolinkurl{10.1109/FLLM67465.2025.11391155}}
@@ -377,7 +380,8 @@ Retrieved August 2026 from \tempurl}
   {and} \bibinfo{person}{M.~M. Kholoosi}.} \bibinfo{year}{2023}\natexlab{}.
 \newblock \showarticletitle{Data Quality for Software Vulnerability Datasets}.
   In \bibinfo{booktitle}{\emph{Proceedings of the 45th {IEEE/ACM} International
-  Conference on Software Engineering ({ICSE})}}. \bibinfo{pages}{121--133}.
+  Conference on Software Engineering ({ICSE})}}. \bibinfo{publisher}{IEEE},
+  \bibinfo{address}{Piscataway, NJ, USA}, \bibinfo{pages}{121--133}.
 \newblock
 \href{https://doi.org/10.1109/ICSE48619.2023.00022}{doi:\nolinkurl{10.1109/ICSE48619.2023.00022}}
 
@@ -390,6 +394,7 @@ Retrieved August 2026 from \tempurl}
   Vulnerability Severity across Data Sources}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 29th {IEEE} International
   Conference on Software Analysis, Evolution and Reengineering ({SANER})}}.
+  \bibinfo{publisher}{IEEE}, \bibinfo{address}{Piscataway, NJ, USA},
   \bibinfo{pages}{338--348}.
 \newblock
 \href{https://doi.org/10.1109/SANER53432.2022.00050}{doi:\nolinkurl{10.1109/SANER53432.2022.00050}}
@@ -464,7 +469,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Large Language Models for Software Engineering:
   Survey and Open Problems}. In \bibinfo{booktitle}{\emph{2023 {IEEE/ACM}
   International Conference on Software Engineering: Future of Software
-  Engineering ({ICSE-FoSE})}}. \bibinfo{pages}{31--53}.
+  Engineering ({ICSE-FoSE})}}. \bibinfo{publisher}{IEEE},
+  \bibinfo{address}{Piscataway, NJ, USA}, \bibinfo{pages}{31--53}.
 \newblock
 \href{https://doi.org/10.1109/ICSE-FoSE59343.2023.00008}{doi:\nolinkurl{10.1109/ICSE-FoSE59343.2023.00008}}
 
@@ -565,6 +571,7 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Automatic Query Reformulations for Text Retrieval
   in Software Engineering}. In \bibinfo{booktitle}{\emph{Proceedings of the
   35th International Conference on Software Engineering ({ICSE})}}.
+  \bibinfo{publisher}{IEEE}, \bibinfo{address}{Piscataway, NJ, USA},
   \bibinfo{pages}{842--851}.
 \newblock
 \href{https://doi.org/10.1109/ICSE.2013.6606630}{doi:\nolinkurl{10.1109/ICSE.2013.6606630}}
@@ -605,6 +612,7 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Are Deep Neural Networks the Best Choice for
   Modeling Source Code?}. In \bibinfo{booktitle}{\emph{Proceedings of the 2017
   11th Joint Meeting on Foundations of Software Engineering ({ESEC/FSE})}}.
+  \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
   \bibinfo{pages}{763--773}.
 \newblock
 \href{https://doi.org/10.1145/3106237.3106290}{doi:\nolinkurl{10.1145/3106237.3106290}}
@@ -660,6 +668,7 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Coverage Is Not Strongly Correlated with Test Suite
   Effectiveness}. In \bibinfo{booktitle}{\emph{Proceedings of the 36th
   International Conference on Software Engineering ({ICSE})}}.
+  \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
   \bibinfo{pages}{435--445}.
 \newblock
 \href{https://doi.org/10.1145/2568225.2568271}{doi:\nolinkurl{10.1145/2568225.2568271}}
@@ -846,6 +855,7 @@ Retrieved August 2026 from \tempurl}
   Hypocritical Paper Section or Essential Analysis?}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 18th {ACM/IEEE} International
   Symposium on Empirical Software Engineering and Measurement ({ESEM})}}.
+  \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
   \bibinfo{pages}{314--324}.
 \newblock
 \href{https://doi.org/10.1145/3674805.3686691}{doi:\nolinkurl{10.1145/3674805.3686691}}
@@ -891,7 +901,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{A Large-Scale Survey on the Usability of {AI}
   Programming Assistants: Successes and Challenges}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 46th {IEEE/ACM} International
-  Conference on Software Engineering ({ICSE})}}. \bibinfo{pages}{1--13}.
+  Conference on Software Engineering ({ICSE})}}. \bibinfo{publisher}{ACM},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{1--13}.
 \newblock
 \href{https://doi.org/10.1145/3597503.3608128}{doi:\nolinkurl{10.1145/3597503.3608128}}
 
@@ -1037,6 +1048,7 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Retrieval-Based Prompt Selection for Code-Related
   Few-Shot Learning}. In \bibinfo{booktitle}{\emph{Proceedings of the 45th
   {IEEE/ACM} International Conference on Software Engineering ({ICSE})}}.
+  \bibinfo{publisher}{IEEE}, \bibinfo{address}{Piscataway, NJ, USA},
   \bibinfo{pages}{2450--2462}.
 \newblock
 \href{https://doi.org/10.1109/ICSE48619.2023.00205}{doi:\nolinkurl{10.1109/ICSE48619.2023.00205}}
@@ -1100,6 +1112,7 @@ Retrieved August 2026 from \tempurl}
   Detection? A Large Scale Empirical Study on the Relationship between Mutants
   and Real Faults}. In \bibinfo{booktitle}{\emph{Proceedings of the 40th
   International Conference on Software Engineering ({ICSE})}}.
+  \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
   \bibinfo{pages}{537--548}.
 \newblock
 \href{https://doi.org/10.1145/3180155.3180183}{doi:\nolinkurl{10.1145/3180155.3180183}}
@@ -1161,7 +1174,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Construct Validity in Software Engineering Research
   and Software Metrics}. In \bibinfo{booktitle}{\emph{Proceedings of the 22nd
   International Conference on Evaluation and Assessment in Software Engineering
-  ({EASE})}}. \bibinfo{pages}{13--23}.
+  ({EASE})}}. \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
+  \bibinfo{pages}{13--23}.
 \newblock
 \href{https://doi.org/10.1145/3210459.3210461}{doi:\nolinkurl{10.1145/3210459.3210461}}
 
@@ -1284,7 +1298,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Views on Internal and External Validity in
   Empirical Software Engineering}. In \bibinfo{booktitle}{\emph{Proceedings of
   the 37th {IEEE/ACM} International Conference on Software Engineering
-  ({ICSE})}}. \bibinfo{pages}{9--19}.
+  ({ICSE})}}. \bibinfo{publisher}{IEEE}, \bibinfo{address}{Piscataway, NJ,
+  USA}, \bibinfo{pages}{9--19}.
 \newblock
 \href{https://doi.org/10.1109/ICSE.2015.24}{doi:\nolinkurl{10.1109/ICSE.2015.24}}
 
@@ -1296,7 +1311,8 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{year}{2007}\natexlab{}.
 \newblock \showarticletitle{The Future of Empirical Methods in Software
   Engineering Research}. In \bibinfo{booktitle}{\emph{Future of Software
-  Engineering ({FOSE} '07)}}. \bibinfo{pages}{358--378}.
+  Engineering ({FOSE} '07)}}. \bibinfo{publisher}{IEEE},
+  \bibinfo{address}{Piscataway, NJ, USA}, \bibinfo{pages}{358--378}.
 \newblock
 \href{https://doi.org/10.1109/FOSE.2007.30}{doi:\nolinkurl{10.1109/FOSE.2007.30}}
 
@@ -1393,6 +1409,7 @@ Retrieved August 2026 from \tempurl}
   Human-{AI} Collaboration in Software Engineering}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 2nd {IEEE/ACM} International
   Conference on {AI} Foundation Models and Software Engineering ({FORGE})}}.
+  \bibinfo{publisher}{IEEE}, \bibinfo{address}{Piscataway, NJ, USA},
   \bibinfo{pages}{236--240}.
 \newblock
 \href{https://doi.org/10.1109/Forge66646.2025.00033}{doi:\nolinkurl{10.1109/Forge66646.2025.00033}}
@@ -1645,7 +1662,8 @@ Retrieved August 2026 from \tempurl}
 \newblock \showarticletitle{Are Code Examples on an Online {Q\&A} Forum
   Reliable? A Study of {API} Misuse on {Stack} {Overflow}}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 40th International Conference on
-  Software Engineering ({ICSE})}}. \bibinfo{pages}{886--896}.
+  Software Engineering ({ICSE})}}. \bibinfo{publisher}{ACM},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{886--896}.
 \newblock
 \href{https://doi.org/10.1145/3180155.3180260}{doi:\nolinkurl{10.1145/3180155.3180260}}
 
@@ -1738,6 +1756,7 @@ Retrieved August 2026 from \tempurl}
   Narrowing the Gap with Human Evaluation in {SE}}. In
   \bibinfo{booktitle}{\emph{Proceedings of the 40th {IEEE/ACM} International
   Conference on Automated Software Engineering ({ASE})}}.
+  \bibinfo{publisher}{IEEE}, \bibinfo{address}{Piscataway, NJ, USA},
   \bibinfo{pages}{2606--2618}.
 \newblock
 \href{https://doi.org/10.1109/ASE63991.2025.00214}{doi:\nolinkurl{10.1109/ASE63991.2025.00214}}

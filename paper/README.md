@@ -58,22 +58,32 @@ needed, but check them against `references.bib` before trusting a field.
 
 ## Outstanding BibTeX warnings
 
-56 remain, down from 180. Each needs a per-entry lookup and an author's
-judgement about what to assert, so none should be closed by a script:
+18 remain, down from 180. They come from seven entries, and every one is a
+property of where the work was published rather than a gap in the record:
 
-- **22 empty publisher, 23 empty address.** Nearly all are `{IEEE/ACM}`
-  co-sponsored SE venues — ICSE, ASE, ESEM — where the publisher of record
-  alternates by year between IEEE and ACM. The three ICLR papers have no
-  publisher at all; ICLR proceedings are OpenReview.
-- **8 missing page numbers.** ICLR, NeurIPS and ICML papers do not have them.
-- **3 missing volume or number.** TMLR is a rolling journal without volumes;
-  the two TOSEM entries are forthcoming and have no issue assigned.
+| Entries | Missing | Why |
+|---|---|---|
+| `asai2024selfrag`, `hong2024metagpt`, `jimenez2024swebench` | publisher, address, pages | ICLR proceedings are OpenReview: no publisher and no page numbers exist. |
+| `thakur2021beir`, `zhuge2024` | pages (and address for PMLR) | NeurIPS Datasets & Benchmarks and ICML papers are not paginated. |
+| `izacard2022contriever` | volume, number, pages | TMLR is a rolling journal; it issues neither. |
+| `liu2026agentsurvey`, `mamun2026blagent` | volume, number, pages | Forthcoming in TOSEM, no issue assigned yet. Fill these in once they appear. |
 
-The warnings that *were* mechanical are already fixed: fifteen arXiv preprints
-typed as `@article` with a `journal` field (a preprint has no volume, number or
-pages, so each raised three warnings), and three repository entries with no
-year, dated from the GitHub API rather than from their citation keys — note
-that `flashrag2025repo` was in fact created in March 2024.
+Do not "fix" these by inventing values. The only one that will ever resolve is
+the last row, when those two papers are assigned an issue.
+
+### How the rest were fixed
+
+The publisher and address of a co-sponsored SE venue cannot be guessed --
+it alternates. Verified against Crossref by title and year, ICSE alone runs
+IEEE in 2013, ACM in 2014, IEEE in 2015, ACM in 2018, IEEE in 2023, ACM in
+2024, IEEE in 2025. All 19 were resolved that way, each to an exact title
+match with a DOI; the DOIs are in the lookup log if they are ever wanted in
+the entries themselves.
+
+Earlier passes fixed the mechanical cases: fifteen arXiv preprints typed as
+`@article` with a `journal` field (a preprint has no volume, number or pages,
+so each raised three warnings), three repository entries with no year, and 45
+proceedings whose venue names its own publisher.
 
 ## Where the numbers come from
 
