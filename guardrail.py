@@ -36,6 +36,12 @@ _CITE_RE = re.compile(r"\[([^\[\]\n]{1,120})\]")
 # Dates are checked separately; cut them out before the version pass so a
 # dotted date form cannot arrive as a version.
 _ISO_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+# A version claim in prose is a product name followed by a number: "Fedora 45",
+# "Chrome v155". A bare number on its own is a count, a year or a day, which is
+# why the dotted-only pass above ignores it -- but "Fedora 45" against a source
+# that only knows Fedora 44 is exactly the invention this module exists to
+# catch, so the pair is checked even when the number is bare.
+_NAMED_VERSION_RE = re.compile(r"\b([A-Za-z][A-Za-z0-9+#.-]{1,30})\s+v?(\d+(?:\.\d+)*)\b")
 
 
 @dataclass
@@ -75,6 +81,12 @@ def _lines(evidence: Sequence) -> Tuple[str, set]:
     return "\n".join(parts), labels
 
 
+def _named_versions(text: str) -> List[Tuple[str, str]]:
+    """(product, version) pairs as prose states them: "Fedora 45" -> ("fedora", "45")."""
+    return [(m.group(1).lower(), m.group(2))
+            for m in _NAMED_VERSION_RE.finditer(text or "")]
+
+
 def check(answer: str, evidence: Sequence) -> Verdict:
     """Check a presented answer against the evidence it was built from."""
     text = (answer or "").strip()
@@ -105,10 +117,28 @@ def check(answer: str, evidence: Sequence) -> Verdict:
     if not cited and not abstained:
         bad.append(Violation("uncited", f"{len(labels)} sources given, none cited"))
 
+    _known: dict = {}
+    for product, v in _named_versions(_ISO_RE.sub(" ", haystack)):
+        _known.setdefault(product, set()).add(v)
+
     known_versions = set(extract_versions(_ISO_RE.sub(" ", haystack), multipart_only=True))
     for v in extract_versions(_ISO_RE.sub(" ", text), multipart_only=True):
         if v not in known_versions:
             bad.append(Violation("unsupported_version", f"{v!r} is in no source"))
+
+    for product, claimed in _named_versions(text):
+        if "." in claimed:
+            continue                      # already checked exactly, above
+        known = _known.get(product)
+        # Only products the sources themselves version are checked. "returned 5
+        # release(s)" and "Sep 8" match the same shape, and "returned" and "Sep"
+        # are not products anyone shipped, so they are not version claims.
+        if known and not any(k == claimed or k.startswith(claimed + ".")
+                             for k in known):
+            bad.append(Violation(
+                "unsupported_version",
+                f"{product} {claimed} is in no source (sources have "
+                f"{', '.join(sorted(known))})"))
 
     known_dates = set(extract_dates(haystack))
     for d in extract_dates(text):
@@ -132,6 +162,8 @@ def _demo() -> None:
                  date="2026-09-01", security=True, detail="kernel 6.17.2"),
         Evidence(label="C1", kind="community", title="Anyone else losing grub?",
                  date="2026-09-02"),
+        Evidence(label="R2", kind="release", title="Chrome v155.0.8047 released",
+                 date="2026-09-08"),
     ]
 
     good = "Fedora 44 shipped on 2026-09-01 with kernel 6.17.2 [R1], and users report grub loss [C1]."
@@ -148,6 +180,16 @@ def _demo() -> None:
     # dotted forms are what the domain decides on, per extract_versions.
     counts = "The feed returned 5 release(s); kernel 6.17.2 is in 2 of them [R1]."
     assert check(counts, ev).ok, check(counts, ev).violations
+
+    # The prefix rule: a bare major is checked when the sources version that
+    # product, and a source's 155.0.8047 is what makes "Chrome 155" true.
+    assert check("Chrome 155 shipped [R2].", ev).ok, check("Chrome 155 shipped [R2].", ev).violations
+    assert check("Fedora 44 shipped [R1].", ev).ok            # exact, bare in the source
+    v = check("Fedora 45 is out [R1].", ev)
+    assert [x.code for x in v.violations] == ["unsupported_version"], v.violations
+    assert "sources have 44" in v.violations[0].detail, v.violations[0].detail
+    # Products the sources do not version are not version claims at all.
+    assert check("Debian 13 is unaffected [R1].", ev).ok
 
     # One weak marker used to skip every check below it. UNKNOWN is a literal
     # security-type value in this domain's release rows, so a model echoing it
