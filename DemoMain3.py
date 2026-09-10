@@ -31,17 +31,19 @@ Usage:
     python DemoMain3.py "Which subreddits are most negative?"
     python DemoMain3.py demo
 Requirements:
-    pip install langchain langchain-core langchain-ollama ollama python-dotenv
+    pip install langchain-classic langchain-core langchain-ollama ollama python-dotenv
     ollama pull llama3.1
 """
 import json
 import sys
 from pathlib import Path
 from langchain_ollama import ChatOllama
-from langchain.tools import tool
-from langchain.agents import create_react_agent, AgentExecutor
+# langchain 1.x dropped the legacy ReAct agent (create_react_agent/AgentExecutor)
+# that this demo is built on; `langchain-classic` is its maintained home.
+from langchain_classic.tools import tool
+from langchain_classic.agents import create_react_agent, AgentExecutor
 from langchain_core.prompts import PromptTemplate
-from langchain.callbacks.base import BaseCallbackHandler
+from langchain_classic.callbacks.base import BaseCallbackHandler
 # ─────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────
