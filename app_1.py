@@ -34,7 +34,7 @@ from typing import Dict, List, Optional
 from temporal import resolve_temporal, matches_window
 from fetch_union import union_fetch, product_terms
 from agent_rules import rules_block
-from answer_agent import present_answer, _resolve_spec
+from answer_agent import present_answer
 from store import open_store, caching_fetch
 from grounding import ground
 import vendor
@@ -664,6 +664,29 @@ def _xai_panel(trace) -> str:
     return "\n".join(out)
 
 
+def _presenter_caption(configured: str, presented=None) -> str:
+    """The sidebar's presenter line, before a run and after one.
+
+    A string and not an `st.caption` call for the same reason `_agent_table`
+    and `_xai_panel` are: it is the part worth testing, and a Streamlit runtime
+    is not needed to test it.
+
+    Before a run there is nothing to report but intent, and stating it is the
+    honest version -- claiming a model the run has not reached yet is what the
+    probe was there to avoid, at the cost of blocking the page on it.
+    """
+    if presented is None:
+        if configured:
+            return f"Presenter model: `{configured}` — configured."
+        return ("Presenter model: chosen when you ask — the cheapest reachable "
+                "one, or rule-based prose if none answers.")
+    if presented.mode == "llm":
+        how = "configured" if configured else "selected as the cheapest reachable"
+        return f"Presenter model: `{presented.model}` — {how}."
+    return ("Presenter model: none used — cited paragraph composed rule-based "
+            f"({presented.note}).")
+
+
 def _agent_table(results=None, presented=None) -> str:
     """The sidebar's agent roster, reporting what each agent actually did.
 
@@ -762,14 +785,15 @@ with st.sidebar:
     # Not `presenter_spec() or rule-based`: the presenter falls back to
     # whatever model_select finds reachable, so on a host with Ollama running
     # this caption promised rule-based prose and the run then used llama3.1.
-    configured = presenter_spec()
-    spec = _resolve_spec(configured or None)
-    if spec:
-        how = "configured" if configured else "selected as the cheapest reachable"
-        st.caption(f"Presenter model: `{spec}` — {how}.")
-    else:
-        st.caption("Presenter model: none reachable — cited paragraph is "
-                   "composed rule-based.")
+    # A slot, not a probe -- for the same reason the roster above it is a slot:
+    # report the run, not the configuration. Resolving the spec here named a
+    # model on the strength of one probe, and `_selected_spec` caches that
+    # probe for the life of the process, so an Ollama that stops answering
+    # after the first page load leaves this line naming llama3.1 while every
+    # answer under it is composed rule-based. Which model wrote the paragraph
+    # is a fact only once one has, and `presented` carries it.
+    presenter_slot = st.empty()
+    presenter_slot.caption(_presenter_caption(presenter_spec()))
     st.divider()
 
     st.markdown("#### ⚙️ Settings")
@@ -1264,6 +1288,7 @@ elif run_btn and query:
     # The roster now describes this run: which feeds answered, whether the
     # rewrite came from a model, how many advisories were separated out.
     agent_status_slot.markdown(_agent_table(results, presented))
+    presenter_slot.caption(_presenter_caption(presenter_spec(), presented))
 
     # The trace is what knows which sources the answer actually cited, so it is
     # built before the caption rather than inside the expander below: the
