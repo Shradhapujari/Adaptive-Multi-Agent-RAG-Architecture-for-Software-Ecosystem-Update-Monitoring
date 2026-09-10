@@ -46,13 +46,15 @@ is exactly what makes the trap possible.
 | `references.bib` | The **only** bibliography source; `\bibliography{references}` cites it alone. |
 | `tosem_amara.bbl` | Generated from the above. Typeset directly. See the warning. |
 | `ACM-Reference-Format.bst` | ACM's style file. |
-| `references_se.bib`, `references_upgrades.bib`, `refs.bib`, `refs_1.bib`, `refs_2.bib` | **Not cited.** Editing them has no effect. |
-| `frag_*.tex` | Older standalone drafts. Nothing `\input`s them; they have drifted from the body and are not the paper. |
 
-Five uncited `.bib` files and six orphaned `.tex` fragments are the second way
-to spend an afternoon on an edit that cannot appear in the output. If any hold
-entries still worth keeping, merge them into `references.bib`; otherwise they
-are safe to delete.
+Everything tracked in `paper/` is live. Five uncited `.bib` files and six
+orphaned `frag_*.tex` drafts used to sit here and were removed in
+`docs/paper-dead-files`: they were a second way to spend an afternoon on an
+edit that could not reach the output. Only one entry in any of them was worth
+keeping (Self-RAG's arXiv id, now folded in), and several actively disagreed
+with `references.bib` on authors, venue and arXiv id -- the copies here were
+older and wrong, not merely redundant. Recover them from git history if ever
+needed, but check them against `references.bib` before trusting a field.
 
 ## Outstanding BibTeX warnings
 
