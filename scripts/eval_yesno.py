@@ -23,7 +23,13 @@ mean anything, and none is reported.
 The feed is frozen to data/yesno_questions_50/snapshot.json. It is live and
 reorders daily; re-fetching would silently measure a different set.
 
-    python3 scripts/eval_yesno.py
+Both fixes to `looks_yesno` were derived from that first 50, so its figures
+are in-sample. `--set fresh` runs the identical procedure over a second,
+non-overlapping 50 (page 2 of the same feed, frozen 2026-09-10, labelled
+after the classifier was frozen): the out-of-sample number.
+
+    python3 scripts/eval_yesno.py            # the original 50 (in-sample)
+    python3 scripts/eval_yesno.py --set fresh
 """
 
 from __future__ import annotations
@@ -36,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import yesno  # noqa: E402
 
-SNAPSHOT = Path(__file__).resolve().parent.parent / "data" / "yesno_questions_50" / "snapshot.json"
+DATA = Path(__file__).resolve().parent.parent / "data"
 
 # Index -> why this post is a genuine yes/no question. Anything not listed was
 # labelled "not yes/no": overwhelmingly help requests ("how do I fix this"),
@@ -68,8 +74,66 @@ TRUE_VERDICT = {
 }
 
 
-def load() -> list:
-    snap = json.loads(SNAPSHOT.read_text())
+# ---- Second, non-overlapping 50 ------------------------------------------
+# Page 2 of the same feed, frozen 2026-09-10 after both classifier fixes had
+# landed, so nothing below was seen while the rules were being written. Same
+# protocol: full body read for every post; every comment read on the genuine
+# yes/no threads. The 13 genuine questions split into two shapes, and the
+# split is the finding: 5 carry the question in the title, 8 ask it mid-body
+# ("Has anyone else encountered this ...") under a declarative title. That
+# second shape was one post in the first 50 ("592 Updates") and is the
+# majority here.
+IS_YESNO_FRESH = {
+    0:  "anyone seeing TRIM issues on Proxmox after the May Windows update",
+    2:  "are the duplicate docker images safe to delete",
+    12: "anyone else had the KDE desktop go unresponsive after sleep",   # mid-body
+    18: "is anyone else seeing Chrome run hot after the update",         # mid-body
+    19: "are Intune check-in and registration broken on Linux",
+    21: "has this happened to anyone else on iOS 26",                    # title is A-or-B; the head-count ask is mid-body
+    25: "anyone else have the mask-editor lag in Firefox",               # mid-body, under a "What happened" title
+    27: "is someone else having the invalid-licence issue",              # mid-body
+    28: "is 42-45 C idle normal after the update",                       # mid-body
+    35: "have you encountered no sites loading after the Chrome update",  # mid-body
+    36: "has anyone experienced the iPad losing internet on 17.7.11",     # mid-body
+    39: "anyone uploading HDR photos with WordPress 7.1",
+    45: "has anyone else had Remote Home-Assistant fail since the update",  # mid-body
+}
+# Not genuine, and flagged anyway (the false positives), for the record:
+#   3  "Dell Micro 3080 and Unifi 5 OS?"  -- a noun phrase with a "?", no ask.
+#      Tallied anyway as "No (1 users)": "working fine" fired inside a comment
+#      that opens "it's not just you". The one vote points the wrong way.
+#   5  "... the chances i might get hired ?"  -- a degree, not a yes/no; off-topic
+#  22  "... Suggestions for troubleshooting?"  -- an open request
+#  44  "... driver issue?"  -- body is a help request (akmod build failed)
+#  49  "... one works and the other doesn't?"  -- a why-question; body asks for a setting
+
+TRUE_VERDICT_FRESH = {
+    0:  "yes",  # "I had a similar issue on a Windows 2019 server"; a workaround link
+    2:  "yes",  # "unreferenced and safe to remove"; "old versions that lost their tag"
+    12: "yes",  # named as two bugs in xwaylandvideobridge with a fix version
+    18: None,   # two troubleshooting suggestions, nobody reports the same
+    19: "yes",  # "Can confirm", "Same here", "Same issue on our end", "We have noticed this"
+    21: None,   # one comment answers the A-or-B (hardware); nobody says it happened to them
+    25: None,   # "No clue", then a plugin recommendation
+    27: "yes",  # "welcome to the club"; Netgate staff confirm the promotion ended.
+                # The tally also says yes -- but off a sarcastic "Yes. How dare
+                # we." from the staff reply, not off "welcome to the club". Right
+                # for the wrong reason; counted as a hit below, flagged here.
+    28: "no",   # power it down; "probably something running in the background"
+    35: None,   # "I don't have that behavior but the equivalent" -- neither
+    36: None,   # both comments are questions back at the asker
+    39: None,   # two comments about 7.1's features; nobody says they are
+    45: None,   # no comments at all
+}
+
+SETS = {
+    "original": (DATA / "yesno_questions_50" / "snapshot.json", IS_YESNO, TRUE_VERDICT),
+    "fresh":    (DATA / "yesno_questions_50_fresh" / "snapshot.json", IS_YESNO_FRESH, TRUE_VERDICT_FRESH),
+}
+
+
+def load(snapshot: Path) -> list:
+    snap = json.loads(snapshot.read_text())
     print(f"snapshot {snap['fetched_utc']}  sha256 {snap['sha256'][:12]}  n={snap['n']}")
     return snap["data"]
 
@@ -80,10 +144,11 @@ def detected(row: dict) -> bool:
             or yesno.looks_yesno(row.get("author_description") or ""))
 
 
-def main() -> int:
-    rows = load()
+def main(which: str = "original") -> int:
+    snapshot, is_yesno, true_verdict = SETS[which]
+    rows = load(snapshot)
     flagged = {i for i, r in enumerate(rows) if detected(r)}
-    truth = set(IS_YESNO)
+    truth = set(is_yesno)
 
     tp, fp, fn = flagged & truth, flagged - truth, truth - flagged
     print(f"\nDETECTION over {len(rows)} questions")
@@ -102,21 +167,21 @@ def main() -> int:
     for i in sorted(fn):
         print(f"    [{i:2d}] {rows[i]['title'][:60]}")
 
-    answerable = [i for i in sorted(truth) if TRUE_VERDICT[i] is not None]
+    answerable = [i for i in sorted(truth) if true_verdict[i] is not None]
     print(f"\nVERDICT over the {len(truth)} genuine yes/no questions")
     decided = correct = 0
     for i in sorted(truth):
         t = yesno.tally(rows[i])
         call = ("yes" if t["yes"] > t["no"] else "no" if t["no"] > t["yes"]
                 else "split") if t["answered"] else None
-        want = TRUE_VERDICT[i]
+        want = true_verdict[i]
         if call is not None:
             decided += 1
             correct += (call == want)
             mark = "ok " if call == want else "WRONG"
         else:
             mark = "abstain" if want is None else "MISS"
-        print(f"  [{i:2d}] {mark:7s} system={str(call):5s} truth={str(want):5s}  {IS_YESNO[i][:44]}")
+        print(f"  [{i:2d}] {mark:7s} system={str(call):5s} truth={str(want):5s}  {is_yesno[i][:44]}")
 
     print(f"\n  answerable from the comments   : {len(answerable)} of {len(truth)}"
           f"  (the rest have no answer in them, and abstaining is correct)")
@@ -126,4 +191,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--set", choices=sorted(SETS), default="original")
+    raise SystemExit(main(ap.parse_args().set))
