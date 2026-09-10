@@ -452,9 +452,20 @@ def _step(label: str, show: bool):
 
 def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
                  yesno_on: bool = True, unclear_as_no: bool = False,
-                 survey_on: bool = True) -> dict:
-    """Main orchestrator — runs all 4 agents and returns results."""
+                 survey_on: bool = True, source: str = "agent",
+                 reddit_id: Optional[str] = None) -> dict:
+    """Main orchestrator — runs all 4 agents and returns results.
+
+    `source` picks where documents come from: "lake" hits releasetrain.io
+    only, "store" reads the local store only, "agent" (default) fetches live
+    and lets the retrieval agent fall back to the store per feed on outage.
+    `reddit_id` is a thread the user picked from the questions feed; its
+    comments become the thread answered from, instead of a BM25 search.
+    """
     results = {
+        "source":          source,
+        "thread":          None,
+        "top_comment":     None,
         "original_query":  query,
         "grounded_query":  query,
         "temporal":        None,
@@ -531,9 +542,18 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # retrieved. The wrapper is transparent to `union_fetch`, which takes the
     # fetch function as an argument precisely so it can be substituted.
     db = get_store()
-    community_fetch = caching_fetch(db, "community", fetch_community_feedback)
-    release_fetch   = caching_fetch(db, "release",   fetch_release_notes)
-    cve_fetch       = caching_fetch(db, "cve",       fetch_cve_data)
+    if source == "store" and db is not None:
+        def _from_store(pool):
+            return lambda q, limit=5, **kw: db.search(q, pool=pool, limit=limit)
+        community_fetch = _from_store("community")
+        release_fetch   = _from_store("release")
+        cve_fetch       = _from_store("cve")
+    else:
+        # "lake": no store, so a live miss is a miss. "agent": store fallback.
+        _db = None if source == "lake" else db
+        community_fetch = caching_fetch(_db, "community", fetch_community_feedback)
+        release_fetch   = caching_fetch(_db, "release",   fetch_release_notes)
+        cve_fetch       = caching_fetch(_db, "cve",       fetch_cve_data)
 
     # Both pools are fetched deeper than they are shown, because the filters
     # in step 4b run *after* the fetch and cutting to `limit` first leaves them
@@ -615,11 +635,21 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # comments of the thread that was retrieved for them: this counts what
     # other people answered, it does not infer an answer from the documents.
     results["yesno"] = None
+    # A thread the user picked is the thread; otherwise search for one only
+    # when the question is shaped to be answered off comments at all.
+    thread = yesno.fetch_thread(reddit_id) if reddit_id else None
     # `is_title=True`: what the user typed is the question itself, the same
     # shape a post's title is, not prose with a question somewhere inside it.
-    if yesno_on and yesno.looks_yesno(query, is_title=True):
+    # A picked thread is judged by its own title; a searched one by the query
+    # that found it -- the thread's title may be a bare "fedora update".
+    yesno_shaped = yesno.looks_yesno(thread.get("title", "") if thread else query,
+                                     is_title=True)
+    if thread is None and yesno_on and yesno_shaped:
         thread = yesno.find_thread(query)
-        if thread is not None:
+    if thread is not None:
+        results["thread"] = thread
+        results["top_comment"] = yesno.top_comment(thread)
+        if yesno_on and yesno_shaped:
             results["yesno"] = {**yesno.tally(thread, unclear_as_no=unclear_as_no),
                                 "thread": thread}
 
@@ -807,19 +837,30 @@ with st.sidebar:
     st.markdown("#### ⚙️ Settings")
     mode = st.radio(
         "Answering mode",
-        ["Multi-agent pipeline", "Single agent (paper baseline)"],
+        ["Multi-agent pipeline", "Single agent (paper baseline)",
+         "Compare both side by side"],
         help="The baseline is the evaluation's own `single_agent` arm: raw "
              "query to the retriever and one synthesis call, with every "
              "coordinating agent removed. Same question, so the difference on "
              "screen is the difference the paper measures.")
     single_mode = mode.startswith("Single")
+    compare_mode = mode.startswith("Compare")
+    source_label = st.radio(
+        "Data source",
+        ["Retrieval agent decides", "Lake only (releasetrain.io live)",
+         "Local store only"],
+        help="Agent: fetch live, fall back to the local store per feed when an "
+             "endpoint is down, and let intent decide which kinds are citable. "
+             "Lake: live only, no fallback. Store: what earlier runs retrieved.")
+    source = {"R": "agent", "L": "lake", "Lo": "store"}["Lo" if source_label.startswith("Local")
+                                                       else source_label[0]]
     result_limit = st.slider("Results per agent", 3, 10, 5)
     show_pipeline = st.toggle("Show pipeline steps", value=True)
     show_raw = st.toggle("Show raw API data", value=False)
     yesno_on = st.toggle("Yes/No consensus", value=True, disabled=single_mode,
                          help="For questions that take a one-word answer, count how "
                               "the retrieved thread's commenters actually answered it.")
-    unclear_as_no = st.toggle("Count non-committal comments as No", value=False,
+    unclear_as_no = st.toggle("Count non-committal comments as No", value=True,
                               disabled=single_mode or not yesno_on,
                               help="A commenter who neither confirms nor denies is "
                                    "read as a no. Defensible for “did this happen to "
@@ -836,6 +877,28 @@ with st.sidebar:
                    "off, which is what makes it the baseline.")
 
     st.divider()
+    st.markdown("#### 🧵 Pick a Reddit question")
+    st.caption("From releasetrain.io/api/reddit/query/questions — the answer is "
+               "the thread's top-voted comment.")
+
+    @st.cache_data(ttl=600, show_spinner=False)
+    def _questions(page: int):
+        return yesno.list_questions(limit=25, page=page)
+
+    q_page = st.number_input("Page", min_value=1, value=1, step=1)
+    q_rows = _questions(int(q_page))
+    q_opts = {f"r/{r.get('subreddit','')} · {r.get('title','')[:70]} "
+              f"({len(r.get('comments') or [])} comments)": r for r in q_rows}
+    picked = st.selectbox("Question", ["—"] + list(q_opts), key="reddit_pick")
+    # Applied once per pick, so the box stays editable afterwards.
+    if picked != "—" and st.session_state.get("reddit_title") != q_opts[picked].get("title"):
+        st.session_state["main_query"] = q_opts[picked].get("title", "")
+        st.session_state["reddit_title"] = q_opts[picked].get("title", "")
+        st.session_state["reddit_id"] = q_opts[picked].get("redditId")
+    elif not q_rows:
+        st.caption("Feed unreachable — type a question instead.")
+
+    st.divider()
     st.markdown("#### 💡 Example queries")
     examples = [
         "Any critical Linux updates today?",
@@ -849,7 +912,8 @@ with st.sidebar:
     ]
     for ex in examples:
         if st.button(ex, use_container_width=True):
-            st.session_state["query_input"] = ex
+            st.session_state["main_query"] = ex
+            st.session_state.pop("reddit_id", None)
 
     st.divider()
     st.markdown("#### 🗄️ Store")
@@ -880,7 +944,7 @@ with st.sidebar:
                                f"{r.n_documents} document(s){flag}")
                     if st.button("Ask again", key=f"again_{r.run_id}",
                                  use_container_width=True):
-                        st.session_state["query_input"] = r.query
+                        st.session_state["main_query"] = r.query
 
 # ── MAIN UI ───────────────────────────────────────────────
 
@@ -897,7 +961,6 @@ st.markdown("""
 # Query input
 query = st.text_input(
     "Ask about any software update, security vulnerability, or release:",
-    value=st.session_state.get("query_input", ""),
     placeholder='e.g. "Any critical Linux updates today?" or "What bugs were fixed in Chrome?"',
     key="main_query"
 )
@@ -905,12 +968,19 @@ query = st.text_input(
 col1, col2, col3 = st.columns([2, 1, 1])
 with col1:
     run_btn = st.button("🚀 Run Single Agent" if single_mode
+                        else "⚖️ Run Both & Compare" if compare_mode
                         else "🚀 Run Multi-Agent Pipeline",
                         type="primary", use_container_width=True)
 with col2:
     if st.button("🔁 Clear", use_container_width=True):
-        st.session_state["query_input"] = ""
+        st.session_state["main_query"] = ""
+        st.session_state.pop("reddit_id", None)
         st.rerun()
+
+# The picked thread only applies while the box still holds its title.
+reddit_id = st.session_state.get("reddit_id")
+if reddit_id and st.session_state.get("reddit_title") != query:
+    reddit_id = None
 
 # ── PIPELINE EXECUTION ────────────────────────────────────
 
@@ -951,6 +1021,40 @@ if run_btn and query and single_mode:
     st.caption("Switch **Answering mode** in the sidebar to run the same "
                "question through the multi-agent pipeline and compare.")
 
+elif run_btn and query and compare_mode:
+    # ── SIDE BY SIDE ──────────────────────────────────────
+    # Same question, both arms, answers next to each other. The multi-agent
+    # column is the pipeline's final answer only; switch mode to see its steps.
+    st.markdown("---")
+    left, right = st.columns(2)
+    with left:
+        st.markdown("### 🤖 Single agent (baseline)")
+        with st.spinner("retrieve, then answer..."):
+            sa = run_single_agent(query, top_k=result_limit)
+        st.success(sa["answer"] or "_(nothing)_")
+        st.caption(f"`{sa['arm']}` · {len(sa.get('docs') or [])} document(s) · "
+                   f"{sa['elapsed']}s")
+    with right:
+        st.markdown("### 🧠 Multi-agent pipeline")
+        with st.spinner("grounding, rewriting, 3 fetches, evaluating, presenting..."):
+            t0 = time.time()
+            results = run_pipeline(query, show_steps=False, limit=result_limit,
+                                   yesno_on=yesno_on, unclear_as_no=unclear_as_no,
+                                   survey_on=survey_on, source=source,
+                                   reddit_id=reddit_id)
+            presented = present_answer(results["original_query"], results,
+                                       model_spec=presenter_spec(),
+                                       per_kind=result_limit)
+        tc = results.get("top_comment")
+        if tc:
+            st.info(f"**Top-voted comment ({tc.get('score', 0)} points, "
+                    f"u/{tc.get('author','')}):** {tc.get('body','')[:600]}")
+        st.success(presented.text)
+        ev = results["evaluation"]
+        st.caption(f"{ev['community_count']} community · {ev['release_count']} "
+                   f"releases · {ev['cve_count']} CVE · quality {ev['quality']:.2f} · "
+                   f"source `{source}` · {round(time.time() - t0, 1)}s")
+
 elif run_btn and query:
 
     # Pipeline steps display
@@ -983,7 +1087,8 @@ elif run_btn and query:
     # Run the pipeline
     results = run_pipeline(query, show_steps=show_pipeline, limit=result_limit,
                            yesno_on=yesno_on, unclear_as_no=unclear_as_no,
-                           survey_on=survey_on)
+                           survey_on=survey_on, source=source,
+                           reddit_id=reddit_id)
 
     # `show_pipeline` is the "Show pipeline steps" switch. Only the plan strip
     # above consulted it, so unchecking the box left every per-agent section on
@@ -1091,6 +1196,29 @@ elif run_btn and query:
                        " · ".join(f"“{p}”" for p in fetched_on) +
                        ". The plain phrasing and the product term find the documents; "
                        "the dated one lets the window rank them.")
+
+    # ── ANSWER FROM THE THREAD ────────────────────────────
+    # For a picked (or matched) Reddit question the community already answered
+    # it; the top-voted comment is that answer, shown before anything synthesised.
+    th = results.get("thread")
+    if th is not None:
+        st.markdown("### 🧵 Answer from the thread")
+        tc = results.get("top_comment")
+        if tc:
+            st.success(f"**Top-voted comment — {tc.get('score', 0)} points, "
+                       f"u/{tc.get('author', '')}:**\n\n{tc.get('body', '')}")
+            if tc.get("permalink"):
+                st.caption(f"🔗 {tc['permalink']}")
+        else:
+            st.warning("No comment from anyone other than the asker or a bot — "
+                       "nothing to present as an answer.")
+        others = [c for c in th.get("comments") or [] if c is not tc]
+        with st.expander(f"“{th.get('title', '')}” (r/{th.get('subreddit', '')}) — "
+                         f"{len(others)} other comment(s), by score"):
+            for c in sorted(others, key=lambda c: -(c.get("score") or 0)):
+                who = "asker" if c.get("is_submitter") else f"u/{c.get('author', '')}"
+                st.markdown(f"**{c.get('score', 0)}** · {who} — {c.get('body', '')[:300]}")
+        st.markdown("---")
 
     # ── YES/NO CONSENSUS ──────────────────────────────────
     # Shown above the evaluator because for this shape of question it *is*
