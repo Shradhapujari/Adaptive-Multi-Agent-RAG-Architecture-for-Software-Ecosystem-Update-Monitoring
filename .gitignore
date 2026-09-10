@@ -53,3 +53,4 @@ data/*.db-shm
 # Presentation artifacts: regenerated per meeting, not needed to run the system
 slides/
 *.pptx
+results/ui_feedback.jsonl
