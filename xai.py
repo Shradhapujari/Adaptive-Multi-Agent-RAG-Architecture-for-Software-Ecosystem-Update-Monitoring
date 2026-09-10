@@ -49,7 +49,8 @@ def _why(query_terms: set, e) -> str:
     if getattr(e, "security", False):
         bits.append("flagged SECURITY")
     if getattr(e, "sentiment", ""):
-        bits.append(f"{e.sentiment.lower()} sentiment")
+        # The feed's own label, not ours -- see Evidence.line().
+        bits.append(f"{e.sentiment.lower()} per the source feed")
     return "; ".join(bits)
 
 
@@ -122,6 +123,7 @@ def _demo() -> None:
     assert [s["used"] for s in t.sources] == [True, True, False]
     assert "'fedora'" in t.sources[0]["why_retrieved"] and "SECURITY" in t.sources[0]["why_retrieved"]
     assert "no query-term overlap" in t.sources[2]["why_retrieved"]   # Debian row, off topic
+    assert "negative per the source feed" in t.sources[1]["why_retrieved"]
     assert len(t.sentences) == 3
     assert t.sentences[2]["grounded"]                                  # no facts, no citation needed
 

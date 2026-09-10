@@ -92,7 +92,12 @@ class Evidence:
         if self.security:
             facts.append("SECURITY")
         if self.sentiment:
-            facts.append(self.sentiment.lower() + " sentiment")
+            # Not "positive sentiment": the app's community agent reads
+            # /api/reddit/query/positive and thresholds that feed's own
+            # positiveScore, so this is the source's label for the post, not an
+            # analysis of it. Titles like "Lots of problems since updating"
+            # arrive marked Positive.
+            facts.append(f"{self.sentiment.lower()} per the source feed")
         meta = f" ({', '.join(facts)})" if facts else ""
         body = f"{self.title}{meta}"
         if self.detail:
@@ -263,9 +268,11 @@ def deterministic_paragraph(query: str, evidence: List[Evidence],
 
     if com:
         neg = [e for e in com if e.sentiment == "Negative"]
-        mood = ("with negative reaction reported" if neg
-                else "with no negative reaction reported")
-        parts.append(f"Community coverage adds {len(com)} post(s) {mood}, "
+        # Nothing on the empty branch: the app fetches the positive feed, so
+        # "with no negative reaction reported" was a claim about the endpoint
+        # dressed up as a finding about the community.
+        mood = " with negative reaction reported" if neg else ""
+        parts.append(f"Community coverage adds {len(com)} post(s){mood}, "
                      f"including “{com[0].title}” [{com[0].label}].")
 
     parts.append("Every statement above is drawn from the bracketed sources; "
