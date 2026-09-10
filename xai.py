@@ -72,7 +72,8 @@ def explain(query: str, answer: str, evidence: Sequence) -> Trace:
     sentences = []
     for s in filter(None, (x.strip() for x in _SENT_RE.split(text))):
         cites = [c.strip() for c in guardrail._CITE_RE.findall(s)]
-        facts = extract_versions(guardrail._ISO_RE.sub(" ", s)) + extract_dates(s)
+        facts = (extract_versions(guardrail._ISO_RE.sub(" ", s), multipart_only=True)
+                 + extract_dates(s))
         sentences.append({
             "text": s,
             "cites": cites,
@@ -127,7 +128,7 @@ def _demo() -> None:
     assert len(t.sentences) == 3
     assert t.sentences[2]["grounded"]                                  # no facts, no citation needed
 
-    bad = explain(q, "Fedora 45 is out.", ev)
+    bad = explain(q, "Fedora 45.0.1 is out.", ev)
     assert not bad.sentences[0]["grounded"] and bad.violations
     print(render(t))
 
