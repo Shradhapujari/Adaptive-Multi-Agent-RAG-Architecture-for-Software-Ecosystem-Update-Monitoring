@@ -50,9 +50,42 @@ separate runs against live sources, and the reranker and the ranked phrasing var
 across them. The panel (a) → (b) contrast is large enough to survive that; the
 within-panel (b) differences are not, and the paper says so.
 
-## Tables 4 and 5 — the scaled evaluation
+## `tab:scaled-retrieval` and `tab:scaled-answer` — the scaled evaluation
 
-All cells from `run_1788139377_6a8e9993db65`, n=100, post-fix.
+**Re-measured 2026-09-03 on a frozen corpus. Cite the replay run.**
+
+| Run | Corpus | Role |
+|---|---|---|
+| `run_1788467936_6a8e9993db65` | `record:results/corpus_scaled_20260902`, `frozen=false` | recording pass; **latency column comes from here** |
+| `run_1788473855_6a8e9993db65` | `replay:` same dir, `frozen=true`, 6,348 hits, 0 corpus misses | **the citable run** |
+| `run_1788139377_6a8e9993db65` | live, unfrozen | **superseded** — see below |
+
+Dataset `data/benchmark_300.json`, `--limit 100 --stratify category,ecosystem`
+(hash `6a8e9993db65`, reproduced exactly under seed 42); generators `marag`,
+`marag:ollama:llama3.1`, `single_agent:ollama:llama3.1`; judge
+`ollama:llama3.1`; `top_k=4`; `MARAG_RERANK=embed`, `MARAG_RANK_QUERY=original`.
+
+The earlier run is superseded rather than merely repeated. It executed before
+the release-fetch repair (`ed206a2`), where truncation ran ahead of the ranking
+function and shipped releases were unreachable for any product with an active
+CVE feed. nDCG@3 moves 0.859 / 0.859 / 0.863 to 0.922 / 0.922 / 0.924 — about
+six points that the defect, not the architecture, was costing. Both arms shared
+that retriever, so the ordering never changed; only the level did.
+
+Two figures in the paper are recomputed on the frozen run and no longer match
+the superseded one: fetch-time loss is **13 of 172 (7.6%)**, previously 19 of
+158 (12.0%); and the two multi-agent arms' top-k sets *and* candidate pools now
+coincide on **100 of 100** questions as ordered lists and as sets, with no
+question excluded, where the live run agreed on top-k but on pools only on 88
+of the 93 questions that had one. That residual was endpoint variability
+between two arms querying live, which is what freezing removes.
+
+Latency is taken from the recording pass. A replay reads documents and model
+responses from cache and its timings measure nothing.
+
+### Superseded detail
+
+All cells previously from `run_1788139377_6a8e9993db65`, n=100, post-fix.
 
 - Dataset: `data/benchmark_300.json`, `--limit 100 --stratify category,ecosystem`
 - Generators: `marag`, `marag:ollama:llama3.1` (reported as `marag_llm`),
@@ -64,9 +97,30 @@ This run stalled at question 98 and was later completed. Numbers reported in an
 earlier draft as n=96 were hand-computed from `per_query.jsonl` mid-run; the
 paper now uses the completed n=100 artifact.
 
-## Table 6 — the ground-truth sample
+## `tab:gt-run` — the ground-truth sample
 
-All cells from `run_1788160859_67177cd53aab`, n=100, post-fix.
+**Re-measured 2026-09-03 on a frozen corpus. Cite the replay run.**
+
+| Run | Corpus | Role |
+|---|---|---|
+| `run_1788474232_67177cd53aab` | `record:results/corpus_gt_20260902`, `frozen=false` | recording pass; latency column |
+| `run_1788479105_67177cd53aab` | `replay:` same dir, `frozen=true`, 6,227 hits, 0 corpus misses | **the citable run** |
+| `run_1788160859_67177cd53aab` | live, unfrozen, pre-repair | superseded |
+
+Dataset `data/benchmark_100.json`, no limit; generators, judge and knobs as for
+the scaled evaluation above.
+
+The point this sample makes is unchanged by the repair, which is why it is
+worth reporting: its nominal ordering on retrieval is still the reverse of
+`tab:scaled-retrieval` (`marag` 0.795 against `single_agent` 0.773 here,
+against 0.922 and 0.924 there), with intervals overlapping throughout. Two
+independent samples disagreeing on sign is the evidence that no difference is
+being measured, and freezing the corpus removes drift as the explanation for
+the disagreement.
+
+### Superseded detail
+
+All cells previously from `run_1788160859_67177cd53aab`, n=100, post-fix.
 
 - Dataset: `data/benchmark_100.json` (28 reference answers, selected to prefer
   ground-truth records within each ecosystem-by-category cell)
@@ -88,7 +142,8 @@ judge-labelled relevant documents absent from the multi-agent **candidate pool**
 | Figure | Set | Run |
 |---|---|---|
 | 22 of 23 (96%) | 10 ground-truth questions | `run_1788128704_237950e265eb` |
-| 19 of 158 (12.0%) | 100-question benchmark subset | `run_1788139377_6a8e9993db65` |
+| 13 of 172 (7.6%) | 100-question benchmark subset, frozen | `run_1788473855_6a8e9993db65` |
+| 19 of 158 (12.0%) | same subset, pre-repair and unfrozen | `run_1788139377_6a8e9993db65` (superseded) |
 
 A top-k version of the second figure gives 23 of 158 (14.6%). An earlier draft
 reported that number against the pool-based 96%, which mixed definitions.
