@@ -111,6 +111,20 @@ def _named_versions(text: str) -> List[Tuple[str, str]]:
     return out
 
 
+def _asserts(text: str) -> bool:
+    """Does this text state something checkable -- a version, a date, a label?
+
+    The question a refusal has to answer before it is treated as one. "No
+    information is available for this question." states nothing; "Security type
+    is unknown, but Chrome v199.9.9999 shipped on 2020-01-01 [R9]." states three
+    things and happens to contain a refusal word.
+    """
+    return bool(_CITE_RE.search(text)
+                or extract_versions(_ISO_RE.sub(" ", text), multipart_only=True)
+                or _named_versions(text)
+                or extract_dates(text))
+
+
 def check(answer: str, evidence: Sequence) -> Verdict:
     """Check a presented answer against the evidence it was built from."""
     text = (answer or "").strip()
@@ -121,11 +135,16 @@ def check(answer: str, evidence: Sequence) -> Verdict:
     if not text:
         return Verdict(False, [Violation("empty", "no answer text")])
 
-    # `strong_only`: the weak markers are "unknown", "not found" and "no
-    # information", and a release record in this domain carries a literal
-    # UNKNOWN security type. A model that echoes it used to abstain by
-    # accident and skip every check below with it.
-    abstained = is_abstention(text, strong_only=True)
+    # An unambiguous refusal phrase declines outright. A weak marker --
+    # "unknown", "not found", "no information" -- declines only if the text
+    # states nothing: a release record in this domain carries a literal UNKNOWN
+    # security type, so a model echoing it beside an invented version was
+    # abstaining by accident and skipping every check below with it. Requiring
+    # the strong phrase alone was too blunt the other way: "no information is
+    # available to answer this question" is a real refusal, and llama3.1 writes
+    # exactly that on an empty pool.
+    abstained = (is_abstention(text, strong_only=True)
+                 or (is_abstention(text) and not _asserts(text)))
 
     if not labels:
         # Nothing retrieved: the only admissible answer is one that says so.
@@ -234,6 +253,16 @@ def _demo() -> None:
 
     # Declining still does not need a citation.
     assert check("I cannot determine that from these sources.", ev).ok
+
+    # A refusal worded with a weak marker is still a refusal when it states
+    # nothing -- this is llama3.1's actual output on an empty pool, and
+    # requiring a strong phrase refused it.
+    weak = "Unfortunately, no information is available to answer this question."
+    assert check(weak, ev).ok, check(weak, ev).violations
+    assert check(weak, []).ok, check(weak, []).violations
+    # ...but the same marker beside an assertion is not a refusal.
+    assert not check("No information found, but Fedora 45.0.1 shipped [R1].", ev).ok
+    assert not check("Unknown, but see 2026-09-05 [R1].", ev).ok
 
     assert check("Fedora 44 is out.", ev).violations[0].code == "uncited"
     assert check("Fedora 44 shipped [R1].", []).violations[0].code == "no_evidence"
