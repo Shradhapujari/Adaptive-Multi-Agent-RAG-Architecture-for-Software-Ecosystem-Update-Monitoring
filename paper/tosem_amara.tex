@@ -103,7 +103,7 @@ cannot promote a document that was never retrieved. Issuing both the original
 and the rewritten phrasing and unioning the candidate pools raises nDCG@3 from
 0.188 to 0.765 in one step, and on a 100-question benchmark spanning 21 software
 ecosystems it reduces the share of the baseline's relevant documents missing
-from the candidate pool from 96\% to 12\%.
+from the candidate pool from 96\% to 7.6\%.
 
 We draw four conclusions for practitioners building agentic software
 engineering tools. First, that query rewriting must augment retrieval rather than
@@ -118,11 +118,11 @@ ordering that standard IR metrics produce, so architectural claims resting on
 one are not safe. Third, an apparent 0.23 faithfulness deficit for the
 multi-agent system proved to be an artifact of answer \emph{format} --- a
 structured template judged against fluent prose --- and vanished when the same
-retrieval was synthesized through the baseline's own prompt (0.926 versus
-0.931). Fourth, and least comfortable: with both defects repaired and the
+retrieval was synthesized through the baseline's own prompt (0.919 versus
+0.929). Fourth, and least comfortable: with both defects repaired and the
 synthesis model held constant, the multi-agent pipeline \emph{matches} rather
-than beats the single-agent baseline on retrieval (nDCG@3 0.859 versus 0.863,
-$n=100$) at roughly twice the latency, so decomposition per se is not what
+than beats the single-agent baseline on retrieval (nDCG@3 0.922 versus 0.924,
+$n=100$, frozen corpus) at roughly twice the latency, so decomposition per se is not what
 produced the original result. We release the architecture, the evaluation
 harness, and a 300-question benchmark mined from live release, advisory, and
 community sources; these are available to reviewers on request and will be
@@ -1731,25 +1731,25 @@ which isolates architecture from model:
 
 \begin{table}[t]
 \caption{Retrieval quality on the 100-question stratified benchmark subset
-($n=100$), pooled graded relevance, judge \texttt{llama3.1}. The two
-multi-agent arms are configured identically and differ only in answer synthesis;
-each nonetheless performs its own retrieval against live sources. Their ranked
-top-$k$ sets coincide on all 100 questions. Of the 93 questions for which a
-candidate pool was recorded, their pools are identical as ordered lists on 88
-and as sets on 89. On the remaining 7 every live endpoint returned nothing and
-the local fallback corpus supplied the documents, so no pool exists to compare;
-those 7 are excluded here rather than counted as agreements. Retrieval is not
-frozen for any run reported here: the endpoints are queried live, so figures
-from different runs are comparable in direction but not paired
-question-by-question.}
+($n=100$), pooled graded relevance, judge \texttt{llama3.1}, mean $\pm$ 95\%
+CI. Every arm was served from a corpus snapshot recorded in a preceding pass
+and replayed here, so all three saw byte-identical documents: 6{,}348 snapshot
+hits, and none of the misses on a document host. The two multi-agent arms are
+configured identically and differ only in answer synthesis; under the frozen
+corpus their ranked top-$k$ sets and their candidate pools now coincide on all
+100 questions, as ordered lists and as sets, with no question excluded. The
+earlier live-endpoint measurement of this table agreed on top-$k$ but on pools
+only on 88 of the 93 questions where a pool existed --- that residual was
+endpoint variability between two arms querying live, not a difference between
+the systems, which is what freezing the corpus establishes.}
 \label{tab:scaled-retrieval}
 \begin{tabular}{lrrrr}
 \toprule
 System & nDCG@3 & nDCG@5 & MRR & Recall@5 \\
 \midrule
-marag         & 0.859 & 0.861 & 0.885 & 0.860 \\
-marag\_llm    & 0.859 & 0.861 & 0.885 & 0.860 \\
-single\_agent & 0.863 & 0.870 & 0.888 & 0.868 \\
+marag         & 0.922 $\pm$ 0.040 & 0.927 $\pm$ 0.038 & 0.945 $\pm$ 0.041 & 0.929 $\pm$ 0.039 \\
+marag\_llm    & 0.922 $\pm$ 0.040 & 0.927 $\pm$ 0.038 & 0.945 $\pm$ 0.041 & 0.929 $\pm$ 0.039 \\
+single\_agent & 0.924 $\pm$ 0.039 & 0.933 $\pm$ 0.037 & 0.948 $\pm$ 0.039 & 0.937 $\pm$ 0.038 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1759,37 +1759,40 @@ multi-agent pipeline and the single-agent baseline are indistinguishable: every
 difference is well within overlapping confidence intervals, and the baseline is
 nominally ahead on all four metrics. The fetch-time diagnostic of Section~\ref{sec:localizing} --- the share of the
 baseline's relevant documents absent from the multi-agent \emph{candidate pool}
---- stands at 22 of 23 on the ten ground-truth questions and at \textbf{19 of
-158 (12.0\%)} here. The two figures come from different question sets rather
+--- stands at 22 of 23 on the ten ground-truth questions and at \textbf{13 of
+172 (7.6\%)} here, recomputed on the frozen corpus. The two figures come from different question sets rather
 than from recomputing one on the other, but they are the same measurement, and
 the union remedy holds at this scale; the residual is the ordinary variation of
 two systems retrieving from live sources.
 
-One qualification applies to the absolute values in this table and in
-Table~\ref{tab:gt-run}, though not to the comparison they support. The
-release-fetching path truncated its candidate list to the requested limit
-\emph{before} applying the ranking function meant to demote advisory records,
-so for any product with an active CVE feed the shipped releases were unreachable:
-measured on the repaired code, a query for \texttt{linux} returned no shipped
-release at all within forty retrieved documents. Both arms called the same
-retriever, so the ordering these tables report is unaffected and the ladder of
-Section~\ref{sec:ladder-results}, run after the repair, reaches the same
-conclusion. The absolute figures, however, were produced by a retriever that
-could not reach part of its corpus, and should be read as a lower bound rather
-than as this architecture's ceiling.
+These figures supersede an earlier measurement of the same comparison, and the
+difference is worth stating because it is large. The release-fetching path
+truncated its candidate list to the requested limit \emph{before} applying the
+ranking function meant to demote advisory records, so for any product with an
+active CVE feed the shipped releases were unreachable: a query for
+\texttt{linux} returned no shipped release at all within forty retrieved
+documents. Measured on that retriever, this table read nDCG@3 0.859 / 0.859 /
+0.863 against the 0.922 / 0.922 / 0.924 reported here --- roughly six points of
+retrieval quality that the defect, not the architecture, was costing. Both arms
+called the same retriever, so the ordering was never affected; only the level
+was. The same repair and the same frozen-corpus protocol are applied to
+Table~\ref{tab:gt-run}.
 
 \begin{table}[t]
-\caption{Answer quality and cost ($n=100$), LLM-judged. \texttt{marag} and
-\texttt{marag\_llm} share a retrieval pipeline and differ only in how the answer
-is produced. Latency is the per-question median in seconds.}
+\caption{Answer quality and cost ($n=100$), LLM-judged, mean $\pm$ 95\% CI.
+\texttt{marag} and \texttt{marag\_llm} share a retrieval pipeline and differ
+only in how the answer is produced. Quality is measured on the frozen-corpus
+replay; latency is the per-question median from the live recording pass that
+produced that snapshot, since a replay reads its documents from cache and its
+timings measure nothing.}
 \label{tab:scaled-answer}
 \begin{tabular}{lrrr}
 \toprule
 System & Faithfulness & Answer relevance & Latency (s) \\
 \midrule
-marag (template answer) & 0.700 & 0.978 & 19.7 \\
-marag\_llm (prose answer) & 0.926 & 0.953 & 21.2 \\
-single\_agent & 0.931 & 0.973 & 9.6 \\
+marag (template answer)   & 0.748 $\pm$ 0.036 & 0.995 $\pm$ 0.004 & 18.8 \\
+marag\_llm (prose answer) & 0.919 $\pm$ 0.035 & 0.968 $\pm$ 0.027 & 24.7 \\
+single\_agent             & 0.929 $\pm$ 0.032 & 0.973 $\pm$ 0.021 & 8.4 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1805,18 +1808,20 @@ of the architecture comparison.
 
 \begin{table}[t]
 \caption{The same three systems on a second 100-question selection, one that
-retains 28 reference answers. Values are mean $\pm$ 95\% CI; correctness is
-computed only where a reference answer exists, with $n$ given per arm. The
-nominal ordering on retrieval is the reverse of
-Table~\ref{tab:scaled-retrieval}.}
+retains 28 reference answers, under the same frozen-corpus protocol (6{,}227
+snapshot hits, no miss on a document host). Values are mean $\pm$ 95\% CI;
+correctness is computed only where a reference answer exists, with $n$ given
+per arm; latency is the median from the live recording pass. The nominal
+ordering on retrieval is the reverse of Table~\ref{tab:scaled-retrieval}, and
+remains so after the repair --- which is the point of reporting this sample.}
 \label{tab:gt-run}
 \begin{tabular}{lrrrr}
 \toprule
 System & nDCG@3 & Faithfulness & Correctness & Latency (s) \\
 \midrule
-marag         & 0.781 $\pm$ 0.072 & 0.722 $\pm$ 0.039 & 0.296 ($n=26$) & 37.5 \\
-marag\_llm    & 0.781 $\pm$ 0.072 & 0.938 $\pm$ 0.030 & 0.367 ($n=24$) & 29.2 \\
-single\_agent & 0.768 $\pm$ 0.075 & 0.917 $\pm$ 0.034 & 0.326 ($n=27$) & 10.5 \\
+marag         & 0.795 $\pm$ 0.071 & 0.735 $\pm$ 0.037 & 0.324 $\pm$ 0.109 ($n=27$) & 16.2 \\
+marag\_llm    & 0.795 $\pm$ 0.071 & 0.939 $\pm$ 0.030 & 0.392 $\pm$ 0.160 ($n=25$) & 16.5 \\
+single\_agent & 0.773 $\pm$ 0.075 & 0.932 $\pm$ 0.031 & 0.363 $\pm$ 0.134 ($n=27$) & 8.2 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1856,18 +1861,19 @@ quantity to read.
 
 Table~\ref{tab:scaled-answer} carries a methodological result worth stating
 separately. Comparing \texttt{marag} against \texttt{single\_agent} on
-faithfulness suggests a substantial deficit (0.700 versus 0.931). Comparing
+faithfulness suggests a substantial deficit (0.748 versus 0.929). Comparing
 \texttt{marag\_llm} against \texttt{single\_agent} --- the same retrieval, the
 same documents, differing only in whether the answer is a structured template or
-model prose --- gives 0.926 versus 0.931. The apparent deficit was almost
+model prose --- gives 0.919 versus 0.929. The apparent deficit was almost
 entirely an artifact of answer \emph{format}: an LLM judge scoring a structured
 template against fluent prose is partly scoring fluency. Any evaluation
 comparing an agentic system that emits structured output against a baseline that
 emits prose is exposed to this, and we would not have detected it without an arm
 constructed specifically to remove it.
 
-On cost, the multi-agent pipeline takes approximately twice the median
-per-question latency of the baseline (19.7\,s versus 9.6\,s). This reflects the
+On cost, the multi-agent pipeline takes roughly twice to three times the median
+per-question latency of the baseline (18.8\,s for the template arm and
+24.7\,s for the prose arm, against 8.4\,s). This reflects the
 rewriter's generation call, the evaluator pass, and the additional retrieval
 calls the union incurs.
 
@@ -1884,9 +1890,8 @@ Every arm answered the same 100 questions with synthesis held at
 documents were served from a snapshot recorded in a preceding pass: 12,344
 snapshot hits against 240 misses, none of the misses on a document host, so
 every arm saw byte-identical documents. This is the strict-replay condition
-Section~\ref{sec:ladder} required, and it removes the caveat attached to
-Table~\ref{tab:scaled-retrieval}, whose arms queried live endpoints and were
-therefore comparable in direction but not paired question-by-question.
+Section~\ref{sec:ladder} required, and it is the same protocol under which
+Tables~\ref{tab:scaled-retrieval} to~\ref{tab:gt-run} are now reported.
 
 \begin{table}[t]
 \caption{Every rung of the ladder on the 100-question benchmark, against a
@@ -2481,7 +2486,7 @@ than reproduced here; Figure~\ref{fig:execution_trace} shows one.
   \item Issuing both the original and rewritten phrasings and unioning the
   candidate pools removes the deficit, and the remedy holds on a
   100-question multi-ecosystem benchmark, where the fetch-time loss falls from
-  96\% to 12\%.
+  96\% to 7.6\%.
   \item With both defects repaired and the synthesis model held constant, the
   multi-agent architecture \emph{matches} the single-agent baseline on retrieval
   and on faithfulness, at roughly twice the latency
@@ -2758,7 +2763,7 @@ the rewrite and against the original question --- are not resolvable at this
 $n$ at all. We report them as observations rather than findings. The claim that
 does not rest on an interval estimate is the document count: 22 of 23 relevant
 documents missing is a census of the retrieved sets, not a sample statistic,
-and its scaled counterpart (19 of 158) was computed on 100 questions.
+and its scaled counterpart (13 of 172) was computed on 100 questions.
 
 \textbf{LLM relevance judge.}
 All relevance judgments reported here were produced by \texttt{llama3.1}, which
@@ -2927,8 +2932,8 @@ can promote a document that was never a candidate.
 
 Issuing both phrasings and unioning the candidate pools resolves it. On a
 100-question benchmark spanning 21 software ecosystems, the fetch-time loss
-falls from 96\% to 12\%, and the repaired pipeline reaches nDCG@3 of 0.859
-against the baseline's 0.863 --- parity, at approximately twice the latency. We report this rather than the
+falls from 96\% to 7.6\%, and the repaired pipeline reaches nDCG@3 of 0.922
+against the baseline's 0.924 --- parity, at approximately twice the latency. We report this rather than the
 improvement our original metric showed. On this benchmark, in this domain,
 architectural decomposition did not improve retrieval quality over a
 well-configured single-agent baseline; what the original evaluation measured was
