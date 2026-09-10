@@ -26,6 +26,7 @@ import json
 import urllib.request
 import re
 import time
+from contextlib import nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
@@ -438,6 +439,17 @@ def evaluate_results(community: list, releases: list, cve: list, query: str,
 
 # ── MANAGER AGENT — ORCHESTRATOR ─────────────────────────
 
+def _step(label: str, show: bool):
+    """The spinner while a step runs, or nothing when steps are hidden.
+
+    `show_steps` controls the narration, never the work. These four blocks used
+    to sit inside `if show_steps:`, so unchecking "Show pipeline steps" skipped
+    the rewrite and all three fetches: the run crashed on the unbound
+    `rewritten` before it could get as far as answering from an empty pool.
+    """
+    return st.spinner(label) if show else nullcontext()
+
+
 def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
                  yesno_on: bool = True, unclear_as_no: bool = False,
                  survey_on: bool = True) -> dict:
@@ -481,18 +493,17 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     grounded = temporal.query
 
     # Step 1 — Query Rewriter
-    if show_steps:
-        with st.spinner("🔄 Query Rewriter Agent — Llama 3.1 rewriting query..."):
-            t0 = time.time()
-            # The rewriter sees the *stripped* phrasing: its job is vocabulary
-            # expansion, and handing it the resolved date only gets the date
-            # copied into a query that then fetches nothing. The grounded
-            # phrasing is fetched alongside it, below.
-            rw = rewrite_query(temporal.stripped or query)
-            rewritten = rw.query
-            results["rewrite"] = rw
-            results["rewritten_query"] = rewritten
-            results["timing"]["rewriter"] = round(time.time()-t0, 1)
+    with _step("🔄 Query Rewriter Agent — Llama 3.1 rewriting query...", show_steps):
+        t0 = time.time()
+        # The rewriter sees the *stripped* phrasing: its job is vocabulary
+        # expansion, and handing it the resolved date only gets the date
+        # copied into a query that then fetches nothing. The grounded
+        # phrasing is fetched alongside it, below.
+        rw = rewrite_query(temporal.stripped or query)
+        rewritten = rw.query
+        results["rewrite"] = rw
+        results["rewritten_query"] = rewritten
+        results["timing"]["rewriter"] = round(time.time()-t0, 1)
 
     # Fetch phrasings: the expanded one first (recall), then the grounded one
     # (date-aware), deduped so an unchanged query is not fetched twice.
@@ -533,27 +544,24 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     pool_limit = max(limit * 10, 50)
 
     # Step 2 — Community Agent
-    if show_steps:
-        with st.spinner("💬 Community Agent — fetching Reddit feedback..."):
-            t0 = time.time()
-            results["community"] = union_fetch(community_fetch, phrasings,
-                                               pool_limit, temporal)
-            results["timing"]["community"] = round(time.time()-t0, 1)
+    with _step("💬 Community Agent — fetching Reddit feedback...", show_steps):
+        t0 = time.time()
+        results["community"] = union_fetch(community_fetch, phrasings,
+                                           pool_limit, temporal)
+        results["timing"]["community"] = round(time.time()-t0, 1)
 
     # Step 3 — Release Notes Agent
-    if show_steps:
-        with st.spinner("📦 Release Notes Agent — fetching live releases..."):
-            t0 = time.time()
-            results["releases"] = union_fetch(release_fetch, release_phrasings,
-                                              pool_limit, temporal)
-            results["timing"]["releases"] = round(time.time()-t0, 1)
+    with _step("📦 Release Notes Agent — fetching live releases...", show_steps):
+        t0 = time.time()
+        results["releases"] = union_fetch(release_fetch, release_phrasings,
+                                          pool_limit, temporal)
+        results["timing"]["releases"] = round(time.time()-t0, 1)
 
     # Step 4 — CVE Agent
-    if show_steps:
-        with st.spinner("🔐 CVE Agent — fetching security vulnerabilities..."):
-            t0 = time.time()
-            results["cve"] = union_fetch(cve_fetch, phrasings, limit, temporal)
-            results["timing"]["cve"] = round(time.time()-t0, 1)
+    with _step("🔐 CVE Agent — fetching security vulnerabilities...", show_steps):
+        t0 = time.time()
+        results["cve"] = union_fetch(cve_fetch, phrasings, limit, temporal)
+        results["timing"]["cve"] = round(time.time()-t0, 1)
 
     # Step 4b — Vendor and record-type filter
     # This is where "Linux v25.642087.0" is stopped. /api/v/?q=Linux returns
