@@ -25,7 +25,7 @@ import re
 from typing import Dict, List, Optional
 
 __all__ = ["looks_yesno", "stance", "tally", "verdict_line", "fetch_thread",
-           "find_thread"]
+           "find_thread", "list_questions", "top_comment"]
 
 THREAD_API = "https://releasetrain.io/api/reddit/"
 QUESTIONS_API = "https://releasetrain.io/api/reddit/query/questions"
@@ -178,6 +178,37 @@ def fetch_thread(reddit_id: str, timeout: int = 10) -> Optional[dict]:
         return None
 
 
+def list_questions(limit: int = 25, page: int = 1, timeout: int = 20) -> List[dict]:
+    """One page of the lake's question feed, comments inline, for a picker."""
+    import requests
+    try:
+        r = requests.get(QUESTIONS_API, params={"where": "either", "limit": limit,
+                                                "page": page, "showCount": "true"},
+                         timeout=timeout)
+        r.raise_for_status()
+        return r.json().get("data", [])
+    except Exception:
+        return []
+
+
+def top_comment(thread: dict) -> Optional[dict]:
+    """The one comment to present as the answer: highest Reddit score.
+
+    Picking from many comments is done by the thread's own readers -- the
+    score is their vote -- not by a second classifier here. Bots, removed
+    comments and the asker's own follow-ups are excluded, since none of them
+    is an answer. Ties go to the earlier comment (Reddit's own listing order).
+    """
+    asker = (thread.get("author") or "").lower()
+    pool = [c for c in thread.get("comments") or []
+            if (c.get("author") or "").strip().lower() not in _SKIP_AUTHORS
+            and (c.get("author") or "").lower() != asker
+            and not c.get("is_submitter") and (c.get("body") or "").strip()]
+    if not pool:
+        return None
+    return max(pool, key=lambda c: (c.get("score") or 0, -(c.get("created_utc_ts") or 0)))
+
+
 def find_thread(question: str, pool: int = 100, timeout: int = 20) -> Optional[dict]:
     """The lake's question thread that best matches `question`, comments and all.
 
@@ -245,6 +276,15 @@ def _demo() -> None:
     assert looks_yesno("No more synced groups for snapcast clients?", is_title=True)
     assert not looks_yesno("Especially the Samsung ecosystem with it?")
     assert not looks_yesno("How to get Home Assistant more reliable?", is_title=True)
+    tc = top_comment({"author": "op", "comments": [
+        {"author": "AutoModerator", "body": "bot", "score": 99},
+        {"author": "op", "body": "mine", "score": 50, "is_submitter": True},
+        {"author": "a", "body": "low", "score": 1, "created_utc_ts": 1},
+        {"author": "b", "body": "best", "score": 7, "created_utc_ts": 2},
+        {"author": "c", "body": "tie-later", "score": 7, "created_utc_ts": 3},
+    ]})
+    assert tc["body"] == "best", tc                          # bot and OP skipped, tie -> earlier
+    assert top_comment({"comments": []}) is None
     assert stance("no issues here, works fine") == "no"
     assert stance("same here, had to reinstall") == "yes"
     print("ok —", verdict_line(t))
