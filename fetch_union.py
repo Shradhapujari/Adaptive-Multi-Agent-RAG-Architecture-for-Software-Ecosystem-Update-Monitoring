@@ -43,10 +43,23 @@ _STOPWORDS = frozenset((
 
 
 def doc_key(d: dict) -> str:
-    """Dedupe key for a fetched item: its URL, else product+version, else title."""
-    return (d.get("url") or "").strip() or \
-        f"{d.get('product','')}|{d.get('version','')}".strip("|") or \
-        d.get("title", "")
+    """Dedupe key for a fetched item: its URL, else product+version, else title.
+
+    The fallbacks are case-folded because `/api/v/` echoes the query's own
+    capitalisation into `product`: asking "What bugs were fixed in Chrome
+    recently?" fetches on both "chrome" and "Chrome", and Chrome 152.0.7977
+    came back as `chrome|152.0.7977` from one and `Chrome|152.0.7977` from the
+    other. Two of the five release slots then held one release, and it was
+    cited to the reader as two sources.
+
+    The URL branch is left alone: a URL path is case-sensitive, and two that
+    differ only in case are not reliably the same document.
+    """
+    url = (d.get("url") or "").strip()
+    if url:
+        return url
+    pv = f"{d.get('product','')}|{d.get('version','')}".strip("|")
+    return (pv or d.get("title", "")).strip().lower()
 
 
 def product_terms(query: str, limit: int = 2) -> List[str]:

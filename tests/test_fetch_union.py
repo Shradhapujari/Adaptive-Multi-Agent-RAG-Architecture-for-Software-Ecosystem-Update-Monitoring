@@ -97,11 +97,31 @@ def test_empty_and_blank_phrasings_are_skipped():
 
 @pytest.mark.parametrize("item,expected", [
     ({"url": "https://x/1", "title": "t"}, "https://x/1"),
-    ({"url": "", "product": "Linux", "version": "6.18.21"}, "Linux|6.18.21"),
-    ({"title": "only a title"}, "only a title"),
+    ({"url": "", "product": "Linux", "version": "6.18.21"}, "linux|6.18.21"),
+    ({"title": "Only A Title"}, "only a title"),
 ])
 def test_doc_key_falls_back_through_url_version_title(item, expected):
     assert doc_key(item) == expected
+
+
+def test_the_same_release_under_two_capitalisations_is_one_document():
+    # Measured against /api/v/ on 2026-09-10: fetching "chrome" and "Chrome"
+    # for one question returns Chrome 152.0.7977 with `product` echoing each
+    # phrasing, and the release has no url to dedupe on. Both reached the
+    # answer as separate cited sources.
+    fetch = _fake({
+        "chrome": [{"url": "", "product": "chrome", "version": "152.0.7977"}],
+        "Chrome": [{"url": "", "product": "Chrome", "version": "152.0.7977"}],
+    })
+    out = union_fetch(fetch, ["chrome", "Chrome"], limit=5)
+    assert len(out) == 1, out
+
+    # A different version is still a different document.
+    fetch2 = _fake({
+        "chrome": [{"url": "", "product": "chrome", "version": "152.0.7977"}],
+        "Chrome": [{"url": "", "product": "Chrome", "version": "155.0.8049"}],
+    })
+    assert len(union_fetch(fetch2, ["chrome", "Chrome"], limit=5)) == 2
 
 
 def test_unchanged_query_fetches_one_phrasing():
