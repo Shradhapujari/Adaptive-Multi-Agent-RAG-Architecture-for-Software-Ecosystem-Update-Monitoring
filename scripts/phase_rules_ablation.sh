@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # Does AGENT_RULES.md change the answers? Two arms on a frozen corpus.
 #
-#   scripts/phase_rules_ablation.sh <dataset.json> <snapshot-dir>
+#   scripts/phase_rules_ablation.sh <dataset.json> <snapshot-dir> [limit]
+#
+# `limit` caps the questions, and every pass gets the same cap so the arms
+# still see the same questions. The 50-question sweep ran 16 questions in
+# five and a half hours on a contended machine; a cap is how a real answer
+# arrives today instead of in two days.
 #
 # The app prepends AGENT_RULES.md to every prompt it sends; the harness does
 # not, so the file has never been measured -- it was verified to reach the
@@ -23,8 +28,10 @@ main() {
   cd "$(dirname "$0")/.."
   DATASET="${1:?usage: phase_rules_ablation.sh <dataset.json> <snapshot-dir>}"
   SNAP="${2:?usage: phase_rules_ablation.sh <dataset.json> <snapshot-dir>}"
+  LIMIT="${3:-}"
   PY=./venv311/bin/python
   COMMON="--dataset $DATASET --generators marag,single_agent --judge ollama:llama3.1 --judge-pool"
+  if [ -n "$LIMIT" ]; then COMMON="$COMMON --limit $LIMIT"; fi
   export MARAG_RERANK=embed
 
   # A fresh directory, and this one refuses rather than warns. Warm-replaying a
