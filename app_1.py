@@ -894,19 +894,29 @@ query = st.text_input(
     key="main_query"
 )
 
-col1, col2, col3 = st.columns([2, 1, 1])
+col1, col2, col3 = st.columns([2, 1.4, 1])
 with col1:
     run_btn = st.button("🚀 Run Single Agent" if single_mode
                         else "🚀 Run Multi-Agent Pipeline",
                         type="primary", use_container_width=True)
 with col2:
+    # The mode picker is still the switch that decides what the page renders;
+    # this runs the baseline once without moving it. Comparing two arms means
+    # asking the same question twice, and a comparison that costs a trip to the
+    # sidebar between the halves is one the audience watches you operate rather
+    # than one they read.
+    baseline_btn = st.button("🤖 Baseline only", use_container_width=True,
+                             disabled=single_mode,
+                             help="Run the paper's single_agent arm on this "
+                                  "question without leaving multi-agent mode.")
+with col3:
     if st.button("🔁 Clear", use_container_width=True):
         st.session_state["query_input"] = ""
         st.rerun()
 
 # ── PIPELINE EXECUTION ────────────────────────────────────
 
-if run_btn and query and single_mode:
+if query and (baseline_btn or (run_btn and single_mode)):
     # ── SINGLE-AGENT BASELINE ─────────────────────────────
     # Rendered before the pipeline branch and returning early: the sections
     # below report what the coordinating agents did, and this arm has none of
