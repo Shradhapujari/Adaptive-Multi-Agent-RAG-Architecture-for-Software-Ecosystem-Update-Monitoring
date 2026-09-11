@@ -42,6 +42,7 @@ import vendor
 import xai
 import yesno
 import survey
+import results_view
 
 # ── PAGE CONFIG ──────────────────────────────────────────
 st.set_page_config(
@@ -812,17 +813,16 @@ def _agent_table(results=None, presented=None) -> str:
 # ── SIDEBAR ───────────────────────────────────────────────
 
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/en/b/bb/University_of_the_Pacific_seal.svg", width=80)
-    st.markdown("### Multi-Agent RAG System")
-    st.markdown("**Adaptive Multi-Agent RAG Architecture**")
-    st.markdown("University of the Pacific · 2026")
-    st.divider()
-
-    st.markdown("#### 🤖 Active Agents")
-    # Filled in again at the end of the run, once every status is a fact
-    # rather than an advertisement.
-    agent_status_slot = st.empty()
-    agent_status_slot.markdown(_agent_table())
+    view = st.radio("View", ["Ask", "Results"], horizontal=True,
+                    label_visibility="collapsed")
+    with st.expander("About", expanded=False):
+        st.image("https://upload.wikimedia.org/wikipedia/en/b/bb/University_of_the_Pacific_seal.svg", width=80)
+        st.markdown("**Adaptive Multi-Agent RAG Architecture** · University of the Pacific · 2026")
+        st.markdown("##### 🤖 Active Agents")
+        # Filled in again at the end of the run, once every status is a fact
+        # rather than an advertisement.
+        agent_status_slot = st.empty()
+        agent_status_slot.markdown(_agent_table())
     # Not `presenter_spec() or rule-based`: the presenter falls back to
     # whatever model_select finds reachable, so on a host with Ollama running
     # this caption promised rule-based prose and the run then used llama3.1.
@@ -833,8 +833,8 @@ with st.sidebar:
     # after the first page load leaves this line naming llama3.1 while every
     # answer under it is composed rule-based. Which model wrote the paragraph
     # is a fact only once one has, and `presented` carries it.
-    presenter_slot = st.empty()
-    presenter_slot.caption(_presenter_caption(presenter_spec()))
+        presenter_slot = st.empty()
+        presenter_slot.caption(_presenter_caption(presenter_spec()))
     st.divider()
 
     st.markdown("#### ⚙️ Settings")
@@ -888,8 +888,16 @@ with st.sidebar:
     def _questions(page: int):
         return yesno.list_questions(limit=25, page=page)
 
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def _catalog():
+        return vendor.load_catalog()
+
+    q_vendor = st.selectbox("Vendor", ["All"] + _catalog(), key="poll_vendor")
     q_page = st.number_input("Page", min_value=1, value=1, step=1)
-    q_rows = _questions(int(q_page))
+    q_rows = yesno.filter_questions(_questions(int(q_page)),
+                                    "" if q_vendor == "All" else q_vendor)
+    st.caption(f"{len(q_rows)} yes/no question(s)"
+               + (f" for {q_vendor}" if q_vendor != "All" else "") + " on this page")
     q_opts = {f"r/{r.get('subreddit','')} · {r.get('title','')[:70]} "
               f"({len(r.get('comments') or [])} comments)": r for r in q_rows}
     picked = st.selectbox("Question", ["—"] + list(q_opts), key="reddit_pick")
@@ -951,15 +959,33 @@ with st.sidebar:
 
 # ── MAIN UI ───────────────────────────────────────────────
 
-st.markdown("""
-<div class="main-header">
-    <h1>🤖 Multi-Agent RAG System — Software Ecosystem Monitor</h1>
-    <p>Adaptive Multi-Agent RAG Architecture · University of the Pacific · releasetrain.io</p>
-    <p style="font-size:0.9rem; opacity:0.8">
-        4 agents · Live APIs · Llama 3.1 · RLAIF feedback · Self-improving
-    </p>
-</div>
-""", unsafe_allow_html=True)
+st.caption("Software ecosystem monitor · releasetrain.io")
+
+if view == "Results":
+    # Read-only: what the harness measured, worst queries first, plus the
+    # admin's own correct/wrong clicks. Re-running evals stays in run_eval.py.
+    runs = results_view.list_runs()
+    if not runs:
+        st.warning("No evaluation runs under results/. Run `python -m eval_harness.run_eval` first.")
+        st.stop()
+    run_id = st.selectbox("Evaluation run", runs)
+    data = st.cache_data(show_spinner="Reading the run...")(results_view.load_run)(run_id)
+    fb = results_view.feedback_tally()
+    st.markdown("#### Aggregate per arm")
+    cols = st.columns(len(data["aggregate"]) + 1)
+    for c, a in zip(cols, data["aggregate"]):
+        c.metric(f"{a['system']} · nDCG@3", f"{float(a['ndcg@3'] or 0):.2f}",
+                 f"MRR {float(a['mrr'] or 0):.2f} · faith {float(a['faithfulness'] or 0):.2f}",
+                 delta_color="off")
+    cols[-1].metric("Your feedback", f"{fb['correct']} correct", f"{fb['wrong']} wrong",
+                    delta_color="inverse")
+    st.markdown("#### Which questions do well")
+    for line in results_view.summarize(data["rows"]):
+        st.markdown(f"- {line}")
+    st.markdown("#### Per query, worst first")
+    rows = sorted(data["rows"], key=lambda r: (r["ndcg@3"] is None, r["ndcg@3"] or 0))
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.stop()
 
 # Query input
 query = st.text_input(
@@ -1024,6 +1050,8 @@ if run_btn and query and single_mode:
     st.caption("Switch **Answering mode** in the sidebar to run the same "
                "question through the multi-agent pipeline and compare.")
 
+    st.session_state["last_answer"] = {"query": query, "reddit_id": reddit_id, "arm": "single_agent"}
+
 elif run_btn and query and compare_mode:
     # ── SIDE BY SIDE ──────────────────────────────────────
     # Same question, both arms, answers next to each other. The multi-agent
@@ -1057,6 +1085,7 @@ elif run_btn and query and compare_mode:
         st.caption(f"{ev['community_count']} community · {ev['release_count']} "
                    f"releases · {ev['cve_count']} CVE · quality {ev['quality']:.2f} · "
                    f"source `{source}` · {round(time.time() - t0, 1)}s")
+    st.session_state["last_answer"] = {"query": query, "reddit_id": reddit_id, "arm": "compare"}
 
 elif run_btn and query:
 
@@ -1203,6 +1232,17 @@ elif run_btn and query:
     # ── ANSWER FROM THE THREAD ────────────────────────────
     # For a picked (or matched) Reddit question the community already answered
     # it; the top-voted comment is that answer, shown before anything synthesised.
+    yn = results.get("yesno")
+    if yn is not None:
+        st.markdown("### 🗳 Poll")
+        line = yesno.verdict_line(yn)
+        (st.success if yn["answered"] else st.warning)(f"**{line}**")
+        n = max(1, yn["yes"] + yn["no"] + (0 if yn.get("unclear_as_no") else yn["unclear"]))
+        for k, lab in (("yes", "Yes"), ("no", "No"), ("unclear", "Unclear")):
+            if k == "unclear" and yn.get("unclear_as_no"):
+                continue
+            st.progress(yn[k] / n, text=f"{lab} · {yn[k]}")
+
     th = results.get("thread")
     if th is not None:
         st.markdown("### 🧵 Answer from the thread")
@@ -1226,11 +1266,8 @@ elif run_btn and query:
     # ── YES/NO CONSENSUS ──────────────────────────────────
     # Shown above the evaluator because for this shape of question it *is*
     # the answer, and a paragraph synthesised underneath it is elaboration.
-    yn = results.get("yesno")
     if yn is not None:
         st.markdown("### ✅ Yes/No Consensus")
-        line = yesno.verdict_line(yn)
-        (st.success if yn["answered"] else st.warning)(f"**{line}**")
         st.caption(f"Counted off the comments of “{yn['thread']['title']}” "
                    f"(r/{yn['thread'].get('subreddit','')}) — one vote per commenter, "
                    f"the person who asked excluded.")
@@ -1489,9 +1526,27 @@ elif run_btn and query:
                        "retrieval dates.")
         if _run_id is not None:
             st.caption(f"Logged as run #{_run_id} in the local store.")
+    st.session_state["last_answer"] = {"query": query, "reddit_id": reddit_id, "arm": "marag"}
 
 elif run_btn and not query:
     st.warning("Please enter a query first.")
+
+# ── FEEDBACK ──────────────────────────────────────────────
+# Outside the run branches on purpose: a button click reruns the script with
+# `run_btn` False, so a button inside them would never see its own click. The
+# answer it grades is the last one run, kept in session state; the click
+# records it and the page keeps the answer visible.
+_last = st.session_state.get("last_answer")
+if _last:
+    st.caption(f"Was this answer right? — “{_last['query']}”")
+    c1, c2, _ = st.columns([1, 1, 6])
+    for col, verdict, label in ((c1, "correct", "👍 Correct"), (c2, "wrong", "👎 Wrong")):
+        if col.button(label, key=f"fb_{verdict}", use_container_width=True):
+            results_view.record_feedback({"ts": datetime.now().isoformat(timespec="seconds"),
+                                          **_last, "verdict": verdict})
+            st.session_state.pop("last_answer")
+            st.toast(f"Recorded as {verdict}.")
+            st.rerun()
 
 # ── FOOTER ────────────────────────────────────────────────
 st.markdown("---")

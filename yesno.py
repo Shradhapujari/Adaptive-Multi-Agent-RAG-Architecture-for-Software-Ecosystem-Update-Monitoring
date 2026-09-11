@@ -191,6 +191,27 @@ def list_questions(limit: int = 25, page: int = 1, timeout: int = 20) -> List[di
         return []
 
 
+def filter_questions(rows: List[dict], vendor_name: str = "") -> List[dict]:
+    """Threads that are yes/no questions, optionally about one product.
+
+    A thread is about `vendor_name` when its subreddit is that product's forum
+    or the name appears in its title or body. Empty `vendor_name` keeps every
+    yes/no thread.
+    """
+    import vendor
+    v = (vendor_name or "").strip().lower()
+    out = []
+    for r in rows:
+        title, body = r.get("title", ""), r.get("author_description", "")
+        if not (looks_yesno(title, is_title=True) or looks_yesno(body)):
+            continue
+        if v and vendor.subreddit_vendor(r.get("subreddit", "")) != v \
+                and v not in f"{title} {body}".lower():
+            continue
+        out.append(r)
+    return out
+
+
 def top_comment(thread: dict) -> Optional[dict]:
     """The one comment to present as the answer: highest Reddit score.
 
@@ -260,6 +281,13 @@ def _demo() -> None:
     assert strict["no"] == 4 and strict["yes"] == 0, strict   # silence read as "no"
     assert "non-committal" in verdict_line(strict), verdict_line(strict)
     assert len(strict["votes"]) == 4                          # still traceable
+    rows = [{"title": "Did the update delete grub?", "subreddit": "fedora"},
+            {"title": "Anyone else on Debian losing wifi?", "subreddit": "linux"},
+            {"title": "How do I fix grub", "subreddit": "fedora"}]
+    assert [r["subreddit"] for r in filter_questions(rows)] == ["fedora", "linux"]
+    assert len(filter_questions(rows, "fedora")) == 1       # by subreddit
+    assert len(filter_questions(rows, "debian")) == 1       # by title
+    assert filter_questions(rows, "chrome") == []
     assert looks_yesno("guys did the latest fedora 44 update cause your kernel to delete")
     assert looks_yesno("Anyone else losing grub after the update?")
     assert not looks_yesno("what changed in the fedora 44 update")
