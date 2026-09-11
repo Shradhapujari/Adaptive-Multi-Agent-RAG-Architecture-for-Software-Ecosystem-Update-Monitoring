@@ -434,6 +434,35 @@ Then open the URL Streamlit prints (usually `http://localhost:8501`).
 `marag_app.py` is a one-line shim that imports `app_1.py`, kept because the
 Streamlit Cloud app is configured to serve that filename.
 
+**Claude Code launcher.** If you work in Claude Code, the browser-preview
+launcher can start the app for you. It reads `.claude/launch.json`, which is
+gitignored, so a fresh clone needs the file recreated:
+
+```json
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "app1",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "exec venv311/bin/streamlit run app_1.py --server.port \"${PORT:-8512}\" --server.headless true"
+      ],
+      "port": 8512,
+      "autoPort": true
+    }
+  ]
+}
+```
+
+Two details in there are load-bearing. `autoPort` lets the launcher pick a free
+port when 8512 is taken by another session, and the `sh -c` wrapper is what
+makes that work: Streamlit reads `STREAMLIT_SERVER_PORT`, not the `PORT`
+variable the launcher sets, so the assigned port has to be passed through to
+`--server.port` explicitly. Dropping the wrapper and passing a bare
+`--server.port 8512` reintroduces the collision.
+
 **Answer Presenter model.** With no model configured the final answer is composed
 rule-based, which is what the deployed host does (Streamlit Community Cloud has no
 Ollama and holds no API key). To have a model write it instead, set a provider spec —
