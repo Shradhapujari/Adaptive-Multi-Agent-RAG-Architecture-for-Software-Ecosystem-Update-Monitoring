@@ -36,7 +36,11 @@ after the classifier was frozen): the out-of-sample number.
 The mid-body rule (`yesno.asks_yesno`) was written against the first two
 sets, then the third 50 (frozen 2026-09-14, sha256 27d32141, no thread in
 common with either) was labelled and run once. Its figures are the only
-out-of-sample ones for that rule.
+out-of-sample ones for that rule -- and it is in-sample for anything after.
+
+A fourth 50 is frozen at data/yesno_questions_50_fourth/snapshot.json
+(2026-09-14, sha256 9f96ed95, no thread in common with the three above),
+unlabelled, for the next change: the verdict markers are the obvious one.
 """
 
 from __future__ import annotations
