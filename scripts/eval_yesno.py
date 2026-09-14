@@ -30,6 +30,12 @@ after the classifier was frozen): the out-of-sample number.
 
     python3 scripts/eval_yesno.py            # the original 50 (in-sample)
     python3 scripts/eval_yesno.py --set fresh
+
+A third 50 is frozen at data/yesno_questions_50_third/snapshot.json
+(2026-09-14, sha256 27d32141, no thread in common with either set above).
+It has no labels and no SETS entry yet, on purpose: it is the set the
+mid-body rule gets measured on, so it is labelled when that rule exists and
+not read while the rule is being written.
 """
 
 from __future__ import annotations
