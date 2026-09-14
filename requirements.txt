@@ -21,3 +21,8 @@ pytest==9.1.1
 # failure -- just a blunter rewrite and a blunter answer. Temporal grounding
 # (temporal.py) is rule-based by design and needs no model at all.
 streamlit>=1.32.0
+
+# DemoMain3.py — legacy ReAct agent demo. langchain 1.x removed
+# create_react_agent/AgentExecutor; langchain-classic still ships them.
+langchain-classic>=1.0.0
+langchain-ollama>=1.1.0
