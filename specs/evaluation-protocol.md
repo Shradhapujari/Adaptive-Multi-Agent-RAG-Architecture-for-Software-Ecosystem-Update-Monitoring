@@ -98,6 +98,7 @@ alongside it.
 | **Fetch** | rewrite replaces vs augments the search | corpus, dataset, judge, models, ranking backend |
 | **System** | `marag` vs `marag_llm` vs `single_agent` | corpus, dataset, judge, synthesis model |
 | **Judge** | `ollama:llama3.1` vs an independent judge | everything else |
+| **Rules** | `MARAG_RULES` ∈ {`off`, `on`} — whether `AGENT_RULES.md` is prepended to every prompt | corpus (recorded once per arm), dataset, judge, models, `MARAG_RERANK=embed` |
 
 `marag_llm` exists to remove the answer-format confound: the multi-agent arm's own
 answer is a template assembled by `EvaluatorAgent`, the baseline's is model prose, and
@@ -109,6 +110,18 @@ model constant:
 ```
 --generators marag,marag:ollama:llama3.1,single_agent:ollama:llama3.1
 ```
+
+The **Rules** arm is exploratory: it was added on 2026-09-10, after the other arms
+were pre-registered, so §6's reporting rule for post-hoc comparisons applies to it.
+It differs from the ranking arms in one way that matters for the corpus: the rules
+reach `multiagent_rag_v3.call_llama`, hence the query rewriter, so the two arms ask
+the corpus different questions. `scripts/phase_rules_ablation.sh` records once per
+arm before replaying, and both replays must report `frozen=true`. For `marag` the
+rules therefore move retrieval as well as the answer — its answer comparison is
+sound, its IR metrics are not a controlled contrast. `single_agent` does not use
+the rewriter and is the clean cell. Default is `off`: `run_eval` forces it before
+any generator is built, because the rules reached the harness's rewriter silently
+from `756b889` until `8a51eb8`, and no published number was produced with them.
 
 ## 5. What makes a run admissible
 

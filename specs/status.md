@@ -5,7 +5,7 @@ Living handoff note. Anyone (or any session) starting work reads this first, the
 what you're picking up. **Update this file at the end of a work session**, not
 just the code.
 
-Last updated: **2026-09-09** (Week 3 update — see §11, appended at the end;
+Last updated: **2026-09-14** (§12, the rules-file ablation, appended; §11 is the Week 3 update, appended at the end;
 §10 is the Week 2 update and the sections above it are the 2026-08-31 snapshot
 from the infra/eval-side session, all kept verbatim so the record of what was
 believed when stays readable).
@@ -610,3 +610,94 @@ neither carried foreign content.
    title-plus-last-sentence rule is the next thing worth measuring.
 6. **Frozen n=300, artifact packaging, `HANDOFF.md` drift.** Unchanged from
    §10.6 items 2–4.
+
+## 12. Rules-file ablation — run 2026-09-10, written up 2026-09-14
+
+`AGENT_RULES.md` (landed `756b889`) is prepended to every prompt the app sends.
+Whether it changes anything was verified only as "the text reaches the prompt"
+until this run. Machinery: PR #41 (the `MARAG_RULES` arm, `rules_arm()` in
+`config.json`, `scripts/phase_rules_ablation.sh`), PR #47 (question cap).
+Protocol entry: `evaluation-protocol.md` §4, **Rules** row.
+
+### 12.1 The run
+
+50 questions of `table_50_questions.json`, `MARAG_RERANK=embed`, judge
+`ollama:llama3.1` with `--judge-pool`, `single_agent` synthesising with
+`ollama:mistral` (a different family from the judge; threat T2 does not apply
+to that cell). Idle-gated: launched at load 5.7 on a 12-core machine after an
+earlier attempt at load 18–27 managed 16 questions in 5½ hours. Four passes,
+15:27–19:16.
+
+| arm | `rules_active` | `rules_sha` | replay | frozen |
+|---|---|---|---|---|
+| off | false | — | 2054 hits, 145 misses, 0 on corpus hosts | **true** |
+| on | true | `239a95279465` | 2094 hits, 92 misses, 0 on corpus hosts | **true** |
+
+Both arms replayed the same snapshot; both frozen; sha agrees with the file at
+`8a51eb8`. Every §5 admissibility line holds **except** `n_questions` against
+§6 (see 12.3) — and one line §5 does not list, which is the one that decides
+this section's status (12.4).
+
+### 12.2 Result
+
+**`single_agent` — the clean cell.** Identical retrieval in both arms
+(50/50 same `doc_ids`); the rules changed every answer (0/50 identical).
+
+| metric | off | on | Δ mean | 95 % bootstrap CI | on better / worse / tie | exact sign p |
+|---|---|---|---|---|---|---|
+| faithfulness | 0.820 | 0.873 | +0.053 | [−0.014, +0.121] | 17 / 9 / 24 | 0.169 |
+| answer_relevance | 0.987 | 0.984 | −0.003 | — | 3 / 4 / 43 | 1.000 |
+
+**`marag` — the confounded cell.** Same documents on 15/50 only; the rules
+reached its rewriter and moved retrieval. Faithfulness 0.726 → 0.726
+(11 / 13 / 26), relevance 0.972 → 0.966 (3 / 7 / 40). Its answer is
+`EvaluatorAgent`'s template, so the rules can only reach it through retrieval,
+and retrieval did not move it. IR: MRR 0.648 → 0.652, nDCG@5 0.459 → 0.468 —
+**not a controlled contrast**, do not quote as a rules effect.
+
+A 20-question interim run on the first 20 of these questions gave
+faithfulness +0.083 (7 / 3 / 10, p = 0.344); on the full 50 the same 20
+contribute +0.098 and the whole settles to +0.053. §6 forbids stopping on an
+interim look; it is recorded here as what it was, a machinery check that got
+read as a result.
+
+### 12.3 What may be said
+
+Per §6, an arm difference below +0.10 is reported as **"not detectable at this
+sample size"** — not a null, not a trend. The observed +0.053 on faithfulness,
+CI crossing zero, is exactly that. The sentence the paper may carry, if the run
+were admissible:
+
+> On 50 questions, prepending the rules file raised single-agent faithfulness
+> from 0.82 to 0.87 (17 improved, 9 worse, 24 unchanged); not detectable at
+> n = 50 (sign test p = 0.17). No effect on relevance. Exploratory arm.
+
+By §6's MDE table (+0.134 at n = 100, +0.077 at n = 300, α = 0.05), an
+effect of +0.053 is below what even the 300-question benchmark can detect —
+if it is real, it is small next to the judge's noise, and no run this
+project has planned would settle it.
+
+### 12.4 Provenance — why this cannot be quoted yet
+
+The two replay run directories were **not retained**: they lived in a
+scratch worktree deleted after the numbers were read out, along with the
+snapshot and the judge-label cache the run grew (+729 lines). By this
+project's own rule — "a number without provenance is not a result" — §12.2
+is a record of what a run showed, not evidence the paper may cite. To make
+it admissible: re-run `scripts/phase_rules_ablation.sh table_50_questions.json
+data/snap_rules_50` on an idle machine (~4 h), keep `results/<run_id>/` for
+both replays, and check every §5 line from their `config.json`.
+
+### 12.5 Two things this run changed about the harness
+
+1. **The rules were in the harness from `756b889` to `8a51eb8`, silently.**
+   `call_llama` prepends them unconditionally and the harness's rewriter is
+   built from that module, so every `marag` harness run in that window used a
+   rewriter prompt no published number was produced with. `run_eval` now
+   forces `MARAG_RULES=off` before building generators. Any marag figure
+   measured 2026-09-09 → 2026-09-10 in that window should be re-run before it
+   is quoted.
+2. **The corpus must be recorded once per arm** when the factor reaches the
+   rewriter. A single off-arm recording gave the on arm 29 misses, 6 on
+   corpus hosts, `frozen=false`. This is the `b100_clean` lesson in a new
+   shape, and the script now refuses an existing snapshot directory.
