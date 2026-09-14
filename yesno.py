@@ -24,8 +24,8 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional
 
-__all__ = ["looks_yesno", "stance", "tally", "verdict_line", "fetch_thread",
-           "find_thread", "list_questions", "top_comment"]
+__all__ = ["looks_yesno", "asks_yesno", "stance", "tally", "verdict_line",
+           "fetch_thread", "find_thread", "list_questions", "top_comment"]
 
 THREAD_API = "https://releasetrain.io/api/reddit/"
 QUESTIONS_API = "https://releasetrain.io/api/reddit/query/questions"
@@ -97,6 +97,42 @@ def looks_yesno(question: str, is_title: bool = False) -> bool:
     if is_title and q.endswith("?") and not _HAS_WH.search(q):
         return True
     return not _WH_RE.match(q) and bool(_YESNO_RE.match(q))
+
+
+# A head-count question asked somewhere inside the body rather than as its
+# opening or its title: "Has anyone else run into this?", "Is this normal?".
+# Measured on the tuning set and the fresh 50 (both in-sample by now), this
+# shape was 1 of 9 and then 8 of 13 of the genuine questions, so a detector
+# that reads only the title and the first words of the body misses most of
+# them. Scanning every "?"-sentence for an auxiliary opener was tried first
+# and measured worse (precision 0.50 -> 0.40 on the tuning set): a help post
+# nearly always has some "Is there a way to ...?" in it. So the sentence has
+# to name other people *and* an experience -- "anyone ... seen", "someone ...
+# same issue", "you ever ... encountered" -- or ask whether something is
+# normal. "Can you point me ...?" names the reader and asks for help; it does
+# not fire, because "you" only counts alongside ever/also/too.
+_SENTENCE_Q = re.compile(r"[^.?!\n]*\?")
+_WHO = re.compile(r"\b(?:any\s?(?:one|body)|some\s?(?:one|body)|you\s+(?:ever|also|too|guys|all))\b", re.I)
+_EXPERIENCE = re.compile(r"\b(?:else|experienc\w*|encounter\w*|same|issues?|problems?|seen|see|had|"
+                         r"having|happen\w*|too|notic\w*|run(?:ning)? into)\b", re.I)
+_NORMAL = re.compile(r"\bis\b.*\bnormal\b", re.I)
+
+
+def asks_yesno(title: str, body: str) -> Optional[str]:
+    """The yes/no question a thread asks, or None: title, body opener, or a
+    head-count sentence anywhere in the body. Returns the text that fired so
+    a flag can be argued with at the sentence level."""
+    if looks_yesno(title or "", is_title=True):
+        return title
+    if looks_yesno(body or ""):
+        return (body or "").strip().split("\n", 1)[0]
+    for sent in _SENTENCE_Q.findall(body or ""):
+        sent = sent.strip()
+        if not sent or _HAS_WH.search(sent):
+            continue
+        if _NORMAL.search(sent) or (_WHO.search(sent) and _EXPERIENCE.search(sent)):
+            return sent
+    return None
 
 
 def stance(text: str) -> str:
@@ -313,6 +349,17 @@ def _demo() -> None:
     ]})
     assert tc["body"] == "best", tc                          # bot and OP skipped, tie -> earlier
     assert top_comment({"comments": []}) is None
+    body = ("My light takes 30 seconds to respond since the update. I reinstalled "
+            "the integration. Has anyone else run into this? Any ideas?")
+    assert asks_yesno("Govee light slow after update", body).startswith("Has anyone else")
+    assert asks_yesno("592 Updates", "I havent turned it on for a month, is the amount actually normal?")
+    # A body that *opens* on an auxiliary is the pre-existing opener rule's
+    # business; the mid-body rule is what has to stay quiet on these.
+    assert asks_yesno("Discover broken", "Hey guys. Updates run fine in the shell. "
+                      "Can you please point me in the right direction solving this issue?") is None
+    assert asks_yesno("Haptics", "I upgraded to the F8 pro. Is this a feature or a bug? "
+                      "Is there a way I can resolve this?") is None
+    assert asks_yesno("Did the update delete grub?", "") == "Did the update delete grub?"
     assert stance("no issues here, works fine") == "no"
     assert stance("same here, had to reinstall") == "yes"
     print("ok —", verdict_line(t))

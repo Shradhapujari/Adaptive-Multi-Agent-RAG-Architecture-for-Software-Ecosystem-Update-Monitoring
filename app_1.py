@@ -644,8 +644,8 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # A picked thread is judged by its title or body -- "fedora update" carries
     # the question in the body; a searched one by the query that found it.
     if thread:
-        yesno_shaped = (yesno.looks_yesno(thread.get("title", ""), is_title=True)
-                        or yesno.looks_yesno(thread.get("author_description") or ""))
+        yesno_shaped = yesno.asks_yesno(thread.get("title", ""),
+                                        thread.get("author_description") or "") is not None
     else:
         yesno_shaped = yesno.looks_yesno(query, is_title=True)
     if thread is None and yesno_on and yesno_shaped:

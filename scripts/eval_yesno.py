@@ -31,11 +31,12 @@ after the classifier was frozen): the out-of-sample number.
     python3 scripts/eval_yesno.py            # the original 50 (in-sample)
     python3 scripts/eval_yesno.py --set fresh
 
-A third 50 is frozen at data/yesno_questions_50_third/snapshot.json
-(2026-09-14, sha256 27d32141, no thread in common with either set above).
-It has no labels and no SETS entry yet, on purpose: it is the set the
-mid-body rule gets measured on, so it is labelled when that rule exists and
-not read while the rule is being written.
+    python3 scripts/eval_yesno.py --set third   # blind set for the mid-body rule
+
+The mid-body rule (`yesno.asks_yesno`) was written against the first two
+sets, then the third 50 (frozen 2026-09-14, sha256 27d32141, no thread in
+common with either) was labelled and run once. Its figures are the only
+out-of-sample ones for that rule.
 """
 
 from __future__ import annotations
@@ -63,6 +64,17 @@ IS_YESNO = {
     16: "did the update remove synced snapcast groups",
     34: "can Chrome updates be scheduled for weekends",
     48: "is this number of updates normal",
+    # Added 2026-09-14 under the criterion the fresh 50 was labelled with: a
+    # post that asks whether others share the experience is a yes/no question
+    # even when the rest of it is a help request -- the head-count answers
+    # that ask, and the UI shows it above the answer, not instead of it. The
+    # 2026-09-09 labels read these four as help requests; the figures quoted
+    # for that labelling (precision 0.80, recall 0.89, 6 of 7, 6 of 6) are
+    # against the nine above only.
+    11: "anyone with this problem",                                   # mid-body
+    22: "has anyone else run into this",                              # mid-body
+    33: "has anyone else seen comparable instability after updates",  # mid-body
+    39: "does anyone encounter an issue like this",                   # mid-body; 0 comments
 }
 
 # What the thread's comments actually answer, read by hand. None = the
@@ -77,6 +89,10 @@ TRUE_VERDICT = {
     16: "yes",  # "they broke it in the update, same thing happened here"
     34: "yes",  # several describe doing exactly this via Chrome policy
     48: "yes",  # two flat "Yes." answers explaining why
+    11: None,   # three comments explain activation lock; nobody reports it
+    22: "yes",  # "mine did the same thing a while back"
+    33: "yes",  # four "same issue"/"happening to me", three "no problems" -- close
+    39: None,   # no comments at all
 }
 
 
@@ -132,9 +148,76 @@ TRUE_VERDICT_FRESH = {
     45: None,   # no comments at all
 }
 
+# ---- Third 50: the blind set for the mid-body rule ------------------------
+# Pages 2-3 on 2026-09-14, frozen (sha256 27d32141) before the rule existed,
+# labelled 2026-09-14 by reading every body and every comment on the genuine
+# threads *before* the rule was run on it. Same criterion as the two sets
+# above after their 2026-09-14 unification. Comment-poor: five of the
+# sixteen genuine threads have no comments at all.
+#
+# Result, one run, then frozen (2026-09-14):
+#   title+opener rule only : precision 0.60  recall 0.38  harmful head-counts 2
+#   with the mid-body rule : precision 0.71  recall 0.62  harmful head-counts 2
+# The four threads the mid-body rule added (27, 29, 38, 41) are all genuine;
+# both harmful calls come from the older title rule (0 "Anyone know how",
+# 49 "Linux or Windows? Thoughts?"). The six misses are questions the rule
+# does not target -- factual yes/no with no "anyone" in them (21, 25, 31,
+# 40), a title that ends in "." after its "?" (4), and a poll sentence that
+# also contains "how" (18). Verdicts stay the weak half: 4 calls on the 5
+# answerable, 2 right; "yeah" and a quoted "Yes," inside explanations.
+IS_YESNO_THIRD = {
+    1:  "is Face ID really secure / has anyone else experienced this",   # title + mid-body
+    4:  "does anyone else experience this Edge censorship",             # title ("dose")
+    8:  "does Apple budge on not installing the latest OS",             # title
+    13: "are the 2026.8.2 BTHome integrations broken",                  # title, 0 comments
+    20: "has the AX211 6 GHz problem ever been solved",                  # title, 0 comments
+    21: "is Chrome now treated as essential",                           # body opener, 0 comments
+    25: "have you found a reliable way to update without breaking",     # mid-body poll
+    31: "does 11's EOL mean I have to upgrade in the next few days",    # mid-body, factual
+    38: "has anyone seen AADSTS500032 in an Azure VM login before",     # mid-body
+    40: "will I get back into iCloud on a new phone",                   # mid-body, factual
+    41: "has anyone seen AADSTS500032 in an Azure VM login before",     # mid-body (cross-post of 38)
+    43: "anyone having issues downloading the update on 5G",            # title
+    44: "anyone having issues downloading the update on 5G",            # title (cross-post of 43)
+    # Added after the first run, and said so: the blind pass read bodies cut
+    # at 1,100 characters, and these three ask their question past that. The
+    # rule had flagged 27 and 29 (counted as false positives on that run) and
+    # had NOT flagged 18 (its sentence also contains "how"), so the correction
+    # moves one number each way. Full bodies were re-read for the whole set;
+    # nothing else past the cut is a yes/no ask (2 "anyone has an idea", 37
+    # "does anyone know what", 48 "can anyone help").
+    18: "has anyone else had this issue recently",                       # mid-body, past 1,100 chars
+    27: "is this behavior anyone has seen",                              # mid-body, past 1,100 chars
+    29: "has anyone experienced something similar",                      # mid-body, past 1,100 chars
+}
+# Read as not yes/no, for the record: 0 "anyone know how" (how); 3, 17, 42
+# "is there a way" (how-to); 5, 39 "does anyone know what/if ... or" (wh,
+# A-or-B); 28, 49 A-or-B; 32 "should i reinstall" trails a crash rant with
+# no question mark -- the closest call in the set.
+
+TRUE_VERDICT_THIRD = {
+    1:  None,   # no comments
+    4:  None,   # no comments
+    8:  "no",   # "No they don't", "making a fuss wont get you anywhere", the repair terms quoted
+    13: None,   # no comments
+    20: None,   # no comments
+    21: None,   # no comments
+    25: None,   # fifteen comments of strategy (backup, replica, wait for stable); no head-count in them
+    31: "no",   # "It's not mandatory", "No, you don't have to rush", "still possible after support ends"
+    38: None,   # "I don't have an answer"; the rest are questions back
+    40: None,   # nobody addresses the new-phone question
+    41: None,   # questions back at the asker; nobody has seen it
+    43: None,   # a settings tip and a note that iCloud was down
+    44: None,   # "reddit reports say need to be on wifi" -- second-hand, not a report
+    18: "yes",  # "i have the exact same issue on my macbook air m4"; a second "me too" in Chinese
+    27: "yes",  # "Yes, I have two similar models ... one started the same thing as yours"
+    29: "yes",  # "My phone recently did something similar" -- no marker phrase, so the tally abstains
+}
+
 SETS = {
     "original": (DATA / "yesno_questions_50" / "snapshot.json", IS_YESNO, TRUE_VERDICT),
     "fresh":    (DATA / "yesno_questions_50_fresh" / "snapshot.json", IS_YESNO_FRESH, TRUE_VERDICT_FRESH),
+    "third":    (DATA / "yesno_questions_50_third" / "snapshot.json", IS_YESNO_THIRD, TRUE_VERDICT_THIRD),
 }
 
 
@@ -145,9 +228,8 @@ def load(snapshot: Path) -> list:
 
 
 def detected(row: dict) -> bool:
-    """The app flags on the user's question; here title and body both stand in."""
-    return (yesno.looks_yesno(row.get("title", ""), is_title=True)
-            or yesno.looks_yesno(row.get("author_description") or ""))
+    """What the app checks on a picked thread: title, body opener, mid-body."""
+    return yesno.asks_yesno(row.get("title", ""), row.get("author_description") or "") is not None
 
 
 def main(which: str = "original") -> int:
@@ -175,7 +257,7 @@ def main(which: str = "original") -> int:
 
     answerable = [i for i in sorted(truth) if true_verdict[i] is not None]
     print(f"\nVERDICT over the {len(truth)} genuine yes/no questions")
-    decided = correct = 0
+    decided = decided_answerable = correct = 0
     for i in sorted(truth):
         t = yesno.tally(rows[i])
         call = ("yes" if t["yes"] > t["no"] else "no" if t["no"] > t["yes"]
@@ -183,16 +265,20 @@ def main(which: str = "original") -> int:
         want = true_verdict[i]
         if call is not None:
             decided += 1
+            decided_answerable += (want is not None)
             correct += (call == want)
             mark = "ok " if call == want else "WRONG"
         else:
             mark = "abstain" if want is None else "MISS"
         print(f"  [{i:2d}] {mark:7s} system={str(call):5s} truth={str(want):5s}  {is_yesno[i][:44]}")
 
+    spurious = decided - decided_answerable
     print(f"\n  answerable from the comments   : {len(answerable)} of {len(truth)}"
           f"  (the rest have no answer in them, and abstaining is correct)")
-    print(f"  reached a call                 : {decided} of {len(answerable)}")
-    print(f"  call agreed with the labeller  : {correct} of {decided}")
+    print(f"  reached a call                 : {decided_answerable} of {len(answerable)}")
+    print(f"  call agreed with the labeller  : {correct} of {decided_answerable}")
+    if spurious:
+        print(f"  called where nothing answers   : {spurious}  (a head-count off comments that do not answer)")
     return 0
 
 
