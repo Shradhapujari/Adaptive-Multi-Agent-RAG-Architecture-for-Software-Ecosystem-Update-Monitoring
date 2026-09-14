@@ -23,6 +23,12 @@ shim can go.
 - **The grounding, visibly.** The question as asked, the question as grounded,
   the phrasings actually fetched, and which results fall inside the resolved
   window.
+- **A component monitor.** The sidebar's *Monitor* view watches a comma-separated
+  list of components (kept in the URL as `?watch=`): latest shipped version and
+  its age, a next-release estimate from the median gap between recent releases,
+  advisories in the last 90 days by severity, monthly release/advisory counts,
+  version history, and a heuristic risk band that rises with an installed
+  version's drift. All of it is derived from `/api/v/search` (see `monitor.py`).
 - **The evidence, visibly.** Each claim in the final paragraph carries its
   source in brackets; the sources expand to live release, CVE and community
   links.
