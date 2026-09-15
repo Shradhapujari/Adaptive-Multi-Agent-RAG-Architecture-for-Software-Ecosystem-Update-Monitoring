@@ -611,7 +611,7 @@ neither carried foreign content.
 6. **Frozen n=300, artifact packaging, `HANDOFF.md` drift.** Unchanged from
    §10.6 items 2–4.
 
-## 12. Rules-file ablation — run 2026-09-10, written up 2026-09-14
+## 12. Rules-file ablation — run 2026-09-10 (not retained), re-run 2026-09-14 (retained, §12.6)
 
 `AGENT_RULES.md` (landed `756b889`) is prepended to every prompt the app sends.
 Whether it changes anything was verified only as "the text reaches the prompt"
@@ -677,16 +677,14 @@ effect of +0.053 is below what even the 300-question benchmark can detect —
 if it is real, it is small next to the judge's noise, and no run this
 project has planned would settle it.
 
-### 12.4 Provenance — why this cannot be quoted yet
+### 12.4 Provenance of the 2026-09-10 run — why *that* run cannot be quoted
 
 The two replay run directories were **not retained**: they lived in a
 scratch worktree deleted after the numbers were read out, along with the
 snapshot and the judge-label cache the run grew (+729 lines). By this
 project's own rule — "a number without provenance is not a result" — §12.2
-is a record of what a run showed, not evidence the paper may cite. To make
-it admissible: re-run `scripts/phase_rules_ablation.sh table_50_questions.json
-data/snap_rules_50` on an idle machine (~4 h), keep `results/<run_id>/` for
-both replays, and check every §5 line from their `config.json`.
+is a record of what a run showed, not evidence the paper may cite. The
+re-run in §12.6 is the one with provenance; quote that.
 
 ### 12.5 Two things this run changed about the harness
 
@@ -701,3 +699,57 @@ both replays, and check every §5 line from their `config.json`.
    rewriter. A single off-arm recording gave the on arm 29 misses, 6 on
    corpus hosts, `frozen=false`. This is the `b100_clean` lesson in a new
    shape, and the script now refuses an existing snapshot directory.
+
+### 12.6 Re-run 2026-09-14, artifacts retained — the quotable one
+
+Same script, same dataset, same arms, `main` at `741d5ae`. Idle-gated at load
+3.8; 16:46–21:38 (the record passes ran 2h52m and 1h43m — five other harness
+runs were active on the machine the same afternoon). Snapshot and both replays
+are on disk under `results/`, ignored by git as every other run is:
+
+| | run id | `rules_active` | `rules_sha` | replay | frozen |
+|---|---|---|---|---|---|
+| snapshot | `results/corpus_rules_20260914/` (27 MB; `sweep.log` and the post-run judge cache alongside) | | | | |
+| off | `run_1789446039_417cbdda5764` | false | — | 2028 hits, 233 misses, 0 on corpus hosts | **true** |
+| on | `run_1789446712_417cbdda5764` | true | `239a95279465` | 2124 hits, 85 misses, 0 on corpus hosts | **true** |
+
+§5 checked from both `config.json`: `corpus.mode == "replay"`, `frozen == true`,
+`rerank_spec == embed:nomic-embed-text`, `rerank_degraded == false`,
+`judge_active == true`, `dataset_hash == 417cbdda57…` (same as §12.1), both
+replayed the same snapshot directory, both postdate `a1c717c` and `46ad7d0`.
+The one line that fails is `n_questions` against §6, as before. The two
+record passes (`run_1789429579…`, `run_1789439881…`) are population passes
+and carry no claim.
+
+**`single_agent` — clean cell** (50/50 identical documents, 0/50 identical answers):
+
+| metric | off | on | Δ mean | 95 % bootstrap CI | better / worse / tie | exact sign p |
+|---|---|---|---|---|---|---|
+| faithfulness | 0.817 | 0.888 | +0.071 | [+0.009, +0.134] | 16 / 11 / 23 | 0.442 |
+| answer_relevance | 0.992 | 0.982 | −0.010 | [−0.036, +0.008] | 4 / 5 / 41 | 1.000 |
+
+**`marag` — confounded cell** (15/50 identical documents): faithfulness
+0.701 → 0.752 (+0.051, CI [+0.002, +0.100], 14 / 9 / 27, p = 0.405); relevance
+0.978 → 0.973. IR MRR 0.627 → 0.662, nDCG@5 0.430 → 0.463 — retrieval moved,
+not a controlled contrast.
+
+**Reading, per §6.** Two independent 50-question runs now agree on direction:
+faithfulness +0.053 (§12.2, unretained) and +0.071 (here). In this run the
+bootstrap CI on the mean excludes zero while the sign test does not
+(16 wins to 11 losses is near-even; the mean is carried by a few large
+positive deltas). Both estimates sit **below the pre-registered +0.10 MDE**,
+so the finding is stated as §6 requires — *not detectable at this sample
+size* — and the sentence the paper may carry is:
+
+> On 50 questions with retrieval held identical, prepending the rules file
+> raised single-agent faithfulness from 0.82 to 0.89 (+0.07, 95 % CI
+> +0.01 to +0.13; 16 improved, 11 worse, 23 unchanged; sign test p = 0.44).
+> Below the pre-registered minimum detectable effect of +0.10; relevance
+> unchanged. Exploratory arm, added after pre-registration. Run
+> `run_1789446039_417cbdda5764` vs `run_1789446712_417cbdda5764`, snapshot
+> `corpus_rules_20260914`.
+
+Not done here, on purpose: merging the run's judge-label growth into the
+tracked `results/qrels_cache.json`, which another session holds modified and
+uncommitted. The post-run cache is saved beside the snapshot as
+`qrels_cache_after_run.json` for whoever merges it.
