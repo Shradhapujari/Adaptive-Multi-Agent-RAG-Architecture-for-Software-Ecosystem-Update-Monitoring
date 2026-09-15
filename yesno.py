@@ -61,22 +61,50 @@ _WH_RE = re.compile(rf"^\s*{_WH}\b", re.I)
 _HAS_WH = re.compile(rf"\b{_WH}\b", re.I)
 _YESNO_RE = re.compile(rf"^\s*(?:{_FILLER}){{0,2}}{_AUX}(?![\w'])", re.I)
 
-# Checked in this order: a "no" phrase wins over a "yes" phrase in the same
-# comment, because the no-phrases are negations ("never had the same issue"
-# contains "same issue") and the yes-phrases are not.
+# Three tiers, checked in this order, each measured on the three frozen sets
+# that were in-sample by 2026-09-14 (scripts/eval_yesno.py):
+#
+#   1. A negated experience is a "no" and wins over everything: "never had
+#      the same issue" contains "same issue", so the negations go first.
+#   2. A shared experience is a "yes".
+#   3. "works fine" / "runs fine" is a "no" only when nothing above matched:
+#      measured on the fresh 50, both harmful head-counts came from these two
+#      phrases inside comments that were not answering -- one of them opened
+#      "it's not just you", which is a yes.
+#
+# The bare words -- yes / yeah / yep / no / nope -- count only as the first
+# word of a top-level comment: an answer to the post. Anywhere else they are
+# conversational ("yeah the mod's read is right", in a reply to that mod; a
+# quoted "> ... Yes."), and measured wrong on three of the four calls the
+# third 50 got wrong. Quoted lines (> ...) are dropped before matching:
+# they are the other person's words.
 NO_MARKERS = (
     "never had", "never heard", "never seen", "never experienced", "never happened",
-    "no issue", "no issues", "no problem", "no problems", "not had", "haven't had",
-    "havent had", "have not had", "not seen", "hasn't happened", "didn't happen",
-    "did not happen", "works fine", "working fine", "runs fine", "no such",
-    "mine is fine", "all fine", "nope", "not for me", "no, ", "no.",
+    "never noticed", "no issue", "no issues", "no problem", "no problems", "not had",
+    "haven't had", "havent had", "have not had", "not seen", "haven't seen",
+    "hasn't happened", "didn't happen", "did not happen", "no such", "mine is fine",
+    "all fine", "not for me", "not affected", "not having", "doesn't happen",
+    "does not happen", "no trouble", "without any problem", "without any issue",
 )
 YES_MARKERS = (
     "same here", "same issue", "same problem", "same thing", "same boat",
-    "me too", "happened to me", "happened here", "i had this", "i have this",
-    "can confirm", "confirmed", "yes, ", "yes.", "yep", "yeah", "affected me",
-    "had to reinstall", "broke mine", "same for me",
+    "similar issue", "similar problem", "something similar", "exact same",
+    "me too", "me as well", "happened to me", "happened here", "happens to me",
+    "happening to me",
+    "i had this", "i have this", "i've had this", "i have had this", "having this too",
+    "have this too", "can confirm", "confirmed", "affected me", "had to reinstall",
+    "broke mine", "same for me", "not just you", "welcome to the club",
+    "noticed this", "noticed the same", "also having", "also had", "also seeing",
+    "also experienc", "did the same", "does the same", "doing the same",
+    "started the same", "i'm seeing this", "im seeing this", "seeing the same",
+    "run into this", "ran into this", "ran into the same", "run into the same",
 )
+WEAK_NO_MARKERS = ("works fine", "working fine", "runs fine", "running fine")
+# "Yes, ..." / "Nope." -- the word, then punctuation. "No prosa, show code"
+# and "No idea" open on the word too, and are not answers.
+_OPENING_YES = re.compile(r"^\W*(?:yes|yeah|yep|yup|yess+)\s*[,.!;:—-]", re.I)
+_OPENING_NO = re.compile(r"^\W*(?:no|nope|nah)\s*(?:[,.!;:—-]|$)", re.I)
+_QUOTED_LINE = re.compile(r"^\s*(?:>|&gt;).*$", re.M)
 
 # Bots and removed comments are not people with an opinion.
 _SKIP_AUTHORS = {"automoderator", "[deleted]", "[removed]", ""}
@@ -135,15 +163,27 @@ def asks_yesno(title: str, body: str) -> Optional[str]:
     return None
 
 
-def stance(text: str) -> str:
-    """One comment's answer to the question: yes | no | unclear."""
-    t = " " + re.sub(r"\s+", " ", (text or "").lower()).strip() + " "
+def stance(text: str, top_level: bool = True) -> str:
+    """One comment's answer to the question: yes | no | unclear.
+
+    `top_level` is whether the comment answers the post rather than another
+    comment; a bare opening "yes"/"no" only counts when it does.
+    """
+    own = _QUOTED_LINE.sub("", text or "")
+    t = " " + re.sub(r"\s+", " ", own.lower()).strip() + " "
     for m in NO_MARKERS:
         if m in t:
             return "no"
     for m in YES_MARKERS:
         if m in t:
             return "yes"
+    if top_level and _OPENING_YES.match(own.strip()):
+        return "yes"
+    if top_level and _OPENING_NO.match(own.strip()):
+        return "no"
+    for m in WEAK_NO_MARKERS:
+        if m in t:
+            return "no"
     return "unclear"
 
 
@@ -167,7 +207,8 @@ def tally(thread: dict, unclear_as_no: bool = False) -> dict:
         key = author.lower()
         if key in _SKIP_AUTHORS or key == asker or c.get("is_submitter"):
             continue
-        s = stance(c.get("body", ""))
+        s = stance(c.get("body", ""),
+                   top_level=str(c.get("parent_id", "t3_")).startswith("t3_"))
         prev = votes.get(key)
         # An author who says something substantive later outranks their own
         # earlier "What?" -- first *classifiable* comment wins, not first.
@@ -361,6 +402,17 @@ def _demo() -> None:
                       "Is there a way I can resolve this?") is None
     assert asks_yesno("Did the update delete grub?", "") == "Did the update delete grub?"
     assert stance("no issues here, works fine") == "no"
+    assert stance("If that's 5.1.37, it's not just you. Mine is working fine now.") == "yes"
+    assert stance("Yes, I have two similar models, one started the same thing as yours") == "yes"
+    assert stance("yeah the mod's 'wait for the next stable' is the right read", top_level=False) == "unclear"
+    assert stance("Yeah, mine did that after the update too.") == "yes"
+    assert stance("&gt; does this mean I have to upgrade?\n\nIt's not mandatory.") == "unclear"
+    assert stance("No, you don't have to rush.") == "no"
+    assert stance("No idea, but try TrixLoader.") == "unclear"
+    assert stance("No prosa, show code") == "unclear"
+    assert stance("Nope") == "no"
+    assert stance("this has been happening to me on one of my 4 UNVRs") == "yes"
+    assert stance("My phone recently did something similar, let the battery die.") == "yes"
     assert stance("same here, had to reinstall") == "yes"
     print("ok —", verdict_line(t))
 

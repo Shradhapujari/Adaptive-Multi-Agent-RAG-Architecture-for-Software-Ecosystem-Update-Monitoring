@@ -38,9 +38,13 @@ sets, then the third 50 (frozen 2026-09-14, sha256 27d32141, no thread in
 common with either) was labelled and run once. Its figures are the only
 out-of-sample ones for that rule -- and it is in-sample for anything after.
 
-A fourth 50 is frozen at data/yesno_questions_50_fourth/snapshot.json
-(2026-09-14, sha256 9f96ed95, no thread in common with the three above),
-unlabelled, for the next change: the verdict markers are the obvious one.
+    python3 scripts/eval_yesno.py --set fourth  # blind set for the stance-marker rework
+
+The stance markers were reworked against the first three sets (tiers,
+opening-word-only yes/no on top-level comments, quoted lines dropped) and
+the fourth 50 (frozen 2026-09-14, sha256 9f96ed95) was labelled from full
+bodies and run once. Every set is in-sample now; the next change needs a
+fifth.
 """
 
 from __future__ import annotations
@@ -218,10 +222,76 @@ TRUE_VERDICT_THIRD = {
     29: "yes",  # "My phone recently did something similar" -- no marker phrase, so the tally abstains
 }
 
+# ---- Fourth 50: the blind set for the stance-marker change ----------------
+# Pages 3-4 on 2026-09-14, frozen (sha256 9f96ed95) after the mid-body rule
+# and before the marker rework; labelled from *full* bodies (the third set's
+# lesson) and every comment, before either rule was run on it. Same
+# criterion as the other three. Close calls, decided and recorded: 19
+# ("Could it be that?" -- seeks a cause, not a head-count: no), 22 ("would
+# this work, or would it stay locked" -- the "or" is the negation, so yes),
+# 49 ("if it's gonna let me reset or not?" -- yes), 29 ("No cellular after
+# update?" title over a troubleshooting body -- no).
+#
+# Result, one run, then frozen (2026-09-14):
+#   detection, title+opener only : precision 0.88  recall 0.41  harmful 0
+#   detection, with mid-body     : precision 0.92  recall 0.71  harmful 0
+#     (a second blind figure for the mid-body rule; the five misses are the
+#      two polls with no "?" (0, 13), two factual asks (2, 22) and 49's
+#      "... or not?")
+#   verdicts, old markers        : 10 answerable, 5 called, 2 right
+#   verdicts, reworked markers   : 10 answerable, 5 called, 2 right -- identical
+# The marker rework removed the third set's four wrong calls and changed
+# nothing here. The three wrong calls are three different failures, none of
+# them the ones the rework targeted: 24 "haven't had" inside a same-
+# experience report; 49 "no problem" meaning "easily"; 34 "Yes, I have been
+# seeing this" -- a true yes to "anyone else?" counted against "is this
+# normal?", where shared experience is not the same answer.
+IS_YESNO_FOURTH = {
+    0:  "is it just me or is anyone else noticing this",               # mid-body, no "?"
+    2:  "has there been a recent update that could be causing this",  # mid-body, factual
+    5:  "is it a glitch in 26.6.1 / anyone else having this issue",    # mid-body
+    9:  "is it okay to stop updating the phone",                       # title + body
+    12: "someone had a similar issue and resolved it",                 # mid-body
+    13: "I don't know if anyone else has this issue",                  # mid-body, no "?"
+    14: "am I screwed",                                                # title
+    17: "anyone else noticed this",                                    # mid-body
+    22: "would removing the iPad from his account let it be reset",    # mid-body, factual
+    24: "anyone else see a drastic change in DSv4Flash",               # mid-body
+    34: "sleep mode broken / is this normal",                          # title + mid-body
+    35: "does somebody have a solution or a similar problem",          # mid-body
+    37: "is anyone else experiencing this right now",                  # mid-body
+    40: "cameras disconnecting / anyone else",                         # title + mid-body
+    42: "will the official API be updated to support 26.07",           # title, factual
+    47: "anyone else notice their BCD files were updated",             # body opener
+    49: "is it going to let me factory reset or not",                  # mid-body, no "?" before "or not?"
+}
+
+TRUE_VERDICT_FOURTH = {
+    0:  None,   # VoLTE advice; nobody reports the same
+    2:  None,   # a how-to-measure answer; the update question is not addressed
+    5:  None,   # one suggestion (attention awareness)
+    9:  "no",   # "Always keep updating"; the 13 GB is install headroom, not storage
+    12: None,   # "the only flicker I know about is VRR" -- not a report
+    13: "no",   # "It works for me" twice
+    14: "no",   # OpenCore patcher; "your Mac DOES meet the requirements for Monterey"
+    17: "yes",  # "I have Fold 8 too and same thing"
+    22: "no",   # "Without the passcode, you're probably out of luck"
+    24: "yes",  # two commenters describe the same runaway sessions
+    34: "no",   # "Firstly, it's not normal", "Known bug" -- though six others say they have it too,
+                # which is a yes to a question the asker did not ask; the tally will read them
+    35: None,   # no comments
+    37: "yes",  # "exactly the same problem" x5, "Same here"
+    40: None,   # no comments
+    42: None,   # "The official API is here. What you're using was never supported" -- the premise fails
+    47: "yes",  # "Funny you say that I noticed that in threatlocker"
+    49: "yes",  # "You'll be able to erase the iPad no problem"
+}
+
 SETS = {
     "original": (DATA / "yesno_questions_50" / "snapshot.json", IS_YESNO, TRUE_VERDICT),
     "fresh":    (DATA / "yesno_questions_50_fresh" / "snapshot.json", IS_YESNO_FRESH, TRUE_VERDICT_FRESH),
     "third":    (DATA / "yesno_questions_50_third" / "snapshot.json", IS_YESNO_THIRD, TRUE_VERDICT_THIRD),
+    "fourth":   (DATA / "yesno_questions_50_fourth" / "snapshot.json", IS_YESNO_FOURTH, TRUE_VERDICT_FOURTH),
 }
 
 

@@ -1180,7 +1180,7 @@ def summarize(records: List[dict], stats: dict, api: Api, out_path: str) -> None
         for key, cat in stats["backfilled_cells"]:
             print(f"    {key:16s} {cat}")
     else:
-        print("\n  BACKFILL TEMPLATES IN OUTPUT: none - all 300 questions are "
+        print(f"\n  BACKFILL TEMPLATES IN OUTPUT: none - all {len(records)} questions are "
               "mined from live data.")
 
     if api.not_catalogued:
