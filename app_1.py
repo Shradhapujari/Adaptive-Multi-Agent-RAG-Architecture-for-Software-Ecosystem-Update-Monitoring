@@ -666,6 +666,16 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
 
     return results
 
+_CITE = re.compile(r"\s*\[[^\]]*\]")
+
+
+def _one_line(text: str) -> str:
+    """The first sentence of a presented answer, citations stripped."""
+    plain = _CITE.sub("", text or "").strip()
+    m = re.match(r"(.+?[.!?])(\s|$)", plain, re.S)
+    return (m.group(1) if m else plain).strip() or "No answer could be composed."
+
+
 def _n_shipped(rows) -> int:
     """How many of the release-feed rows are versions that actually shipped."""
     return sum(1 for r in (rows or []) if vendor.is_release_record(r))
@@ -839,7 +849,7 @@ with st.sidebar:
     st.divider()
 
     st.markdown("#### ⚙️ Settings")
-    mode = st.radio(
+    mode = st.selectbox(
         "Answering mode",
         ["Multi-agent pipeline", "Single agent (paper baseline)",
          "Compare both side by side"],
@@ -849,7 +859,7 @@ with st.sidebar:
              "screen is the difference the paper measures.")
     single_mode = mode.startswith("Single")
     compare_mode = mode.startswith("Compare")
-    source_label = st.radio(
+    source_label = st.selectbox(
         "Data source",
         ["Retrieval agent decides", "Lake only (releasetrain.io live)",
          "Local store only"],
@@ -858,9 +868,15 @@ with st.sidebar:
              "Lake: live only, no fallback. Store: what earlier runs retrieved.")
     source = {"R": "agent", "L": "lake", "Lo": "store"}["Lo" if source_label.startswith("Local")
                                                        else source_label[0]]
-    result_limit = st.slider("Results per agent", 3, 10, 5)
-    show_pipeline = st.toggle("Show pipeline steps", value=True)
-    show_raw = st.toggle("Show raw API data", value=False)
+    result_limit = st.slider("Results per agent", 1, 10, 5)
+    show_details = st.toggle("Show details", value=False,
+                             help="Off: the question and a one-sentence answer. "
+                                  "On: every agent's step, the evidence tabs and "
+                                  "the cited paragraph.")
+    show_pipeline = st.toggle("Show pipeline steps", value=True,
+                              disabled=not show_details) and show_details
+    show_raw = st.toggle("Show raw API data", value=False,
+                         disabled=not show_details) and show_details
     yesno_on = st.toggle("Yes/No consensus", value=True, disabled=single_mode,
                          help="For questions that take a one-word answer, count how "
                               "the retrieved thread's commenters actually answered it.")
@@ -1118,27 +1134,31 @@ if run_btn and query and single_mode:
                else " · no model reachable, so the deterministic template "
                     "rendering ran instead of prose synthesis")
                + f" · {sa['elapsed']}s")
-    st.info("**Raw question → retriever → one answer.** No temporal grounding, "
-            "no vendor or intent detection, no query rewriting, no CVE agent, "
-            "no RLAIF evaluator, no survey weighting, no yes/no tally. This is "
-            "the arm the paper compares against, run on your question.")
+    if not show_details:
+        st.markdown(f"**Q:** {query}")
+        st.success(f"**A:** {_one_line(sa['answer'])}")
+    else:
+        st.info("**Raw question → retriever → one answer.** No temporal grounding, "
+                "no vendor or intent detection, no query rewriting, no CVE agent, "
+                "no RLAIF evaluator, no survey weighting, no yes/no tally. This is "
+                "the arm the paper compares against, run on your question.")
 
-    st.markdown("#### ✅ Answer")
-    st.success(sa["answer"] or "_(the baseline returned nothing)_")
+        st.markdown("#### ✅ Answer")
+        st.success(sa["answer"] or "_(the baseline returned nothing)_")
 
-    docs = sa.get("docs") or []
-    with st.expander(f"📄 Documents it retrieved ({len(docs)})"):
-        if not docs:
-            st.caption("None — the raw query matched nothing.")
-        for d in docs:
-            title = d.get("title") or d.get("product") or "(untitled)"
-            src = d.get("source") or d.get("kind") or "?"
-            st.markdown(f"• **{title}**  ·  `{src}`")
-            if d.get("url"):
-                st.caption(d["url"])
+        docs = sa.get("docs") or []
+        with st.expander(f"📄 Documents it retrieved ({len(docs)})"):
+            if not docs:
+                st.caption("None — the raw query matched nothing.")
+            for d in docs:
+                title = d.get("title") or d.get("product") or "(untitled)"
+                src = d.get("source") or d.get("kind") or "?"
+                st.markdown(f"• **{title}**  ·  `{src}`")
+                if d.get("url"):
+                    st.caption(d["url"])
 
-    st.caption("Switch **Answering mode** in the sidebar to run the same "
-               "question through the multi-agent pipeline and compare.")
+        st.caption("Switch **Answering mode** in the sidebar to run the same "
+                   "question through the multi-agent pipeline and compare.")
 
     st.session_state["last_answer"] = {"query": query, "reddit_id": reddit_id, "arm": "single_agent"}
 
@@ -1152,7 +1172,7 @@ elif run_btn and query and compare_mode:
         st.markdown("### 🤖 Single agent (baseline)")
         with st.spinner("retrieve, then answer..."):
             sa = run_single_agent(query, top_k=result_limit)
-        st.success(sa["answer"] or "_(nothing)_")
+        st.success(sa["answer"] if show_details else _one_line(sa["answer"]))
         st.caption(f"`{sa['arm']}` · {len(sa.get('docs') or [])} document(s) · "
                    f"{sa['elapsed']}s")
     with right:
@@ -1167,10 +1187,10 @@ elif run_btn and query and compare_mode:
                                        model_spec=presenter_spec(),
                                        per_kind=result_limit)
         tc = results.get("top_comment")
-        if tc:
+        if tc and show_details:
             st.info(f"**Top-voted comment ({tc.get('score', 0)} points, "
                     f"u/{tc.get('author','')}):** {tc.get('body','')[:600]}")
-        st.success(presented.text)
+        st.success(presented.text if show_details else _one_line(presented.text))
         ev = results["evaluation"]
         st.caption(f"{ev['community_count']} community · {ev['release_count']} "
                    f"releases · {ev['cve_count']} CVE · quality {ev['quality']:.2f} · "
@@ -1222,331 +1242,6 @@ elif run_btn and query:
     # answer's window note all use `tr`, and they render either way.
     tr = results["temporal"]
 
-    if show_pipeline:
-        # ── TEMPORAL GROUNDING RESULT ─────────────────────────
-        st.markdown("### 📅 Temporal Grounder Agent")
-        if tr is not None and tr.changed:
-            tg1, tg2 = st.columns(2)
-            with tg1:
-                st.info(f"**As asked:** {tr.original}")
-            with tg2:
-                st.success(f"**Grounded:** {tr.query}")
-            st.caption(f"Resolved {tr.describe()} — relative words are rewritten to "
-                       f"absolute dates before retrieval, because no document "
-                       f"contains the word “today”, only a date.")
-        else:
-            st.caption("No relative time expression in this query — nothing to ground. "
-                       "(Version words like “latest” are left alone on purpose: they "
-                       "are ordinal over releases, not a date.)")
-
-    # ── FEED OUTAGES ──────────────────────────────────────
-    # Named explicitly. The alternative this replaced was a document whose
-    # title was the exception text, which the answer then cited as a source.
-    if results.get("errors"):
-        for e in results["errors"]:
-            st.error(f"**{e['agent']} feed unreachable** — {e['error']}. "
-                     "No documents from this feed are included below, and "
-                     "nothing is cited from it.")
-
-    gq = results.get("grounding")        # same: read by the raw-data payload
-
-    if show_pipeline:
-        # ── VENDOR + INTENT GROUNDING RESULT ──────────────────
-        if gq is not None:
-            st.markdown("### 🏷 Vendor & Intent Grounder")
-            vg1, vg2 = st.columns(2)
-            with vg1:
-                if gq.vendors:
-                    st.success("**Products:** " + ", ".join(
-                        f"“{v.matched}” → `{v.name}`" for v in gq.vendors))
-                else:
-                    st.warning("**Products:** none matched the catalog — "
-                               "retrieval is not vendor-scoped for this question.")
-            with vg2:
-                if gq.intent and gq.intent.confident:
-                    st.success(f"**Intent:** {gq.intent.describe()}")
-                else:
-                    st.warning(f"**Intent:** {gq.intent.describe() if gq.intent else 'not classified'}")
-            if gq.rewritten != gq.original:
-                st.info(f"**Question as grounded:** {gq.rewritten}")
-            excluded = results.get("advisories_excluded", 0)
-            if excluded:
-                st.caption(
-                    f"{excluded} CVE advisory row(s) excluded from the release pool. "
-                    "A CVE record's version field is the *affected* version, not a "
-                    "version that shipped — citing one as a release is what produced "
-                    "answers like “Linux v25.642087.0”.")
-            elif gq.intent and gq.intent.label == "security":
-                st.caption("Security question — advisories are kept and cited as "
-                           "advisories, named by their CVE id rather than by the "
-                           "affected-version string.")
-            else:
-                # Reached when no intent was confident enough to route on. Saying
-                # "security question" here contradicted the line directly above it,
-                # which had just reported no clear intent.
-                st.caption("No intent was confident enough to narrow the search, so "
-                           "every source is searched and advisories are cited as "
-                           "advisories rather than as releases.")
-            if gq.needs_clarification:
-                st.error("No product and no clear intent were found in this "
-                         "question. The answer below is drawn from an unscoped "
-                         "search — naming a product would make it specific.")
-
-        # ── QUERY REWRITING RESULT ────────────────────────────
-        st.markdown("### 🔄 Query Rewriter Agent")
-        rw_col1, rw_col2 = st.columns(2)
-        with rw_col1:
-            st.info(f"**Grounded input:** {results['grounded_query']}")
-        with rw_col2:
-            rw = results.get("rewrite")
-            text = results['rewritten_query'] or results['original_query']
-            if rw is not None and rw.mode == "llm":
-                st.success(f"**Rewritten** by {rw.model}: {text}")
-            elif rw is not None:
-                # Never shown as model output. On a host with no reachable Ollama
-                # -- Streamlit Community Cloud, for one -- this is every run, and
-                # the heading above still reads "Llama 3.1 local".
-                st.warning(f"**Rewritten** by rule: {text}")
-                st.caption(f"Rule-based keyword expansion — {rw.note}. "
-                           "The rewrite is blunter than a model's; retrieval still "
-                           "runs on the grounded product term alongside it.")
-            else:
-                st.success(f"**Rewritten:** {text}")
-        fetched_on = results.get("release_phrasings") or results.get("fetch_phrasings", [])
-        if len(fetched_on) > 1:
-            st.caption("Fetched on every phrasing and unioned — " +
-                       " · ".join(f"“{p}”" for p in fetched_on) +
-                       ". The plain phrasing and the product term find the documents; "
-                       "the dated one lets the window rank them.")
-
-    # ── ANSWER FROM THE THREAD ────────────────────────────
-    # For a picked (or matched) Reddit question the community already answered
-    # it; the top-voted comment is that answer, shown before anything synthesised.
-    yn = results.get("yesno")
-    if yn is not None:
-        st.markdown("### 🗳 Poll")
-        line = yesno.verdict_line(yn)
-        (st.success if yn["answered"] else st.warning)(f"**{line}**")
-        n = max(1, yn["yes"] + yn["no"] + (0 if yn.get("unclear_as_no") else yn["unclear"]))
-        for k, lab in (("yes", "Yes"), ("no", "No"), ("unclear", "Unclear")):
-            if k == "unclear" and yn.get("unclear_as_no"):
-                continue
-            st.progress(yn[k] / n, text=f"{lab} · {yn[k]}")
-
-    th = results.get("thread")
-    if th is not None:
-        st.markdown("### 🧵 Answer from the thread")
-        tc = results.get("top_comment")
-        if tc:
-            st.success(f"**Top-voted comment — {tc.get('score', 0)} points, "
-                       f"u/{tc.get('author', '')}:**\n\n{tc.get('body', '')}")
-            if tc.get("permalink"):
-                st.caption(f"🔗 {tc['permalink']}")
-        else:
-            st.warning("No comment from anyone other than the asker or a bot — "
-                       "nothing to present as an answer.")
-        others = [c for c in th.get("comments") or [] if c is not tc]
-        with st.expander(f"“{th.get('title', '')}” (r/{th.get('subreddit', '')}) — "
-                         f"{len(others)} other comment(s), by score"):
-            for c in sorted(others, key=lambda c: -(c.get("score") or 0)):
-                who = "asker" if c.get("is_submitter") else f"u/{c.get('author', '')}"
-                st.markdown(f"**{c.get('score', 0)}** · {who} — {c.get('body', '')[:300]}")
-        st.markdown("---")
-
-    # ── YES/NO CONSENSUS ──────────────────────────────────
-    # Shown above the evaluator because for this shape of question it *is*
-    # the answer, and a paragraph synthesised underneath it is elaboration.
-    if yn is not None:
-        st.markdown("### ✅ Yes/No Consensus")
-        st.caption(f"Counted off the comments of “{yn['thread']['title']}” "
-                   f"(r/{yn['thread'].get('subreddit','')}) — one vote per commenter, "
-                   f"the person who asked excluded.")
-        if yn["thread"].get("url"):
-            st.caption(f"🔗 {yn['thread']['url']}")
-        if yn["asker_report"]:
-            st.caption(f"The asker's own report: “{yn['asker_report'][:200]}”")
-        with st.expander(f"Show the {len(yn['votes'])} comment(s) behind this count"):
-            for v in yn["votes"]:
-                icon = {"yes": "🟥", "no": "🟩", "unclear": "⬜"}[v["stance"]]
-                st.markdown(f"{icon} **{v['stance'].upper()}** — {v['body'][:300]}")
-                if v["url"]:
-                    st.caption(v["url"])
-        st.markdown("---")
-
-    if show_pipeline:
-        # ── RLAIF EVALUATION METRICS ──────────────────────────
-        st.markdown("### 📊 RLAIF Evaluator")
-        ev = results["evaluation"]
-        sv = ev.get("survey", {})
-        m1, m2, m3, m4, m5, m6 = st.columns(6)
-        m1.metric("Quality Score", f"{ev['quality']:.2f}/1.0",
-                  delta=(f"{ev['quality'] - ev['quality_base']:+.2f} vs. count only"
-                         if ev.get("survey_on") else None))
-        m2.metric("RLAIF Signal", "✅ Positive" if ev["signal"]=="positive" else "⚠️ Retry")
-        m3.metric("User-Priority Fit", f"{sv.get('score', 0):.2f}/1.0")
-        m4.metric("Community Posts", ev["community_count"])
-        m5.metric("Release Notes", ev["release_count"])
-        m6.metric("CVE Results", ev["cve_count"])
-
-        # ── SURVEY-INFORMED PRIORITIES ────────────────────────
-        if sv:
-            n = sv["n"]
-            if ev.get("survey_on"):
-                st.caption(f"Quality blends retrieval volume with user-priority fit "
-                           f"(0.7 / 0.3). Count alone would score {ev['quality_base']:.2f}.")
-            else:
-                st.caption(f"Survey off — quality is retrieval volume alone. The fit "
-                           f"against {n} respondents' priorities is still reported, "
-                           f"it just does not move the score.")
-            cov = ", ".join(f"{c['label']} ({c['respondents']}/{n})" for c in sv["covered"])
-            miss = ", ".join(f"{m['label']} ({m['respondents']}/{n})" for m in sv["missing"])
-            if cov:
-                st.success(f"**Speaks to:** {cov}")
-            if miss:
-                st.warning(f"**Says nothing about:** {miss}")
-            with st.expander(f"What the {n} surveyed users said they care about"):
-                st.caption("Counts are respondents who raised the priority — by "
-                           "ticking it, writing about it, or both. Read from "
-                           "`data/SoftwareUpdateSurvey.csv` on every run.")
-                for pr in survey.priorities():
-                    hit = any(c["key"] == pr["key"] for c in sv["covered"])
-                    matched = next((", ".join(c["matched"]) for c in sv["covered"]
-                                    if c["key"] == pr["key"]), "")
-                    st.markdown(f"{'🟢' if hit else '⚪️'} **{pr['label']}** — "
-                                f"{pr['respondents']}/{n} respondents "
-                                f"({pr['share']:.0%})"
-                                + (f" · matched on _{matched}_" if matched else ""))
-                    if pr["quote"]:
-                        st.caption(f"“{pr['quote'][:240]}”")
-
-        timing = results["timing"]
-        st.caption(f"⏱ Timing — Temporal: {timing.get('temporal',0)}s | Rewriter: {timing.get('rewriter',0)}s | Community: {timing.get('community',0)}s | Releases: {timing.get('releases',0)}s | CVE: {timing.get('cve',0)}s")
-
-    st.markdown("---")
-
-    # ── RESULTS TABS ──────────────────────────────────────
-    tab1, tab2, tab3 = st.tabs([
-        # The release tab counted advisories as releases, so a pool of four NVD
-        # records and one kernel read as "Release Notes (5)" while the answer
-        # below it said one release. Both numbers were right about different
-        # things; only the label was wrong.
-        f"📦 Releases ({_n_shipped(results['releases'])})"
-        + (f" + {len(results['releases']) - _n_shipped(results['releases'])} advisory"
-           if len(results['releases']) > _n_shipped(results['releases']) else ""),
-        f"💬 Community Feedback ({len(results['community'])})",
-        f"🔐 Security Discussion ({len(results['cve'])})",
-    ])
-
-    # Release Notes Tab
-    with tab1:
-        st.markdown("**Live software releases from releasetrain.io/api/v/**")
-        if tr is not None and tr.window and results["releases"]:
-            inside = sum(1 for r in results["releases"]
-                         if matches_window(r.get("date", ""), tr) is True)
-            st.caption(f"{inside} of {len(results['releases'])} shown releases fall "
-                       f"inside {tr.window[0]} … {tr.window[1]}. Out-of-window results "
-                       f"are kept and ranked last rather than dropped, so a quiet day "
-                       f"still returns something to read.")
-        if results["releases"]:
-            for r in results["releases"]:
-                is_security = "SECURITY" in r.get("security", [])
-                has_breaking = len(r.get("breaking", [])) > 0
-                badge = "🔴 SECURITY" if is_security else ("🟡 BREAKING" if has_breaking else "🟢 UPDATE")
-                # Whether this release actually falls in the asked-about window.
-                # None = no window asked for, or an unparseable date: shown as
-                # nothing rather than as a miss.
-                in_win = matches_window(r.get("date", ""), tr) if tr is not None else None
-                win_badge = "" if in_win is None else (" 📅 in window" if in_win else " ⏳ outside window")
-
-                with st.expander(f"{badge} {r['product']} v{r['version']} — {r['date']}{win_badge}"):
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        st.markdown(f"**Release Notes:** {r['notes'] or 'No notes available'}")
-                        if r.get("breaking"):
-                            st.warning(f"⚠️ Breaking changes: {', '.join(r['breaking'])}")
-                        if r.get("security") and r["security"] != ["UNKNOWN"]:
-                            st.error(f"🔐 Security type: {', '.join(r['security'])}")
-                    with col2:
-                        st.markdown(f"**Channel:** {r['channel']}")
-                        if r.get("url"):
-                            st.markdown(f"[View on GitHub]({r['url']})")
-        else:
-            st.info("No release notes found for this query.")
-
-    # Community Feedback Tab
-    with tab2:
-        st.markdown("**Live Reddit community feedback from releasetrain.io**")
-        if results["community"]:
-            for post in results["community"]:
-                sentiment_class = "positive" if post["sentiment"]=="Positive" else "negative" if post["sentiment"]=="Negative" else "neutral"
-                icon = "🟢" if post["sentiment"]=="Positive" else "🔴" if post["sentiment"]=="Negative" else "🟡"
-
-                with st.expander(f"{icon} {post['title'][:80]}"):
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Subreddit", f"r/{post['subreddit']}")
-                    col2.metric("Score", post["score"])
-                    col3.metric("Date", post["date"])
-
-                    tags = []
-                    if post.get("is_cve"): tags.append("🔐 CVE")
-                    if post.get("is_update"): tags.append("📦 Update")
-                    if tags: st.markdown(" ".join(tags))
-                    if post.get("url"): st.markdown(f"[View on Reddit]({post['url']})")
-        else:
-            st.info("No community feedback found for this query.")
-
-    # CVE Tab
-    with tab3:
-        st.markdown("**Security vulnerabilities from releasetrain.io CVE feed**")
-        if results["cve"]:
-            for cve in results["cve"]:
-                with st.expander(f"🔐 {cve['title'][:80]}"):
-                    col1, col2 = st.columns(2)
-                    col1.metric("Subreddit", f"r/{cve['subreddit']}")
-                    col2.metric("Date", cve["date"])
-                    if cve.get("tags"): st.markdown(f"**Tags:** {', '.join(cve['tags'])}")
-                    if cve.get("url"): st.markdown(f"[View post]({cve['url']})")
-        else:
-            st.info("No CVE results found. Try adding 'CVE' or a specific version to your query.")
-
-    # Raw data
-    if show_raw:
-        with st.expander("🔍 Raw API response data"):
-            # `temporal` holds a dataclass, which st.json cannot serialise;
-            # show its resolved fields instead of dropping the step from view.
-            raw = dict(results)
-            raw["temporal"] = {
-                "original": tr.original, "grounded": tr.query,
-                "resolved": [{"matched": a, "as": b} for a, b in tr.terms],
-                "window": [str(tr.start), str(tr.end)] if tr.window else None,
-            } if tr is not None else None
-            # Same reason: GroundedQuestion is a dataclass holding further
-            # dataclasses. Show what it decided, not the object.
-            raw["grounding"] = {
-                "rewritten": gq.rewritten,
-                "vendors": gq.vendor_names,
-                "intent": gq.intent.label if gq.intent else None,
-                "intent_scores": gq.intent.scores if gq.intent else None,
-                "citable_kinds": list(gq.citable_kinds),
-                "retrieval_phrasings": gq.retrieval_phrasings,
-                "needs_clarification": gq.needs_clarification,
-            } if gq is not None else None
-            _rw = results.get("rewrite")
-            raw["rewrite"] = {"query": _rw.query, "mode": _rw.mode,
-                              "model": _rw.model, "note": _rw.note} \
-                if _rw is not None else None
-            st.json(raw)
-
-    # ── FINAL GROUNDED ANSWER ─────────────────────────────
-    # The Answer Presenter agent turns the retrieved documents into one
-    # readable paragraph and cites each claim in brackets. It reuses the
-    # eval harness's provider layer, so the presenting model is configurable
-    # (PRESENTER_MODEL in Streamlit secrets or the environment); with no model
-    # reachable it composes the same shape by rule and says so, rather than
-    # dressing rule-based text up as model output.
-    st.markdown("---")
-    st.markdown("### ✅ Final Answer")
-
     window_note = ""
     if tr is not None and tr.window:
         a, b = tr.window
@@ -1562,8 +1257,6 @@ elif run_btn and query:
         )
         present_secs = round(time.time() - t0, 1)
 
-    st.success(presented.text)
-
     # The roster now describes this run: which feeds answered, whether the
     # rewrite came from a model, how many advisories were separated out.
     agent_status_slot.markdown(_agent_table(results, presented))
@@ -1578,14 +1271,361 @@ elif run_btn and query:
                         presented.evidence)
     cited = [s for s in trace.sources if s["used"]]
 
-    src_label = (f"Presented by {presented.model}" if presented.mode == "llm"
-                 else f"Presented rule-based ({presented.note})")
-    st.caption(f"{src_label} · {len(cited)} of {len(presented.evidence)} "
-               f"source(s) cited · {present_secs}s")
+    # ── ONE-LINE ANSWER ───────────────────────────────────
+    # The default view: the question and one sentence. For a yes/no question
+    # the tally is the answer. Outages stay visible either way -- an error the
+    # reader has to see. Everything else is behind "Show details".
+    yn = results.get("yesno")
+    if not show_details:
+        st.markdown(f"**Q:** {query}")
+        # The tally is the answer only when the question *is* the thread's
+        # (picked from the sidebar). For a typed question a matched thread
+        # with two non-committal comments reads "No -- No (2 users)", which
+        # answers something else.
+        short = (yesno.verdict_line(yn) if yn is not None and yn["answered"] and reddit_id
+                 else _one_line(presented.text))
+        st.success(f"**A:** {short}")
+        st.caption(f"{len(cited)} source(s) · {present_secs}s · "
+                   "turn on **Show details** in the sidebar for the evidence.")
+        for e in results.get("errors") or []:
+            st.error(f"**{e['agent']} feed unreachable** — {e['error']}.")
 
-    if presented.evidence:
-        with st.expander("🔎 Why these sources, and which claim rests on which"):
-            st.markdown(_xai_panel(trace))
+    if show_details:
+        if show_pipeline:
+            # ── TEMPORAL GROUNDING RESULT ─────────────────────────
+            st.markdown("### 📅 Temporal Grounder Agent")
+            if tr is not None and tr.changed:
+                tg1, tg2 = st.columns(2)
+                with tg1:
+                    st.info(f"**As asked:** {tr.original}")
+                with tg2:
+                    st.success(f"**Grounded:** {tr.query}")
+                st.caption(f"Resolved {tr.describe()} — relative words are rewritten to "
+                           f"absolute dates before retrieval, because no document "
+                           f"contains the word “today”, only a date.")
+            else:
+                st.caption("No relative time expression in this query — nothing to ground. "
+                           "(Version words like “latest” are left alone on purpose: they "
+                           "are ordinal over releases, not a date.)")
+
+        # ── FEED OUTAGES ──────────────────────────────────────
+        # Named explicitly. The alternative this replaced was a document whose
+        # title was the exception text, which the answer then cited as a source.
+        if results.get("errors"):
+            for e in results["errors"]:
+                st.error(f"**{e['agent']} feed unreachable** — {e['error']}. "
+                         "No documents from this feed are included below, and "
+                         "nothing is cited from it.")
+
+        gq = results.get("grounding")        # same: read by the raw-data payload
+
+        if show_pipeline:
+            # ── VENDOR + INTENT GROUNDING RESULT ──────────────────
+            if gq is not None:
+                st.markdown("### 🏷 Vendor & Intent Grounder")
+                vg1, vg2 = st.columns(2)
+                with vg1:
+                    if gq.vendors:
+                        st.success("**Products:** " + ", ".join(
+                            f"“{v.matched}” → `{v.name}`" for v in gq.vendors))
+                    else:
+                        st.warning("**Products:** none matched the catalog — "
+                                   "retrieval is not vendor-scoped for this question.")
+                with vg2:
+                    if gq.intent and gq.intent.confident:
+                        st.success(f"**Intent:** {gq.intent.describe()}")
+                    else:
+                        st.warning(f"**Intent:** {gq.intent.describe() if gq.intent else 'not classified'}")
+                if gq.rewritten != gq.original:
+                    st.info(f"**Question as grounded:** {gq.rewritten}")
+                excluded = results.get("advisories_excluded", 0)
+                if excluded:
+                    st.caption(
+                        f"{excluded} CVE advisory row(s) excluded from the release pool. "
+                        "A CVE record's version field is the *affected* version, not a "
+                        "version that shipped — citing one as a release is what produced "
+                        "answers like “Linux v25.642087.0”.")
+                elif gq.intent and gq.intent.label == "security":
+                    st.caption("Security question — advisories are kept and cited as "
+                               "advisories, named by their CVE id rather than by the "
+                               "affected-version string.")
+                else:
+                    # Reached when no intent was confident enough to route on. Saying
+                    # "security question" here contradicted the line directly above it,
+                    # which had just reported no clear intent.
+                    st.caption("No intent was confident enough to narrow the search, so "
+                               "every source is searched and advisories are cited as "
+                               "advisories rather than as releases.")
+                if gq.needs_clarification:
+                    st.error("No product and no clear intent were found in this "
+                             "question. The answer below is drawn from an unscoped "
+                             "search — naming a product would make it specific.")
+
+            # ── QUERY REWRITING RESULT ────────────────────────────
+            st.markdown("### 🔄 Query Rewriter Agent")
+            rw_col1, rw_col2 = st.columns(2)
+            with rw_col1:
+                st.info(f"**Grounded input:** {results['grounded_query']}")
+            with rw_col2:
+                rw = results.get("rewrite")
+                text = results['rewritten_query'] or results['original_query']
+                if rw is not None and rw.mode == "llm":
+                    st.success(f"**Rewritten** by {rw.model}: {text}")
+                elif rw is not None:
+                    # Never shown as model output. On a host with no reachable Ollama
+                    # -- Streamlit Community Cloud, for one -- this is every run, and
+                    # the heading above still reads "Llama 3.1 local".
+                    st.warning(f"**Rewritten** by rule: {text}")
+                    st.caption(f"Rule-based keyword expansion — {rw.note}. "
+                               "The rewrite is blunter than a model's; retrieval still "
+                               "runs on the grounded product term alongside it.")
+                else:
+                    st.success(f"**Rewritten:** {text}")
+            fetched_on = results.get("release_phrasings") or results.get("fetch_phrasings", [])
+            if len(fetched_on) > 1:
+                st.caption("Fetched on every phrasing and unioned — " +
+                           " · ".join(f"“{p}”" for p in fetched_on) +
+                           ". The plain phrasing and the product term find the documents; "
+                           "the dated one lets the window rank them.")
+
+        # ── ANSWER FROM THE THREAD ────────────────────────────
+        # For a picked (or matched) Reddit question the community already answered
+        # it; the top-voted comment is that answer, shown before anything synthesised.
+        yn = results.get("yesno")
+        if yn is not None:
+            st.markdown("### 🗳 Poll")
+            line = yesno.verdict_line(yn)
+            (st.success if yn["answered"] else st.warning)(f"**{line}**")
+            n = max(1, yn["yes"] + yn["no"] + (0 if yn.get("unclear_as_no") else yn["unclear"]))
+            for k, lab in (("yes", "Yes"), ("no", "No"), ("unclear", "Unclear")):
+                if k == "unclear" and yn.get("unclear_as_no"):
+                    continue
+                st.progress(yn[k] / n, text=f"{lab} · {yn[k]}")
+
+        th = results.get("thread")
+        if th is not None:
+            st.markdown("### 🧵 Answer from the thread")
+            tc = results.get("top_comment")
+            if tc:
+                st.success(f"**Top-voted comment — {tc.get('score', 0)} points, "
+                           f"u/{tc.get('author', '')}:**\n\n{tc.get('body', '')}")
+                if tc.get("permalink"):
+                    st.caption(f"🔗 {tc['permalink']}")
+            else:
+                st.warning("No comment from anyone other than the asker or a bot — "
+                           "nothing to present as an answer.")
+            others = [c for c in th.get("comments") or [] if c is not tc]
+            with st.expander(f"“{th.get('title', '')}” (r/{th.get('subreddit', '')}) — "
+                             f"{len(others)} other comment(s), by score"):
+                for c in sorted(others, key=lambda c: -(c.get("score") or 0)):
+                    who = "asker" if c.get("is_submitter") else f"u/{c.get('author', '')}"
+                    st.markdown(f"**{c.get('score', 0)}** · {who} — {c.get('body', '')[:300]}")
+            st.markdown("---")
+
+        # ── YES/NO CONSENSUS ──────────────────────────────────
+        # Shown above the evaluator because for this shape of question it *is*
+        # the answer, and a paragraph synthesised underneath it is elaboration.
+        if yn is not None:
+            st.markdown("### ✅ Yes/No Consensus")
+            st.caption(f"Counted off the comments of “{yn['thread']['title']}” "
+                       f"(r/{yn['thread'].get('subreddit','')}) — one vote per commenter, "
+                       f"the person who asked excluded.")
+            if yn["thread"].get("url"):
+                st.caption(f"🔗 {yn['thread']['url']}")
+            if yn["asker_report"]:
+                st.caption(f"The asker's own report: “{yn['asker_report'][:200]}”")
+            with st.expander(f"Show the {len(yn['votes'])} comment(s) behind this count"):
+                for v in yn["votes"]:
+                    icon = {"yes": "🟥", "no": "🟩", "unclear": "⬜"}[v["stance"]]
+                    st.markdown(f"{icon} **{v['stance'].upper()}** — {v['body'][:300]}")
+                    if v["url"]:
+                        st.caption(v["url"])
+            st.markdown("---")
+
+        if show_pipeline:
+            # ── RLAIF EVALUATION METRICS ──────────────────────────
+            st.markdown("### 📊 RLAIF Evaluator")
+            ev = results["evaluation"]
+            sv = ev.get("survey", {})
+            m1, m2, m3, m4, m5, m6 = st.columns(6)
+            m1.metric("Quality Score", f"{ev['quality']:.2f}/1.0",
+                      delta=(f"{ev['quality'] - ev['quality_base']:+.2f} vs. count only"
+                             if ev.get("survey_on") else None))
+            m2.metric("RLAIF Signal", "✅ Positive" if ev["signal"]=="positive" else "⚠️ Retry")
+            m3.metric("User-Priority Fit", f"{sv.get('score', 0):.2f}/1.0")
+            m4.metric("Community Posts", ev["community_count"])
+            m5.metric("Release Notes", ev["release_count"])
+            m6.metric("CVE Results", ev["cve_count"])
+
+            # ── SURVEY-INFORMED PRIORITIES ────────────────────────
+            if sv:
+                n = sv["n"]
+                if ev.get("survey_on"):
+                    st.caption(f"Quality blends retrieval volume with user-priority fit "
+                               f"(0.7 / 0.3). Count alone would score {ev['quality_base']:.2f}.")
+                else:
+                    st.caption(f"Survey off — quality is retrieval volume alone. The fit "
+                               f"against {n} respondents' priorities is still reported, "
+                               f"it just does not move the score.")
+                cov = ", ".join(f"{c['label']} ({c['respondents']}/{n})" for c in sv["covered"])
+                miss = ", ".join(f"{m['label']} ({m['respondents']}/{n})" for m in sv["missing"])
+                if cov:
+                    st.success(f"**Speaks to:** {cov}")
+                if miss:
+                    st.warning(f"**Says nothing about:** {miss}")
+                with st.expander(f"What the {n} surveyed users said they care about"):
+                    st.caption("Counts are respondents who raised the priority — by "
+                               "ticking it, writing about it, or both. Read from "
+                               "`data/SoftwareUpdateSurvey.csv` on every run.")
+                    for pr in survey.priorities():
+                        hit = any(c["key"] == pr["key"] for c in sv["covered"])
+                        matched = next((", ".join(c["matched"]) for c in sv["covered"]
+                                        if c["key"] == pr["key"]), "")
+                        st.markdown(f"{'🟢' if hit else '⚪️'} **{pr['label']}** — "
+                                    f"{pr['respondents']}/{n} respondents "
+                                    f"({pr['share']:.0%})"
+                                    + (f" · matched on _{matched}_" if matched else ""))
+                        if pr["quote"]:
+                            st.caption(f"“{pr['quote'][:240]}”")
+
+            timing = results["timing"]
+            st.caption(f"⏱ Timing — Temporal: {timing.get('temporal',0)}s | Rewriter: {timing.get('rewriter',0)}s | Community: {timing.get('community',0)}s | Releases: {timing.get('releases',0)}s | CVE: {timing.get('cve',0)}s")
+
+        st.markdown("---")
+
+        # ── RESULTS TABS ──────────────────────────────────────
+        tab1, tab2, tab3 = st.tabs([
+            # The release tab counted advisories as releases, so a pool of four NVD
+            # records and one kernel read as "Release Notes (5)" while the answer
+            # below it said one release. Both numbers were right about different
+            # things; only the label was wrong.
+            f"📦 Releases ({_n_shipped(results['releases'])})"
+            + (f" + {len(results['releases']) - _n_shipped(results['releases'])} advisory"
+               if len(results['releases']) > _n_shipped(results['releases']) else ""),
+            f"💬 Community Feedback ({len(results['community'])})",
+            f"🔐 Security Discussion ({len(results['cve'])})",
+        ])
+
+        # Release Notes Tab
+        with tab1:
+            st.markdown("**Live software releases from releasetrain.io/api/v/**")
+            if tr is not None and tr.window and results["releases"]:
+                inside = sum(1 for r in results["releases"]
+                             if matches_window(r.get("date", ""), tr) is True)
+                st.caption(f"{inside} of {len(results['releases'])} shown releases fall "
+                           f"inside {tr.window[0]} … {tr.window[1]}. Out-of-window results "
+                           f"are kept and ranked last rather than dropped, so a quiet day "
+                           f"still returns something to read.")
+            if results["releases"]:
+                for r in results["releases"]:
+                    is_security = "SECURITY" in r.get("security", [])
+                    has_breaking = len(r.get("breaking", [])) > 0
+                    badge = "🔴 SECURITY" if is_security else ("🟡 BREAKING" if has_breaking else "🟢 UPDATE")
+                    # Whether this release actually falls in the asked-about window.
+                    # None = no window asked for, or an unparseable date: shown as
+                    # nothing rather than as a miss.
+                    in_win = matches_window(r.get("date", ""), tr) if tr is not None else None
+                    win_badge = "" if in_win is None else (" 📅 in window" if in_win else " ⏳ outside window")
+
+                    with st.expander(f"{badge} {r['product']} v{r['version']} — {r['date']}{win_badge}"):
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            st.markdown(f"**Release Notes:** {r['notes'] or 'No notes available'}")
+                            if r.get("breaking"):
+                                st.warning(f"⚠️ Breaking changes: {', '.join(r['breaking'])}")
+                            if r.get("security") and r["security"] != ["UNKNOWN"]:
+                                st.error(f"🔐 Security type: {', '.join(r['security'])}")
+                        with col2:
+                            st.markdown(f"**Channel:** {r['channel']}")
+                            if r.get("url"):
+                                st.markdown(f"[View on GitHub]({r['url']})")
+            else:
+                st.info("No release notes found for this query.")
+
+        # Community Feedback Tab
+        with tab2:
+            st.markdown("**Live Reddit community feedback from releasetrain.io**")
+            if results["community"]:
+                for post in results["community"]:
+                    sentiment_class = "positive" if post["sentiment"]=="Positive" else "negative" if post["sentiment"]=="Negative" else "neutral"
+                    icon = "🟢" if post["sentiment"]=="Positive" else "🔴" if post["sentiment"]=="Negative" else "🟡"
+
+                    with st.expander(f"{icon} {post['title'][:80]}"):
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Subreddit", f"r/{post['subreddit']}")
+                        col2.metric("Score", post["score"])
+                        col3.metric("Date", post["date"])
+
+                        tags = []
+                        if post.get("is_cve"): tags.append("🔐 CVE")
+                        if post.get("is_update"): tags.append("📦 Update")
+                        if tags: st.markdown(" ".join(tags))
+                        if post.get("url"): st.markdown(f"[View on Reddit]({post['url']})")
+            else:
+                st.info("No community feedback found for this query.")
+
+        # CVE Tab
+        with tab3:
+            st.markdown("**Security vulnerabilities from releasetrain.io CVE feed**")
+            if results["cve"]:
+                for cve in results["cve"]:
+                    with st.expander(f"🔐 {cve['title'][:80]}"):
+                        col1, col2 = st.columns(2)
+                        col1.metric("Subreddit", f"r/{cve['subreddit']}")
+                        col2.metric("Date", cve["date"])
+                        if cve.get("tags"): st.markdown(f"**Tags:** {', '.join(cve['tags'])}")
+                        if cve.get("url"): st.markdown(f"[View post]({cve['url']})")
+            else:
+                st.info("No CVE results found. Try adding 'CVE' or a specific version to your query.")
+
+        # Raw data
+        if show_raw:
+            with st.expander("🔍 Raw API response data"):
+                # `temporal` holds a dataclass, which st.json cannot serialise;
+                # show its resolved fields instead of dropping the step from view.
+                raw = dict(results)
+                raw["temporal"] = {
+                    "original": tr.original, "grounded": tr.query,
+                    "resolved": [{"matched": a, "as": b} for a, b in tr.terms],
+                    "window": [str(tr.start), str(tr.end)] if tr.window else None,
+                } if tr is not None else None
+                # Same reason: GroundedQuestion is a dataclass holding further
+                # dataclasses. Show what it decided, not the object.
+                raw["grounding"] = {
+                    "rewritten": gq.rewritten,
+                    "vendors": gq.vendor_names,
+                    "intent": gq.intent.label if gq.intent else None,
+                    "intent_scores": gq.intent.scores if gq.intent else None,
+                    "citable_kinds": list(gq.citable_kinds),
+                    "retrieval_phrasings": gq.retrieval_phrasings,
+                    "needs_clarification": gq.needs_clarification,
+                } if gq is not None else None
+                _rw = results.get("rewrite")
+                raw["rewrite"] = {"query": _rw.query, "mode": _rw.mode,
+                                  "model": _rw.model, "note": _rw.note} \
+                    if _rw is not None else None
+                st.json(raw)
+
+        # ── FINAL GROUNDED ANSWER ─────────────────────────────
+        # The Answer Presenter agent turns the retrieved documents into one
+        # readable paragraph and cites each claim in brackets. It reuses the
+        # eval harness's provider layer, so the presenting model is configurable
+        # (PRESENTER_MODEL in Streamlit secrets or the environment); with no model
+        # reachable it composes the same shape by rule and says so, rather than
+        # dressing rule-based text up as model output.
+        st.markdown("---")
+        st.markdown("### ✅ Final Answer")
+
+        st.success(presented.text)
+
+        src_label = (f"Presented by {presented.model}" if presented.mode == "llm"
+                     else f"Presented rule-based ({presented.note})")
+        st.caption(f"{src_label} · {len(cited)} of {len(presented.evidence)} "
+                   f"source(s) cited · {present_secs}s")
+
+        if presented.evidence:
+            with st.expander("🔎 Why these sources, and which claim rests on which"):
+                st.markdown(_xai_panel(trace))
 
     # ── LOG THE RUN ───────────────────────────────────────
     # Written after the answer exists, so the stored row is the whole run --
