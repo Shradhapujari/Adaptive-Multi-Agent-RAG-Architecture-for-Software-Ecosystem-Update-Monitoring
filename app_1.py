@@ -43,6 +43,7 @@ import xai
 import yesno
 import survey
 import results_view
+import monitor
 
 # ── PAGE CONFIG ──────────────────────────────────────────
 st.set_page_config(
@@ -813,7 +814,7 @@ def _agent_table(results=None, presented=None) -> str:
 # ── SIDEBAR ───────────────────────────────────────────────
 
 with st.sidebar:
-    view = st.radio("View", ["Ask", "Results"], horizontal=True,
+    view = st.radio("View", ["Ask", "Monitor", "Results"], horizontal=True,
                     label_visibility="collapsed")
     with st.expander("About", expanded=False):
         st.image("https://upload.wikimedia.org/wikipedia/en/b/bb/University_of_the_Pacific_seal.svg", width=80)
@@ -960,6 +961,95 @@ with st.sidebar:
 # ── MAIN UI ───────────────────────────────────────────────
 
 st.caption("Software ecosystem monitor · releasetrain.io")
+
+if view == "Monitor":
+    # releasetrain.io's component search, on top of the same feed the Release
+    # Notes agent reads: latest version, freshness, history, a next-release
+    # forecast, recent advisories and a risk band per watched component. The
+    # watchlist lives in the URL, so a reload keeps it and the link shares it.
+    st.markdown("#### 📡 Component monitor")
+    watch_default = st.query_params.get("watch", "firefox,python,linux")
+    watch_raw = st.text_input("Components to watch (comma-separated)", value=watch_default,
+                              help="Names as releasetrain.io knows them, e.g. firefox, "
+                                   "chrome, python, django, linux, macos, ios.")
+    names = [n.strip().lower() for n in watch_raw.split(",") if n.strip()]
+    if watch_raw != watch_default:
+        st.query_params["watch"] = ",".join(names)
+    if not names:
+        st.info("Add a component name above.")
+        st.stop()
+
+    @st.cache_data(ttl=900, show_spinner=False)
+    def _component_rows(name: str) -> list:
+        data = _get_json(RELEASES_API + "search", {"q": name, "limit": 300},
+                         agent=f"Monitor:{name}")
+        return (data or {}).get("data") or []
+
+    _reset_fetch_errors()
+    for name in names:
+        rows = _component_rows(name)
+        installed = st.session_state.get(f"installed_{name}", "")
+        s = monitor.summarize(name, rows, installed=installed)
+        latest, rk = s["latest"], s["risk"]
+        title = (f"{name} · v{latest['versionNumber']} ({s['days_ago']}d ago)"
+                 if latest else f"{name} · no shipped release in the feed")
+        band_icon = {"Low": "🟢", "Medium": "🟡", "High": "🟠", "Critical": "🔴"}[rk["band"]]
+        with st.expander(f"{band_icon} {title} · risk {rk['band']} {rk['score']}", expanded=True):
+            if not rows:
+                st.warning("Nothing came back for this name — the feed may be down "
+                           "or the name unknown. Check the vendor list in the Ask view.")
+                continue
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Latest", f"v{latest['versionNumber']}" if latest else "—",
+                      latest["versionReleaseDate"] if latest else None, delta_color="off")
+            fc = s["forecast"]
+            c2.metric("Next release (est.)", str(fc["date"]) if fc else "—",
+                      f"every ~{fc['gap_days']}d over {fc['samples']} releases" if fc else
+                      "fewer than 3 dated releases", delta_color="off")
+            c3.metric("Advisories, 90d", rk["recent_advisories"],
+                      " · ".join(f"{k} {v}" for k, v in sorted(rk["severity"].items())) or None,
+                      delta_color="off")
+            c4.text_input("Installed version", key=f"installed_{name}",
+                          placeholder=latest["versionNumber"] if latest else "")
+            if installed:
+                if rk["behind"]:
+                    st.warning(f"v{installed} is {rk['behind']} release(s) behind; "
+                               f"{rk['cves_since_installed']} advisory(ies) filed since it shipped.")
+                else:
+                    st.success(f"v{installed} is current.")
+            if s["upcoming"]:
+                st.caption("Scheduled: " + ", ".join(
+                    f"v{r['versionNumber']} {r['versionReleaseChannel']} on {r['versionReleaseDate']}"
+                    for r in s["upcoming"][:4]))
+            if s["by_month"]:
+                st.bar_chart([{"month": m, **v} for m, v in s["by_month"].items()],
+                             x="month", y=["releases", "advisories"], height=240)
+            hcol, acol = st.columns(2)
+            with hcol:
+                st.markdown("**Version history**")
+                st.dataframe([{"version": r["versionNumber"], "date": r["versionReleaseDate"],
+                               "channel": r.get("versionReleaseChannel", ""),
+                               "notes": r.get("versionReleaseNotes") or r.get("versionUrl") or ""}
+                              for r in s["history"]], use_container_width=True, hide_index=True)
+            with acol:
+                st.markdown("**Latest advisories**")
+                if s["advisories"]:
+                    st.dataframe([{"severity": a.get("versionSeverity", ""),
+                                   "date": a["versionReleaseDate"],
+                                   "status": a.get("versionStatus", ""),
+                                   "link": a.get("versionUrl", "")}
+                                  for a in s["advisories"]],
+                                 use_container_width=True, hide_index=True,
+                                 column_config={"link": st.column_config.LinkColumn()})
+                else:
+                    st.caption("None in the feed.")
+            st.caption("Risk = severity-weighted advisories in the last 90 days + version "
+                       "drift from your installed version + staleness. A heuristic, not "
+                       "the site's own score.")
+    errs = _FETCH_ERRORS.get() or []
+    if errs:
+        st.error("Feed unreachable for: " + ", ".join(e["agent"].split(":")[1] for e in errs))
+    st.stop()
 
 if view == "Results":
     # Read-only: what the harness measured, worst queries first, plus the
