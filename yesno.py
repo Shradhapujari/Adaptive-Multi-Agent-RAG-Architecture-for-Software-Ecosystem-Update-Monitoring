@@ -105,6 +105,16 @@ WEAK_NO_MARKERS = ("works fine", "working fine", "runs fine", "running fine")
 _OPENING_YES = re.compile(r"^\W*(?:yes|yeah|yep|yup|yess+)\s*[,.!;:—-]", re.I)
 _OPENING_NO = re.compile(r"^\W*(?:no|nope|nah)\s*(?:[,.!;:—-]|$)", re.I)
 _QUOTED_LINE = re.compile(r"^\s*(?:>|&gt;).*$", re.M)
+# A yes-phrase with a negation in the three words before it is the negated
+# experience, not the shared one: "haven't noticed this", "not seeing the
+# same", "never ran into this". Tier 1 catches only the negations spelled out
+# in NO_MARKERS, and every yes-phrase the rework added has a negated form
+# that is not. Checked on the text before the match, so "it's not just you"
+# -- where the "not" is inside the phrase -- is still a yes.
+_NEGATED_BEFORE = re.compile(
+    r"\b(?:not|no|never|nobody|no one|haven'?t|hasn'?t|hadn'?t|didn'?t|don'?t|"
+    r"doesn'?t|isn'?t|aren'?t|wasn'?t|weren'?t|can'?t|couldn'?t|won'?t)"
+    r"(?:\s+\w+){0,3}\s*$", re.I)
 
 # Bots and removed comments are not people with an opinion.
 _SKIP_AUTHORS = {"automoderator", "[deleted]", "[removed]", ""}
@@ -175,8 +185,9 @@ def stance(text: str, top_level: bool = True) -> str:
         if m in t:
             return "no"
     for m in YES_MARKERS:
-        if m in t:
-            return "yes"
+        i = t.find(m)
+        if i >= 0:
+            return "no" if _NEGATED_BEFORE.search(t[:i]) else "yes"
     if top_level and _OPENING_YES.match(own.strip()):
         return "yes"
     if top_level and _OPENING_NO.match(own.strip()):
@@ -414,6 +425,16 @@ def _demo() -> None:
     assert stance("this has been happening to me on one of my 4 UNVRs") == "yes"
     assert stance("My phone recently did something similar, let the battery die.") == "yes"
     assert stance("same here, had to reinstall") == "yes"
+    # A negation ahead of a yes-phrase is the negated experience. These four
+    # all returned "yes" before the look-back; none of them is a head-count.
+    assert stance("I haven't noticed this at all") == "no"
+    assert stance("Not seeing the same on my end") == "no"
+    assert stance("Haven't run into this yet") == "no"
+    assert stance("never ran into this") == "no"
+    assert stance("I did not have the same issue") == "no"
+    # ...and the negation that is part of the phrase, or before a comma, is not.
+    assert stance("If that's 5.1.37, it's not just you.") == "yes"
+    assert stance("No, same here.") == "yes"
     print("ok —", verdict_line(t))
 
 
