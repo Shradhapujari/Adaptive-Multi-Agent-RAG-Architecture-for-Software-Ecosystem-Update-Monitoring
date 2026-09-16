@@ -286,6 +286,75 @@ overnight on a laptop that entered clamshell sleep, so its wall-clock times
 include suspend, and the replay pass reports sub-second times because documents
 and model responses both come from cache.
 
+## The rules ablation (does `AGENT_RULES.md` change anything?)
+
+The app prepends `AGENT_RULES.md` to every prompt; the harness did not, so
+the file had never been measured. `scripts/phase_rules_ablation.sh` records
+a corpus once and replays it for both settings, so `MARAG_RULES` is the only
+thing that differs. Run 2026-09-14, `table_50_questions.json`, n=50, arms
+`marag` and `single_agent`, judge `ollama:llama3.1`, `--judge-pool`,
+`MARAG_RERANK=embed` pinned by the script. Every config records
+`rules_active` and `rules_sha` (`239a9527…`), so no run's setting is
+inferred from its position in a log.
+
+**Cite the replays.** The record passes are `frozen=false` by construction.
+
+| Run | Rules | Corpus | Role |
+|---|---|---|---|
+| `run_1789442318_417cbdda5764` | off | `replay:results/snap_rules_50`, `frozen=true`, 2,005 hits, 0 corpus misses | **citable** |
+| `run_1789443187_417cbdda5764` | on | same, 2,075 hits, 0 corpus misses | **citable** |
+| `run_1789426665_417cbdda5764` | off | `record:results/snap_rules_50` | recording pass |
+| `run_1789433706_417cbdda5764` | on | same | recording pass |
+
+Paired Wilcoxon on per-question differences, rules off → on:
+
+| Arm | Metric | off → on | Better / worse | p |
+|---|---|---|---|---|
+| `single_agent` | faithfulness | 0.808 → **0.883** | 16 / 7 | **0.011** |
+| `single_agent` | nDCG@5 | 0.506 → 0.502 | 3 / 6 | 0.515 |
+| `marag` | faithfulness | 0.725 → 0.759 | 13 / 9 | 0.158 |
+| `marag` | nDCG@5 | 0.488 → 0.519 | 10 / 6 | 0.326 |
+
+Retrieval is null on every metric for both arms, as it should be: the rules
+enter the prompt, and the prompt does not touch retrieval. The effect is on
+faithfulness, and it is clear for the single-agent arm and borderline for the
+multi-agent one — whose template rendering already constrains what the
+answer can say, leaving less for the rules to fix.
+
+**Independently replicated.** A second session ran the identical sweep the
+same afternoon into its own snapshot, `corpus_rules_20260914`, same dataset
+hash and same `rules_sha`. Its frozen replays are `run_1789446039` (off) and
+`run_1789446712` (on):
+
+| Arm | Metric | Δ (this sweep) | Δ (replication) |
+|---|---|---|---|
+| `single_agent` | faithfulness | +0.075, p=0.011 | +0.071, p=0.019 |
+| `marag` | faithfulness | +0.034, p=0.158 | +0.051, p=0.045 |
+| `single_agent` | nDCG@5 | −0.004, p=0.515 | +0.000, p=0.779 |
+| `marag` | nDCG@5 | +0.031, p=0.326 | +0.034, p=0.148 |
+
+Two frozen corpora, recorded independently, agree on sign and size. The
+single-agent faithfulness gain is the finding; the multi-agent one crosses
+0.05 in one sweep and not the other, and should be reported as borderline.
+
+Two things not to read into these numbers:
+
+- `mrr` and `pool_recall` on `marag` move on 3 non-zero pairs, where the
+  smallest attainable p is 0.25. Null, not evidence.
+- The script uses the bare specs: `single_agent` synthesises through
+  `mistral` (`generators.py`, `build_generators`), and `marag` is the
+  template arm, which makes no synthesis call. The judge is `llama3.1`.
+  Every pass shares that configuration, so the off/on comparison is
+  unaffected — but the absolute faithfulness values are not comparable to
+  `tab:scaled-answer`, which held synthesis at `llama3.1` on both arms, and
+  the `marag` row here carries the template-rendering penalty the 2×2
+  quantified at about 0.10.
+
+The 20-question pilot that preceded this, and the earlier 50-question attempt
+that ran 16 questions in five and a half hours, both lived in session
+scratchpads and are gone. This sweep was run from the checkout so its
+snapshot and runs sit under `results/`.
+
 ## Reproducing an arm
 
 ```bash
