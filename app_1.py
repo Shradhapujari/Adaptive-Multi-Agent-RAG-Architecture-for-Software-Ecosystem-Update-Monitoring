@@ -676,6 +676,20 @@ def _one_line(text: str) -> str:
     return (m.group(1) if m else plain).strip() or "No answer could be composed."
 
 
+def _answer_caption(presented, n_cited: int, secs) -> str:
+    """Who wrote the answer, and how much of the pool it rests on.
+
+    Shared by the one-line view and the details view so they cannot disagree.
+    The one-line view used to print "2 source(s)" and nothing else, which made
+    a guardrail rejection -- the model's paragraph thrown away and rule-based
+    prose shown in its place -- indistinguishable from a clean model answer.
+    That is the one fact the default view most needs to carry.
+    """
+    who = (f"Presented by {presented.model}" if presented.mode == "llm"
+           else f"Presented rule-based ({presented.note})")
+    return f"{who} · {n_cited} of {len(presented.evidence)} source(s) cited · {secs}s"
+
+
 def _n_shipped(rows) -> int:
     """How many of the release-feed rows are versions that actually shipped."""
     return sum(1 for r in (rows or []) if vendor.is_release_record(r))
@@ -1285,8 +1299,8 @@ elif run_btn and query:
         short = (yesno.verdict_line(yn) if yn is not None and yn["answered"] and reddit_id
                  else _one_line(presented.text))
         st.success(f"**A:** {short}")
-        st.caption(f"{len(cited)} source(s) · {present_secs}s · "
-                   "turn on **Show details** in the sidebar for the evidence.")
+        st.caption(_answer_caption(presented, len(cited), present_secs)
+                   + " · turn on **Show details** in the sidebar for the evidence.")
         for e in results.get("errors") or []:
             st.error(f"**{e['agent']} feed unreachable** — {e['error']}.")
 
@@ -1618,10 +1632,7 @@ elif run_btn and query:
 
         st.success(presented.text)
 
-        src_label = (f"Presented by {presented.model}" if presented.mode == "llm"
-                     else f"Presented rule-based ({presented.note})")
-        st.caption(f"{src_label} · {len(cited)} of {len(presented.evidence)} "
-                   f"source(s) cited · {present_secs}s")
+        st.caption(_answer_caption(presented, len(cited), present_secs))
 
         if presented.evidence:
             with st.expander("🔎 Why these sources, and which claim rests on which"):
