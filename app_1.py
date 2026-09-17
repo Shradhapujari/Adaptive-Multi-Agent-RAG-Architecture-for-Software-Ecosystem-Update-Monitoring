@@ -1239,7 +1239,7 @@ elif run_btn and query and compare_mode:
                                        model_spec=presenter_spec(),
                                        per_kind=result_limit)
         tc = results.get("top_comment")
-        if tc and show_details:
+        if tc:
             st.info(f"**Top-voted comment ({tc.get('score', 0)} points, "
                     f"u/{tc.get('author','')}):** {tc.get('body','')[:600]}")
         st.success(presented.text if show_details else _one_line(presented.text))
@@ -1334,9 +1334,20 @@ elif run_btn and query:
         # (picked from the sidebar). For a typed question a matched thread
         # with two non-committal comments reads "No -- No (2 users)", which
         # answers something else.
-        short = (yesno.verdict_line(yn) if yn is not None and yn["answered"] and reddit_id
-                 else _one_line(presented.text))
-        st.success(f"**A:** {short}")
+        tc = results.get("top_comment") if reddit_id else None
+        if tc:
+            # The question is the thread's, so the thread's own best answer is
+            # the answer: the highest-scored comment, the users' vote.
+            st.success(f"**A:** {tc.get('body', '')[:600]}")
+            st.caption(" · ".join(filter(None, [
+                f"Top-voted comment, {tc.get('score', 0)} points, u/{tc.get('author', '')}",
+                tc.get("permalink"),
+                yesno.verdict_line(yn) if yn is not None and yn["answered"] else "",
+            ])))
+        else:
+            short = (yesno.verdict_line(yn) if yn is not None and yn["answered"] and reddit_id
+                     else _one_line(presented.text))
+            st.success(f"**A:** {short}")
         st.caption(_answer_caption(presented, len(cited), present_secs)
                    + " · turn on **Show details** in the sidebar for the evidence.")
         for e in results.get("errors") or []:
