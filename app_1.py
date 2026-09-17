@@ -1156,10 +1156,13 @@ with col1:
                         else "🚀 Run Multi-Agent Pipeline",
                         type="primary", use_container_width=True)
 with col2:
-    if st.button("🔁 Clear", use_container_width=True):
+    # A callback, not an `if st.button(...)` body: the text box above is already
+    # instantiated by the time the body runs, and Streamlit refuses to change a
+    # widget's session key after that. Callbacks run before the rerun's widgets.
+    def _clear_query():
         st.session_state["main_query"] = ""
         st.session_state.pop("reddit_id", None)
-        st.rerun()
+    st.button("🔁 Clear", use_container_width=True, on_click=_clear_query)
 
 # The picked thread only applies while the box still holds its title.
 reddit_id = st.session_state.get("reddit_id")
