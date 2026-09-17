@@ -29,6 +29,7 @@ cross-run judgment cache and is provenance only -- do not score with it.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -111,25 +112,33 @@ def _save_qrels_cache(results_dir: str, cache: dict) -> None:
     and dumps its in-memory dict would silently drop every label another
     process (or a git merge) added to the file since. Re-read the file and
     union before writing; ours wins on conflicting keys.
+
+    The re-read and the rename must be one step, or two writers read the same
+    old file and the second rename throws away the first one's union -- which
+    is exactly what happened with four concurrent writers, losing a quarter
+    of their labels. A lock file beside the cache serialises the whole
+    read-union-replace; the rename stays so readers never see a torn file.
     """
     os.makedirs(results_dir, exist_ok=True)
     final = os.path.join(results_dir, QRELS_CACHE)
-    on_disk = _load_qrels_cache(results_dir)
-    on_disk.update(cache)
-    cache.update(on_disk)   # in place, so the caller's dict sees the union too
     tmp = f"{final}.{os.getpid()}.tmp"
-    try:
-        with open(tmp, "w") as f:
-            json.dump(cache, f, indent=1)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, final)
-    except BaseException:
+    with open(f"{final}.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        on_disk = _load_qrels_cache(results_dir)
+        on_disk.update(cache)
+        cache.update(on_disk)   # in place, so the caller's dict sees the union too
         try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+            with open(tmp, "w") as f:
+                json.dump(cache, f, indent=1)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, final)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
 
 
 PER_QUERY = "per_query.jsonl"

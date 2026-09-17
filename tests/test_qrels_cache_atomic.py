@@ -37,7 +37,8 @@ class TestAtomicSave:
     def test_no_temp_files_left_behind(self):
         with tempfile.TemporaryDirectory() as d:
             _save_qrels_cache(d, {qrels_key("q", "b" * 12): 1})
-            leftovers = [f for f in os.listdir(d) if f != QRELS_CACHE]
+            leftovers = [f for f in os.listdir(d)
+                         if f not in (QRELS_CACHE, f"{QRELS_CACHE}.lock")]
             assert leftovers == [], f"temp files not cleaned up: {leftovers}"
 
     def test_concurrent_writers_never_leave_torn_json(self):
@@ -50,14 +51,22 @@ class TestAtomicSave:
             # loader would have swallowed into a silent full re-judge.
             with open(os.path.join(d, QRELS_CACHE)) as f:
                 loaded = json.load(f)
-            assert len(loaded) == 400
+            # Every writer unions the file before replacing it, so no writer's
+            # labels are lost to another's: four disjoint sets of 400 survive.
+            assert len(loaded) == 1600
             assert _load_qrels_cache(d) == loaded
 
-    def test_existing_file_is_replaced_not_appended(self):
+    def test_save_unions_with_what_is_on_disk(self):
+        """A stale in-memory dict must not drop labels others added since."""
         with tempfile.TemporaryDirectory() as d:
             _save_qrels_cache(d, {qrels_key(f"q{i}", "c" * 12): 1 for i in range(50)})
-            _save_qrels_cache(d, {qrels_key("q0", "d" * 12): 2})
-            assert len(_load_qrels_cache(d)) == 1
+            mine = {qrels_key("q0", "c" * 12): 2,      # conflicts: ours wins
+                    qrels_key("q0", "d" * 12): 2}      # new
+            _save_qrels_cache(d, mine)
+            on_disk = _load_qrels_cache(d)
+            assert len(on_disk) == 51
+            assert on_disk[qrels_key("q0", "c" * 12)] == 2
+            assert mine == on_disk                     # caller's dict sees the union
 
     def test_corrupt_file_still_degrades_to_empty(self):
         """Unchanged behaviour: a damaged cache must not crash a run."""
