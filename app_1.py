@@ -103,10 +103,13 @@ OLLAMA_API          = "http://localhost:11434/api/generate"
 def presenter_spec() -> str:
     """Which model the Answer Presenter uses, if any.
 
-    Read from Streamlit secrets first so a deployed host can supply one without
-    a code change; empty means the presenter runs its rule-based path, which is
+    The sidebar pick wins, then Streamlit secrets so a deployed host can supply
+    one without a code change; empty means the presenter runs its rule-based path, which is
     what Community Cloud does today (no Ollama, no key).
     """
+    pick = st.session_state.get("presenter_pick", "")
+    if pick and not pick.startswith("Auto"):
+        return pick
     try:
         return str(st.secrets.get("PRESENTER_MODEL", "") or "")
     except Exception:
@@ -676,6 +679,20 @@ def _one_line(text: str) -> str:
     return (m.group(1) if m else plain).strip() or "No answer could be composed."
 
 
+def _answer_caption(presented, n_cited: int, secs) -> str:
+    """Who wrote the answer, and how much of the pool it rests on.
+
+    Shared by the one-line view and the details view so they cannot disagree.
+    The one-line view used to print "2 source(s)" and nothing else, which made
+    a guardrail rejection -- the model's paragraph thrown away and rule-based
+    prose shown in its place -- indistinguishable from a clean model answer.
+    That is the one fact the default view most needs to carry.
+    """
+    who = (f"Presented by {presented.model}" if presented.mode == "llm"
+           else f"Presented rule-based ({presented.note})")
+    return f"{who} · {n_cited} of {len(presented.evidence)} source(s) cited · {secs}s"
+
+
 def _n_shipped(rows) -> int:
     """How many of the release-feed rows are versions that actually shipped."""
     return sum(1 for r in (rows or []) if vendor.is_release_record(r))
@@ -859,6 +876,15 @@ with st.sidebar:
              "screen is the difference the paper measures.")
     single_mode = mode.startswith("Single")
     compare_mode = mode.startswith("Compare")
+    from model_select import MODELS
+    st.selectbox("Presenter model",
+                 ["Auto (cheapest reachable)"] + [m["spec"] for m in MODELS],
+                 key="presenter_pick",
+                 help="Which model writes the cited paragraph (and the baseline's "
+                      "prose). Auto probes for the cheapest reachable one; a model "
+                      "that is not reachable on this host falls back to rule-based "
+                      "prose and the caption says so. Overrides PRESENTER_MODEL "
+                      "in secrets.")
     source_label = st.selectbox(
         "Data source",
         ["Retrieval agent decides", "Lake only (releasetrain.io live)",
@@ -995,6 +1021,9 @@ if view == "Monitor":
         st.info("Add a component name above.")
         st.stop()
 
+    window = st.selectbox("Window", [30, 90, 180, 365], index=1,
+                          format_func=lambda d: f"Last {d} days")
+
     @st.cache_data(ttl=900, show_spinner=False)
     def _component_rows(name: str) -> list:
         data = _get_json(RELEASES_API + "search", {"q": name, "limit": 300},
@@ -1002,10 +1031,30 @@ if view == "Monitor":
         return (data or {}).get("data") or []
 
     _reset_fetch_errors()
+    summaries = {}
     for name in names:
         rows = _component_rows(name)
         installed = st.session_state.get(f"installed_{name}", "")
-        s = monitor.summarize(name, rows, installed=installed)
+        summaries[name] = (rows, monitor.summarize(name, rows, installed=installed, days=window))
+
+    # All watched components at once, the way the site's feed sidebar does it.
+    activity = {}
+    for _rows, s in summaries.values():
+        for m, v in s["by_month"].items():
+            a = activity.setdefault(m, {"releases": 0, "advisories": 0})
+            a["releases"] += v["releases"]; a["advisories"] += v["advisories"]
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Components", len(names))
+    k2.metric(f"Releases, {window}d", sum(v["releases"] for v in activity.values()))
+    k3.metric(f"Advisories, {window}d", sum(v["advisories"] for v in activity.values()))
+    k4.metric("Months with activity", len(activity))
+    if activity:
+        st.line_chart([{"month": m, **v} for m, v in sorted(activity.items())],
+                      x="month", y=["releases", "advisories"], height=200)
+        st.caption(f"Releases and advisories per month across the watched "
+                   f"components, {min(activity)} to {max(activity)}.")
+
+    for name, (rows, s) in summaries.items():
         latest, rk = s["latest"], s["risk"]
         title = (f"{name} · v{latest['versionNumber']} ({s['days_ago']}d ago)"
                  if latest else f"{name} · no shipped release in the feed")
@@ -1107,10 +1156,13 @@ with col1:
                         else "🚀 Run Multi-Agent Pipeline",
                         type="primary", use_container_width=True)
 with col2:
-    if st.button("🔁 Clear", use_container_width=True):
+    # A callback, not an `if st.button(...)` body: the text box above is already
+    # instantiated by the time the body runs, and Streamlit refuses to change a
+    # widget's session key after that. Callbacks run before the rerun's widgets.
+    def _clear_query():
         st.session_state["main_query"] = ""
         st.session_state.pop("reddit_id", None)
-        st.rerun()
+    st.button("🔁 Clear", use_container_width=True, on_click=_clear_query)
 
 # The picked thread only applies while the box still holds its title.
 reddit_id = st.session_state.get("reddit_id")
@@ -1285,8 +1337,8 @@ elif run_btn and query:
         short = (yesno.verdict_line(yn) if yn is not None and yn["answered"] and reddit_id
                  else _one_line(presented.text))
         st.success(f"**A:** {short}")
-        st.caption(f"{len(cited)} source(s) · {present_secs}s · "
-                   "turn on **Show details** in the sidebar for the evidence.")
+        st.caption(_answer_caption(presented, len(cited), present_secs)
+                   + " · turn on **Show details** in the sidebar for the evidence.")
         for e in results.get("errors") or []:
             st.error(f"**{e['agent']} feed unreachable** — {e['error']}.")
 
@@ -1546,7 +1598,13 @@ elif run_btn and query:
         with tab2:
             st.markdown("**Live Reddit community feedback from releasetrain.io**")
             if results["community"]:
-                for post in results["community"]:
+                order = st.selectbox("Sort", ["Newest first", "Oldest first", "Highest score"],
+                                     key="community_sort", label_visibility="collapsed")
+                posts = sorted(results["community"],
+                               key=(lambda p: p["score"] or 0) if order == "Highest score"
+                               else (lambda p: p["date"]),
+                               reverse=order != "Oldest first")
+                for post in posts:
                     sentiment_class = "positive" if post["sentiment"]=="Positive" else "negative" if post["sentiment"]=="Negative" else "neutral"
                     icon = "🟢" if post["sentiment"]=="Positive" else "🔴" if post["sentiment"]=="Negative" else "🟡"
 
@@ -1618,10 +1676,7 @@ elif run_btn and query:
 
         st.success(presented.text)
 
-        src_label = (f"Presented by {presented.model}" if presented.mode == "llm"
-                     else f"Presented rule-based ({presented.note})")
-        st.caption(f"{src_label} · {len(cited)} of {len(presented.evidence)} "
-                   f"source(s) cited · {present_secs}s")
+        st.caption(_answer_caption(presented, len(cited), present_secs))
 
         if presented.evidence:
             with st.expander("🔎 Why these sources, and which claim rests on which"):

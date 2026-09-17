@@ -62,13 +62,13 @@ def forecast_next(rows: List[dict], today: date, n: int = 8) -> Optional[dict]:
     return {"date": dates[0] + timedelta(days=gap), "gap_days": gap, "samples": len(dates)}
 
 
-def by_month(rows: List[dict], months: int = 12, today: Optional[date] = None) -> Dict[str, Dict[str, int]]:
-    """{'2026-08': {'releases': 3, 'advisories': 12}, ...} for the trailing window."""
+def by_month(rows: List[dict], days: int = 365, today: Optional[date] = None) -> Dict[str, Dict[str, int]]:
+    """{'2026-08': {'releases': 3, 'advisories': 12}, ...} for the trailing `days`."""
     today = today or date.today()
     out: Dict[str, Dict[str, int]] = {}
     for r in rows:
         d = parse_ymd(r.get("versionReleaseDate"))
-        if d is None or d > today or (today - d).days > 31 * months:
+        if d is None or d > today or (today - d).days > days:
             continue
         m = d.strftime("%Y-%m")
         kind = "advisories" if r.get("isCve") else "releases"
@@ -117,7 +117,7 @@ def risk(rows: List[dict], today: date, installed: str = "") -> dict:
 
 
 def summarize(name: str, rows: List[dict], today: Optional[date] = None,
-              installed: str = "") -> dict:
+              installed: str = "", days: int = 365) -> dict:
     today = today or date.today()
     ship = shipped(rows, today)
     latest = ship[0] if ship else None
@@ -130,7 +130,7 @@ def summarize(name: str, rows: List[dict], today: Optional[date] = None,
                      if (d := parse_ymd(r.get("versionReleaseDate"))) and d > today],
         "forecast": forecast_next(rows, today),
         "advisories": advisories(rows)[:10],
-        "by_month": by_month(rows, today=today),
+        "by_month": by_month(rows, days=days, today=today),
         "risk": risk(rows, today, installed),
         "n_rows": len(rows),
     }
