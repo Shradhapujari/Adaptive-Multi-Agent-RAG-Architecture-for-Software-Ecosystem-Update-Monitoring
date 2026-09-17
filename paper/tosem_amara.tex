@@ -462,10 +462,41 @@ answering agents~\cite{nguyen2025marag}. MAIN-RAG separates document
 selection and answer generation through dedicated predictor and judge
 agents~\cite{wang2024mainrag}. More generally, frameworks such as
 AutoGen~\cite{wu2023autogen} and smolagents~\cite{huggingface2024agents}
-provide infrastructure for agent orchestration and tool use. Most prior
-evaluations focus on general question-answering benchmarks, whereas this
-work evaluates a multi-agent architecture for software update question
-answering.
+provide infrastructure for agent orchestration and tool use.
+
+Four recent systems are close enough to the pipeline studied here to warrant
+individual comparison. MA-RAG chains Planner, Step Definer, Extractor, and QA
+agents that hand chain-of-thought state to one another, and reports that
+LLaMA3-8B under this arrangement outperforms larger standalone models on
+multi-hop benchmarks~\cite{nguyen2025marag}; it shares our staged specialists
+and 8B-class local model but is evaluated on Wikipedia-derived corpora with no
+memory across questions. RAGentA feeds hybrid sparse--dense retrieval into a
+draft-answer agent, a triplet filter, a citing answer agent, and a completeness
+checker that reformulates the query when evidence is
+lacking~\cite{besrour2025ragenta}; its filter-and-cite stages correspond to our
+reranker and source-traced answers, but its reformulation runs \emph{after} a
+first retrieval over the original wording, so the original query is always
+searched --- the property whose absence produced the defect reported in
+Section~\ref{sec:rewrite-roles}. Amber maintains an agent-updated memory that steers
+an adaptive information collector and a multi-granular filter across retrieval
+iterations~\cite{qin2025amber}; it is the nearest analogue to our
+self-improvement memory, though Amber's memory lives inside a single question's
+loop whereas ours persists across successive queries and is updated from their
+outcomes. Shaikh ablates decomposition, adaptive routing, loop depth, and
+cross-encoder reranking on a local Qwen2.5-7B and finds fixed hybrid retrieval
+beating adaptive routing, with decomposition and reranking contributing only
+modest gains~\cite{shaikh2026dissecting} --- a design-space result that agrees
+with our own finding that decomposition per se did not produce the originally
+reported improvement, though our result arrived as a defect diagnosis rather
+than an ablation. Finally, Mishra et al.\ systematise agentic RAG as a
+partially observable decision process along planning, retrieval orchestration,
+memory, and tool-use axes, and catalogue retrieval misalignment and memory
+poisoning as systemic risks~\cite{mishra2026sok}; the replacing rewriter
+described in this paper is a concrete instance of the former.
+
+Most prior evaluations focus on general question-answering benchmarks, whereas
+this work evaluates a multi-agent architecture for software update question
+answering over a live, heterogeneous corpus.
 
 \subsection{Multi-Agent RAG and Reproducibility Infrastructure}
 
