@@ -106,9 +106,17 @@ def _save_qrels_cache(results_dir: str, cache: dict) -> None:
     Write to a private temp file in the same directory, then rename. os.replace
     is atomic within a filesystem, so a concurrent reader sees either the old
     file or the new one, never a half-written one.
+
+    Atomic is not the same as lossless: a run that loaded the cache hours ago
+    and dumps its in-memory dict would silently drop every label another
+    process (or a git merge) added to the file since. Re-read the file and
+    union before writing; ours wins on conflicting keys.
     """
     os.makedirs(results_dir, exist_ok=True)
     final = os.path.join(results_dir, QRELS_CACHE)
+    on_disk = _load_qrels_cache(results_dir)
+    on_disk.update(cache)
+    cache.update(on_disk)   # in place, so the caller's dict sees the union too
     tmp = f"{final}.{os.getpid()}.tmp"
     try:
         with open(tmp, "w") as f:
