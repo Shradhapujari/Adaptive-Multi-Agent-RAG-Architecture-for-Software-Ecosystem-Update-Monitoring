@@ -287,9 +287,11 @@ Three consequences for numbers already cited:
    (13/80/7), not significant after Holm across the 21-test family the script
    runs; it needs re-testing in its own family before it is quoted.
 
-The fix for future runs is to exclude a question's own `url` from the candidate
-pool at fetch time, or to build the benchmark from posts the corpus cannot
-return. Neither has been done; no run in this file is leak-free by construction.
+Since 2026-09-17 the harness strikes the question's own `url` from every arm's
+candidate tiers before ranking (`RetrieverAgent.exclude_urls`, set per question
+by `run_eval`; `config.json` records `exclude_own_post`). It is on by default;
+`--no-exclude-own-post` restores the old behaviour. Every run above predates it
+and is not leak-free by construction; the table is a post-hoc correction.
 
 ## The ablation ladder (grounding vs coordination)
 

@@ -43,6 +43,11 @@ class EvalConfig:
     # at the cost of one judge call per extra candidate, so it is off by default
     # and worth turning on for the small ground-truth sets.
     judge_pool: bool = False
+    # Strike a Reddit-mined question's own source post from every arm's
+    # candidate pool. Off, the live feed returns the post the title came from
+    # and the retrieval score is a lookup rate (FINDINGS.md, Finding 7). Every
+    # run before 2026-09-17 was made with this off.
+    exclude_own_post: bool = True
     # Frozen-corpus control, "record:<dir>" or "replay:<dir>"; see
     # corpus_snapshot.py. Empty means read the live endpoints, which makes two
     # runs incomparable and so must never be used for an ablation.

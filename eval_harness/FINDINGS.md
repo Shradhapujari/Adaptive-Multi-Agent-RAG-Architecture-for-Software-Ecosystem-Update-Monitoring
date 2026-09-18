@@ -236,10 +236,12 @@ is nDCG@3 ~0.3 for every arm, and no arm of the multi-agent pipeline moves it.
 The format confound (template vs prose) is a pure answer-side effect and is
 unaffected.
 
-**Fix, not yet applied.** Exclude the question's own `url` from the candidate
-pool at fetch time, or mine questions from posts the corpus cannot return. No
-existing run is leak-free by construction; the table above is a post-hoc
-correction.
+**Fix.** `RetrieverAgent.exclude_urls` strikes the question's own `url` from
+both tiers before ranking; `run_eval` sets it per question and records
+`exclude_own_post` in `config.json` (default on, `--no-exclude-own-post` to
+disable). Verified on a replay of the 500 snapshot: own post absent from pool
+and top-k on both arm types. Every run before 2026-09-17 predates it; the table
+above is a post-hoc correction, and a fresh run is the clean measurement.
 
 ---
 
@@ -251,7 +253,7 @@ correction.
 | **Synthesis model.** A bare `single_agent` synthesises with Mistral while marag uses Llama 3.1, though the paper reports Llama 3.1 throughout. Retrieval metrics are model-independent and unaffected; answer metrics were confounded. | Addressed by holding the model constant: `--generators marag,marag:ollama:llama3.1,single_agent:ollama:llama3.1`. |
 | **Judge independence.** The judge (`ollama:llama3.1`) shares a model family with the system under test. | Open. Needs a stronger independent judge before publication. |
 | **Qrels cache collisions.** The relevance cache was keyed by a question's *row position*, so datasets with overlapping ids read each other's labels. Runs made before this fix shared a cache with `table_50` runs. | Fixed (keys are now a hash of the question text); old-format entries are dropped rather than trusted. Headline numbers are being re-measured against a regenerated cache. |
-| **Own-post leak.** Reddit-mined questions are post titles and the live feed returns the post itself; the judge grades it relevant. 72-83% of top-k lists in the cited runs contain the question's own post; absolute retrieval numbers above ~0.3 are mostly this. | Measured post hoc (`scripts/leak_report.py`, Finding 7). Not yet excluded at fetch time. |
+| **Own-post leak.** Reddit-mined questions are post titles and the live feed returns the post itself; the judge grades it relevant. 72-83% of top-k lists in the cited runs contain the question's own post; absolute retrieval numbers above ~0.3 are mostly this. | Fixed for new runs: excluded from the candidate tiers before ranking, default on. Existing runs corrected post hoc (`scripts/leak_report.py`, Finding 7). |
 | **Live APIs.** The document pool drifts, so a *given run* is reproducible via its saved qrels and per-query docs, but two runs days apart are not strictly comparable. | Open by design. A frozen snapshot is the fix if strict comparability is needed. |
 
 ---
