@@ -1307,6 +1307,14 @@ Rewritten query:"""
 # AGENT 2 — RETRIEVER (unchanged — searches real dataset)
 # ─────────────────────────────────────────────────────────────
 
+def _norm_url(u) -> str:
+    """Same post whether it arrives as reddit.com or www.reddit.com, with or
+    without a trailing slash or scheme."""
+    u = (u or "").strip().lower()
+    u = re.sub(r"^https?://(www\.)?", "", u)
+    return u.rstrip("/")
+
+
 class RetrieverAgent:
     name = "📚  Retriever Agent"
 
@@ -1316,6 +1324,12 @@ class RetrieverAgent:
     last_rank_query: str = ""
     last_rerank_spec: str = ""
     last_rerank_degraded: bool = False
+    # URLs to strike from the candidate pool before ranking. The eval harness
+    # sets this to the benchmark question's own source post: a question mined
+    # from a Reddit title otherwise retrieves that very post, the judge grades
+    # it relevant, and the retrieval score measures a lookup of the answer key
+    # (72-83% of top-k lists in every pre-2026-09-17 run; FINDINGS.md, Finding 7).
+    exclude_urls: set = set()
 
     def run(self, rewritten_query: str, top_k: int = 4, original_query: str = "",
             union: bool = True) -> list:
@@ -1430,6 +1444,11 @@ class RetrieverAgent:
         # eval_harness/FINDINGS.md for the measurement that motivated this.
         import rerank as _rerank
 
+        if self.exclude_urls:
+            # Ranking below runs per tier, so filter the tiers, not the pool.
+            banned = {_norm_url(u) for u in self.exclude_urls}
+            tier1 = [d for d in tier1 if _norm_url(d.get("url")) not in banned]
+            tier2 = [d for d in tier2 if _norm_url(d.get("url")) not in banned]
         pool = tier1 + tier2
         # Which phrasing the ranker scores against is its own ablation dimension,
         # independent of which scoring function ranks. Conflating the two makes

@@ -210,6 +210,89 @@ For a frozen, byte-identical-documents comparison, cite the ladder below
 instead. This run is the large-sample corroboration of its coordination result,
 not a replacement for it.
 
+## The full 500-question run, and the own-post leak it exposed
+
+`run_1789429742_8fda4edb2d21`, n=500, `data/benchmark_500.json` (a strict
+superset of `benchmark_300.json`: all 300 `source_id`s plus 200 new; ids are
+renumbered, so join the two files by `source_id`, never by `id`). Same
+configuration as the 300 run: seed 42, `top_k=4`, generators `marag`,
+`marag:ollama:llama3.1`, `single_agent:ollama:llama3.1`, reranker
+`embed:nomic-embed-text`, judge `ollama:llama3.1`, rules off. Corpus
+`record:data/corpus_snapshot_b500_full_0914`, 19,707 responses, `frozen=false`.
+Launched 2026-09-14, died at 181/500 with the session that started it, resumed
+2026-09-16 with `--resume`, finished 2026-09-17. Same pairing caveat as the 300
+run: three arms back-to-back per question, so the paired comparison holds and
+nothing else is comparable across runs.
+
+Paired against `single_agent`, Holm-corrected (`comparison.md` in the run dir):
+
+| Metric | Arm | Mean delta | W/T/L | p_holm |
+|---|---|---:|---:|---:|
+| nDCG@3 | marag | -0.010 | 35/416/49 | 0.497 |
+| nDCG@5 | marag | -0.016 | 42/388/70 | 0.164 |
+| Recall@5 | marag | -0.030 | 30/416/54 | 0.022 |
+| MRR | marag | -0.013 | 17/449/34 | 0.306 |
+| Faithfulness | marag (template) | **-0.110** | 43/159/298 | **<0.001** |
+| Faithfulness | marag_llm (prose) | +0.014 | 66/383/51 | 0.031 |
+| Answer relevance | marag_llm | +0.013 | 40/435/25 | 0.012 |
+| Correctness (n=65) | marag | -0.005 | 11/43/11 | 0.935 |
+
+Latency medians 56.9 / 60.6 / 26.7 s (2.1x, 2.3x); the means are inflated by
+two questions above 10,000 s on every arm and, as with the 300 run, must not
+be quoted. Top-k lists are identical across `marag` and `single_agent` on 125 of
+500; `marag`'s mean pool is 19.8 against 13.2.
+
+**The absolute retrieval numbers fell by 0.34 for every arm** (nDCG@3 0.827 ->
+0.483 for `marag`; the same for the baseline), on the *same 300 questions*, with
+the judge, reranker and code paths unchanged. The cause is not in the systems:
+
+Every Reddit-mined question is a real post title and carries that post's `url`.
+The live Reddit endpoints return the post itself, its `doc_id` is `sha1(url)`,
+and the judge grades the post the question was lifted from as relevant. In the
+300 run the question's own post was in the candidate pool for **247 of 262**
+Reddit questions, judged relevant for 232, and was the *only* relevant document
+for 140. By 14-17 September the feed had aged past most of those posts: own
+post in pool for 171 of 445, only-relevant for 82. `scripts/leak_report.py`
+recomputes the metrics with the own post struck from ranking and qrels:
+
+| Run | Arm | nDCG@3 | nDCG@3 no own post | own post in top-k |
+|---|---|---:|---:|---:|
+| n=300 | marag | 0.827 | 0.319 | 82.7% |
+| n=300 | single_agent | 0.818 | 0.324 | 82.3% |
+| n=500 | marag | 0.483 | 0.294 | 33.8% |
+| n=500 | single_agent | 0.494 | 0.309 | 34.2% |
+| n=100 frozen ladder | single_agent | 0.731 | 0.269 | 72.0% |
+| n=100 frozen ladder | rewrite_only | 0.210 | 0.263 | 4.0% |
+
+Leak-free, the two large runs agree with each other (0.29-0.32 on every arm),
+and the parity result stands: n=500 paired deltas vs `single_agent` are
+-0.015 nDCG@3 (37/410/53, p_holm 0.43), -0.032 Recall@5 (p_holm 0.12), -0.016
+MRR (p_holm 0.41); n=300 is the same picture (all p_holm >= 0.83).
+
+Three consequences for numbers already cited:
+
+1. **Every absolute retrieval number in this file above ~0.3 is mostly the
+   leak.** The direction of paired comparisons between arms that retrieve the
+   own post at the same rate (all `marag*` vs `single_agent*` arms, 72-83% each)
+   is unaffected; the magnitudes are not interpretable as retrieval quality.
+2. **The `rewrite_only` drop is the leak.** Rewriting the query stops it
+   matching the post title verbatim, so the own post falls out of top-k (4% vs
+   72%). With the own post struck, `rewrite_only` is level with `single_agent`
+   on the frozen ladder (nDCG@3 -0.006, 8/83/9; Recall@5 +0.032). The "rewriting
+   damages retrieval, union fetch repairs it" reading of the ladder does not
+   survive; what union fetch repairs is the ability to look up the answer key.
+   The n=10 Table 1/Table 3 numbers were not re-examined here (different
+   dataset and qrels format) and should be assumed affected until they are.
+3. **The grounding gain shrinks.** A1 -> A1g leak-free is +0.052 nDCG@3
+   (13/80/7), not significant after Holm across the 21-test family the script
+   runs; it needs re-testing in its own family before it is quoted.
+
+Since 2026-09-17 the harness strikes the question's own `url` from every arm's
+candidate tiers before ranking (`RetrieverAgent.exclude_urls`, set per question
+by `run_eval`; `config.json` records `exclude_own_post`). It is on by default;
+`--no-exclude-own-post` restores the old behaviour. Every run above predates it
+and is not leak-free by construction; the table is a post-hoc correction.
+
 ## The ablation ladder (grounding vs coordination)
 
 Two runs, same 100 questions, same eight arms. **Cite the frozen one.**

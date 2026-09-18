@@ -70,6 +70,19 @@
 > nDCG@3 **0.973** (a pre-qrels-cache-keyfix artifact; post-fix and
 > reproducibly, 0.765) and the scaled tables at n = 96 (a stalled run that has
 > since completed at n = 100).
+>
+> **A second defect surfaced at n = 500 (2026-09-17): benchmark questions were
+> retrieving their own source post.** Reddit-mined questions are post titles,
+> the live feed returns the post the title came from, and the judge correctly
+> marks it relevant — inflating every absolute score that predates the fix
+> (own post was in 72–83% of top-k lists across the n=100/300/500 runs). It
+> does **not** change the parity finding above: every arm hit the same leak at
+> the same rate, so the paired *differences* between arms were never affected.
+> It does retract one earlier reading — the `rewrite_only` "drift" result was
+> mostly the rewritten query missing the answer-key post, not a retrieval
+> regression. Fixed going forward (`exclude_own_post`, on by default); a clean
+> n=500 rerun is in flight. Details: [Finding 7 in
+> `eval_harness/FINDINGS.md`](eval_harness/FINDINGS.md).
 
 ---
 
@@ -80,7 +93,18 @@
 | **Live demo** | <https://software-update-questions.streamlit.app/> — public, no key required |
 | **Paper** | Retargeted from the AgenticSE '26 workshop version and submitted to **TOSEM**, special section on Human–AI Collaboration in Software Engineering (1 September 2026). Source: `paper/tosem_amara.tex` |
 | **Framing** | A negative result plus its remedy, not an improvement claim |
-| **Tests** | 643 offline tests, no network required |
+| **Tests** | 663 offline tests, no network required |
+
+---
+
+## Contents
+
+[Documentation](#documentation) · [Why this exists](#why-this-exists) ·
+[Architecture](#architecture) · [Data sources](#data-sources) ·
+[Evaluation](#evaluation) · [Results](#results) · [Tech stack](#tech-stack) ·
+[Getting started](#getting-started) · [Repository layout](#repository-layout) ·
+[Known limitations](#known-limitations) · [Roadmap](#roadmap) ·
+[Citation](#citation) · [Collaborate](#collaborate)
 
 ---
 
@@ -267,6 +291,11 @@ fabricates claims like *"Is iOS v4.2.0 vulnerable?"*), and some feed dates are
 corrupt. Rows that cannot be attributed confidently are dropped, and every
 question carries a `source` field so mined and templated items stay
 distinguishable.
+
+`data/benchmark_1000.json` (**1,000 questions, 200 per category, 24
+ecosystems**) is built the same way, at larger scale. It has not been run
+yet — it overlaps `benchmark_500` on 486/500 questions, so it isn't a fresh
+sample, just more of the same distribution.
 
 ### Evaluation at scale
 
@@ -580,6 +609,9 @@ We're explicit about these in the paper (§5) — they're real, and good directi
 - [x] Temporal grounding before retrieval (`temporal.py`) with window-aware ranking (`fetch_union.py`).
 - [x] Cited prose answers in the demo (`answer_agent.py`), replacing the bullet template.
 - [x] Finish the 300-question run — completed at 300/300 via `--resume`; retrieval parity holds and the format confound is confirmed at full sample.
+- [x] Fix the own-post retrieval leak (Reddit-mined questions retrieving their own source post) — `exclude_own_post`, on by default since 2026-09-17.
+- [ ] Clean, leak-free n=500 rerun — in flight, first measurement since the fix above.
+- [ ] Run the 1,000-question benchmark (`data/benchmark_1000.json`) — built, not yet run.
 - [ ] Report the self-reflective (Self-RAG / CRAG) baseline arm — implemented, run incomplete
 - [ ] Measure self-improvement against a frozen corpus, so adaptation is separable from corpus drift
 - [ ] Independent judge (`--judge openai:gpt-4o`) to remove the judge/system model-family overlap
