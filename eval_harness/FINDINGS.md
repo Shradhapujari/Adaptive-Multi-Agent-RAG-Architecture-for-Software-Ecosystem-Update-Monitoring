@@ -245,6 +245,44 @@ above is a post-hoc correction, and a fresh run is the clean measurement.
 
 ---
 
+## Finding 8 — Leak-free, every arm retrieves at nDCG@3 0.30 and the parity is exact
+
+`run_1789703506_8fda4edb2d21`: the 500 questions rerun with the own post
+excluded at fetch time, nothing else changed. Own post in 0 of 445 pools.
+
+| Arm | nDCG@3 | Recall@5 | MRR | Faithfulness |
+|---|---:|---:|---:|---:|
+| marag (template) | 0.304 | 0.351 | 0.344 | 0.844 |
+| marag_llm (prose) | 0.306 | 0.353 | 0.345 | 0.915 |
+| single_agent | 0.301 | 0.366 | 0.344 | 0.910 |
+
+Paired vs `single_agent`: nDCG@3 +0.003 (40/418/42, p_holm 1.0), Recall@5
+-0.015 (p_holm 0.65), MRR +0.000 (28/434/38). Template faithfulness -0.066 on
+283 of 500 (p<0.001); prose +0.005 (p 0.38). The post-hoc leak-free estimate
+from Finding 7 (0.29-0.32) was right to within 0.01.
+
+Three things this settles:
+
+1. **The honest retrieval number for this system, and for its baseline, is
+   about 0.30.** Every number above that in earlier runs was the question's
+   own post. 273 of 500 questions have no judged-relevant document in any
+   arm's pool.
+2. **Parity is exact and not a benchmark artifact.** Only 113 of 500 top-k lists
+   are identical across marag and single_agent; the multi-agent pool is 19.3
+   against 12.8; and no metric moves by more than 0.015.
+3. **The format effect is real but smaller than the leaky runs showed** —
+   -0.066 here against -0.110 (leaky n=500) and -0.196 (n=300). Part of the
+   earlier gap was the template rendering the own post's title verbatim.
+
+**One number not to quote.** Template correctness +0.129 on the 72 GT
+questions (16/54/2, p 0.002) is the judge scoring a "✅ VERIFIED" banner and
+version strings around an answer that says the sources do not cover the
+question. The prose arms say the same thing without the banner and score 0.
+See PROVENANCE for an example; it is the judge-independence confound, not a
+result.
+
+---
+
 ## Confounds, and what has been done about them
 
 | Confound | Status |

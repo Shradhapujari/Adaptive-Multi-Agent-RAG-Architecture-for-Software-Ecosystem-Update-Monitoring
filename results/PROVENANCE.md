@@ -293,6 +293,53 @@ by `run_eval`; `config.json` records `exclude_own_post`). It is on by default;
 `--no-exclude-own-post` restores the old behaviour. Every run above predates it
 and is not leak-free by construction; the table is a post-hoc correction.
 
+## The clean 500-question run (own post excluded)
+
+`run_1789703506_8fda4edb2d21` — same dataset, arms, judge, reranker, seed and
+`top_k` as the leaky run above; the only change is `exclude_own_post: true`
+(commit `d80305a`). Corpus `record:data/corpus_snapshot_b500_clean_0917`,
+29,020 responses, `frozen=false`. Ran 2026-09-17 19:45 to 2026-09-19 without
+interruption. `scripts/leak_report.py` confirms the question's own post is in
+**0 of 445** Reddit questions' pools. The first leak-free measurement.
+
+| Arm | nDCG@3 | nDCG@5 | Recall@5 | MRR | Faithfulness | Ans. rel. |
+|---|---:|---:|---:|---:|---:|---:|
+| marag (template) | 0.304 | 0.316 | 0.351 | 0.344 | 0.844 | 0.923 |
+| marag_llm (prose) | 0.306 | 0.318 | 0.353 | 0.345 | 0.915 | 0.968 |
+| single_agent | 0.301 | 0.323 | 0.366 | 0.344 | 0.910 | 0.966 |
+
+Paired vs `single_agent`, Holm across the family:
+
+| Metric | Arm | Mean delta | W/T/L | p_holm |
+|---|---|---:|---:|---:|
+| nDCG@3 | marag | +0.003 | 40/418/42 | 1.000 |
+| nDCG@5 | marag | -0.007 | 45/387/68 | 1.000 |
+| Recall@5 | marag | -0.015 | 39/408/53 | 0.654 |
+| MRR | marag | +0.000 | 28/434/38 | 1.000 |
+| Faithfulness | marag (template) | **-0.066** | 28/189/283 | **<0.001** |
+| Faithfulness | marag_llm (prose) | +0.005 | 79/364/57 | 0.376 |
+| Answer relevance | marag (template) | -0.043 | 34/225/241 | <0.001 |
+| Correctness (n=72) | marag (template) | +0.129 | 16/54/2 | 0.002 |
+
+The leak-free column of the earlier runs predicted 0.29-0.32 nDCG@3 for every
+arm; measured, 0.301-0.306. Parity is exact: every retrieval delta is within
+0.015 with 387-434 ties out of 500, and the multi-agent pool is still half again
+larger (19.3 vs 12.8) for it. 273 of 500 questions have no judged-relevant
+document in any arm's pool — on this benchmark, the corpus does not contain an
+answer for most questions, and no arm changes that.
+
+Latency medians 53.9 / 53.6 / 26.4 s (2.0x, 2.0x); means carry 6/5/1 stalls
+above 600 s and are not quotable.
+
+**Do not quote the correctness row.** The template arm's +0.129 on the 72
+ground-truth questions is a judge artifact: the winning answers say the sources
+do not cover the question (e.g. "does not appear to be directly related") under
+a "✅ VERIFIED from live releasetrain.io APIs" banner and a list of version
+strings, and `llama3.1` scores that 0.7 against a ground truth the answer does
+not state. The prose arms, which say plainly they could not find it, score 0.
+This is the judge-independence confound (FINDINGS.md) showing up as a
+false positive; it needs a stronger judge before it means anything.
+
 ## The ablation ladder (grounding vs coordination)
 
 Two runs, same 100 questions, same eight arms. **Cite the frozen one.**
