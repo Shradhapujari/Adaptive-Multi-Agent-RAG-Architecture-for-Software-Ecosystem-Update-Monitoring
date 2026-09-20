@@ -46,7 +46,7 @@ def _norm_record(raw: dict, idx: int) -> Optional[dict]:
     # category-only: every record's ecosystem becomes None, so the second
     # dimension collapses into one group and contributes nothing. The harness
     # then reports "ecosystem: None=100" — honest, but easy to miss.
-    for extra in ("ecosystem", "vendor", "source", "subreddit", "date"):
+    for extra in ("ecosystem", "vendor", "source", "subreddit", "date", "url"):
         if raw.get(extra) is not None:
             rec[extra] = raw[extra]
     return rec

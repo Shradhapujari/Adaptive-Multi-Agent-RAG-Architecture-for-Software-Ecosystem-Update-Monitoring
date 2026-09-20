@@ -53,6 +53,7 @@ from .dataset import load_dataset, dataset_hash
 from . import benchmarks as bench_mod
 from agent_rules import RULES_ENV
 from .generators import build_generators, rules_arm
+import multiagent_rag_v3 as marag
 from .judge import Judge
 from .metrics import retrieval_metrics, mean_ci
 from . import report as report_mod
@@ -349,6 +350,11 @@ def run(cfg: EvalConfig) -> str:
             continue
         query = rec["query"]
         print(f"\n[{qi}/{len(records)}] {query[:80]}")
+        # Strike the question's own source post from every arm's pool. Every
+        # generator retrieves through RetrieverAgent, so the class attribute
+        # reaches all of them; it is a set so a record may carry several.
+        marag.RetrieverAgent.exclude_urls = (
+            {rec["url"]} if cfg.exclude_own_post and rec.get("url") else set())
         sys_outputs: Dict[str, dict] = {}
         for g in gens:
             t0 = time.time()
@@ -478,6 +484,7 @@ def run(cfg: EvalConfig) -> str:
     # write time would be a guess; ask the reranker the harness really used.
     _rr = rerank.get_reranker()
     cfg_dict["rerank_requested"] = os.environ.get("MARAG_RERANK", rerank.DEFAULT_SPEC)
+    cfg_dict["exclude_own_post"] = cfg.exclude_own_post
     cfg_dict["rerank_spec"] = _rr.spec
     cfg_dict["rerank_degraded"] = bool(_rr.degraded)
     # Same rule for the rules factor: ask the generator what it used. The sha
@@ -552,6 +559,10 @@ def _parse_args() -> EvalConfig:
                    metavar="RUN_DIR",
                    help="continue an interrupted run: reuse that run dir and "
                         "skip questions already scored for every system")
+    p.add_argument("--no-exclude-own-post", dest="exclude_own_post",
+                   action="store_false", default=cfg.exclude_own_post,
+                   help="keep the question's own source post in the candidate "
+                        "pool (pre-2026-09-17 behaviour; FINDINGS.md Finding 7)")
     p.add_argument("--judge-pool", action="store_true", default=cfg.judge_pool,
                    help="judge every pre-rerank candidate, enabling pool recall")
     p.add_argument("--corpus", default=cfg.corpus,
@@ -569,6 +580,7 @@ def _parse_args() -> EvalConfig:
     cfg.judge_pool = a.judge_pool
     cfg.corpus = a.corpus
     cfg.resume = a.resume
+    cfg.exclude_own_post = a.exclude_own_post
     return cfg
 
 
