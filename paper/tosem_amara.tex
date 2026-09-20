@@ -2303,482 +2303,70 @@ a judge from a different model family before it means anything.
 \subsection{Observations Carried Over From the Earlier Evaluation}
 \label{sec:carried-over}
 
-The remainder of this section reports measurements from the evaluation described
-in the conference version. They are retained because they do not depend on the
-architecture comparison and are not affected by the corrections above: they
-concern how the system behaves, not whether it beats a baseline. Where a
-measurement has been weakened or qualified by what Sections~\ref{sec:two-metrics}
-to~\ref{sec:leak} establish, that is stated at the point it appears
-rather than left for the reader to notice.
+The conference version of this work reported a set of measurements that do not
+depend on the architecture comparison and are not affected by the corrections
+above: they concern how the system behaves, not whether it beats a baseline.
+We summarize them here in the form the evidence supports, and refer the reader
+to that version for the full tables and traces.
 
-\subsection{Answer Accuracy}
+\textbf{Answer accuracy.} On the version-specific questions of the earlier
+evaluation the pipeline named Linux v7.0.0 (13 April 2026) and Firefox v149.0.1
+(7 April 2026), and in each case the version and date appeared in a document it
+had retrieved. On ten answers read from the live questions endpoint, four were
+fully and six partially correct under a lenient scoring that credits the right
+product with the wrong version. Under the strict CRAG-style scoring of
+Section~\ref{sec:scaled-eval}, correctness on questions with a reference answer
+is 0.30--0.37 for every arm including the baseline; the two measurements agree,
+and the strict one carries forward. What survives is the narrower claim: on
+none of the ten did the answer state a version number, release date, or update
+claim absent from its retrieved documents. Errors were retrieval and selection
+errors, not fabrications.
 
-Retrieval metrics score the documents, not the answer written from them, so
-the earlier evaluation also read the answers to version-specific questions. On
-those questions the pipeline named Linux v7.0.0 (released 13 April 2026) and
-Firefox v149.0.1 (released 7 April 2026), and in each case the version and date
-it reported appeared in a document it had retrieved.
+\textbf{Adaptive feedback.} The Evaluator signals a retry when its quality
+score falls below a threshold ($\theta=0.30$ in that harness; 0.15 in the
+released implementation, Section~\ref{sec:agents}). The retry was instrumented
+and its rate in the surviving run artifact is zero: no question crossed the
+threshold, so its effect on retrieval was never measured, and the configuration
+evaluated in Sections~\ref{sec:two-metrics}--\ref{sec:leak} does not invoke the
+Orchestrator at all (Section~\ref{sec:setup}). None of the retrieval numbers in
+this paper include a retry. Before the union fetch, a retry re-issued a second
+rewritten query in place of the user's question --- the defect of
+Section~\ref{sec:localizing} repeated; under the union it inherits both
+phrasings.
 
-We then read ten answers to questions drawn from the live questions endpoint:
-four fully correct, six partially correct. On none of
-the ten did the pipeline state a version number, release date, or update claim
-that was absent from its retrieved documents.
+\textbf{Self-improvement.} The bespoke retrieval score rose from 0.756 in the
+first tertile of the 50-question run to 0.826 in the last ($+9.3\%$;
+$t(16)=2.18$, $p=0.043$, $d=0.83$), and 27 query-expansion terms accumulated
+positive weight in the Self-Improvement Memory, the highest-scoring being
+\emph{vulnerability}, \emph{patch}, \emph{advisory}, \emph{update}, and
+\emph{kernel}. The comparison is confounded: tertiles are ordered in time and
+the corpus is live, so drift is not separable from adaptation. The mechanism is
+sound and its learned terms are interpretable; the magnitude is not
+established, and establishing it needs a frozen corpus or an interleaved
+design.
 
-Two things about that count need saying, because taken alone it reads more
-favourably than the evidence supports. It is a lenient scoring: ``partially
-correct'' awards credit for an answer that retrieves the right product while
-getting the version, the date, or the affected component wrong, and the
-version is usually the whole question. Under the deterministic scoring used in
-Section~\ref{sec:scaled-eval} --- which labels a prediction naming the right
-product but the wrong version as incorrect rather than partial --- correctness on
-questions carrying a reference answer is between 0.30 and 0.37 for every arm,
-including the single-agent baseline. The two measurements are not in conflict;
-they are the same behaviour scored leniently and strictly, and the strict figure
-is the one to carry forward. What survives from this subsection is the narrower
-claim, which the strict scoring does not contradict: version-specific
-information in generated answers was traceable to a retrieved document, so the
-errors are retrieval and selection errors rather than fabrications.
-
-Figure~\ref{fig:siri_example} presents a representative software update
-question. The question concerns Siri behavior following the iOS~26.4
-update. The Retriever identified the relevant vendor, collected
-release and community information, and the generated answer reflected
-information contained in the retrieved sources.
-
-\begin{figure*}[t]
-\centering
-\resizebox{\textwidth}{!}{%
-\begin{tikzpicture}[
-  box/.style={
-      rectangle,
-      draw,
-      rounded corners,
-      text centered,
-      align=center,
-      minimum height=0.8cm,
-      font=\small,
-      fill=white
-  },
-  agent/.style={
-      box,
-      fill=blue!10
-  },
-  answer/.style={
-      box,
-      fill=gray!10
-  },
-  arrow/.style={
-      ->,
-      thick,
-      >=stealth
-  }
-]
-
-% ==================================================
-% Example Query
-% ==================================================
-
-\node[
-    box,
-    fill=gray!10,
-    minimum width=8.2cm
-] (query) at (0,6.2)
-{
-\textbf{User Question}\\
-``Are there known Siri issues following the iOS 26.4/26.4.1 updates?''
-};
-
-% ==================================================
-% Left Side : Single-Agent RAG
-% ==================================================
-
-\node[
-    agent,
-    minimum width=4.8cm,
-    minimum height=2.4cm
-] (single) at (-6.0,2.8)
-{
-Single-Agent RAG\\
-Query Rewriting\\
-Retrieval\\
-Evaluation\\
-Answer Generation
-};
-
-\node[
-    answer,
-    minimum width=6.0cm,
-    text width=5.4cm
-] (ans1) at (-6.0,-1.2)
-{
-\textbf{Generated Answer}\\
-``Try updating Siri settings. The issue may
-have been fixed in a recent update.''\\
-\textit{Limited supporting evidence}
-};
-
-% ==================================================
-% Divider
-% ==================================================
-
-\draw[gray!50, very thick]
-(-0.6,-3.0) -- (-0.6,5.2);
-
-% ==================================================
-% Right Side : Multi-Agent RAG
-% ==================================================
-
-\node[
-    agent,
-    minimum width=4.8cm
-] (orch) at (6.8,4.1)
-{
-Multi-Agent RAG\\
-Orchestrator Agent
-};
-
-\node[
-    agent,
-    minimum width=3.5cm
-] (rw) at (2.8,1.8)
-{
-Query Rewriter\\
-Agent
-};
-
-\node[
-    agent,
-    minimum width=3.5cm
-] (ret) at (6.8,1.8)
-{
-Retriever\\
-Agent
-};
-
-\node[
-    agent,
-    minimum width=3.5cm
-] (eval) at (10.8,1.8)
-{
-Evaluator\\
-Agent
-};
-
-\node[
-    answer,
-    minimum width=9.2cm,
-    text width=8.5cm
-] (ans2) at (6.8,-2.0)
-{
-\textbf{Generated Answer}\\
-``Community discussions and release
-documentation indicate that iOS~26.4
-introduced changes affecting Siri offline
-task execution. Multiple users report the
-same behavior following the update.''\\
-\textit{Grounded in retrieved sources}
-};
-
-% ==================================================
-% Connections
-% ==================================================
-
-\draw[arrow]
-(query.south west)
--- ++(-2.0,-0.45)
--- (single.north);
-
-\draw[arrow]
-(single.south)
--- (ans1.north);
-
-\draw[arrow]
-(query.south east)
--- ++(2.0,-0.45)
--- (orch.north);
-
-\draw[arrow]
-(orch.south)
--- ++(0,-0.45)
--| (rw.north);
-
-\draw[arrow]
-(orch.south)
--- (ret.north);
-
-\draw[arrow]
-(orch.south)
--- ++(0,-0.45)
--| (eval.north);
-
-\draw[arrow]
-(ret.south)
--- (ans2.north);
-
-\end{tikzpicture}%
-}
-\caption{
-Illustrative execution traces on one software update question, recorded
-\emph{before} the substitution defect of Section~\ref{sec:localizing} was
-identified and repaired. The difference shown is a property of that defect and
-of these particular traces, not an architecture effect:
-Section~\ref{sec:scaled-eval} reports the two systems as statistically
-indistinguishable once it is fixed.
-}
-\Description{Side-by-side execution traces for the question about Siri issues following an iOS update. The single-agent path performs rewriting, retrieval, evaluation, and generation in one pass and yields an answer with limited supporting evidence. The multi-agent path routes the question through Orchestrator, Query Rewriter, Retriever, and Evaluator agents and yields an answer citing release documentation and community reports. Both traces predate the retrieval defect repaired in this paper.}
-\label{fig:siri_example}
-\end{figure*}
-
-\subsection{Example Multi-Agent Execution}
-
-Figure~\ref{fig:execution_trace} illustrates a representative execution
-of the proposed architecture on a software update question. The Query
-Rewriter Agent reformulates the user question with the intention of widening
-retrieval coverage --- an intention Section~\ref{sec:localizing} shows is
-realized only when the reformulation augments the original question rather than
-replacing it --- the Retriever Agent gathers evidence from software ecosystem
-documents, and the Evaluator Agent assigns a retrieval quality score
-before answer generation. This example demonstrates how retrieval and
-evaluation are separated into specialized agents within the proposed
-architecture.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{Figures/execution-trace.png}
-\caption{
-Example execution trace of the Query Rewriter, Retriever, and Evaluator agents.
-}
-\Description{Screenshot of a console execution trace showing each agent's output in turn: the Query Rewriter's reformulation of the user question, the Retriever's endpoint calls and the documents returned, and the Evaluator's numeric retrieval quality score, followed by the generated answer with its cited sources.}
-\label{fig:execution_trace}
-\end{figure}
-\subsection{Adaptive Feedback}
-
-The Evaluator signals a retry when the initial retrieval quality score falls
-below the threshold that harness used ($\theta = 0.30$; the released
-implementation uses 0.15, Section~\ref{sec:agents}). On that signal the
-Orchestrator executes an additional retrieval cycle using a revised query
-generated by the Query Rewriter, without manual intervention.
-
-We report no retry rate and no effect of retrying on retrieval quality, and
-the reason is worth stating precisely rather than as an omission. The retry
-\emph{was} instrumented: each per-question record carries a flag for whether a
-retry occurred, and the harness reports the rate. In the surviving run artifact
-of that harness the rate is zero --- no question crossed the threshold, so no
-retry fired --- and the effect of retrying on retrieval quality was therefore
-never measured. What the mechanism does when it fires is a description of the
-code, not a measurement. Worse for the mechanism's case, the configuration
-evaluated in Sections~\ref{sec:two-metrics}--\ref{sec:scaled-eval} does not
-invoke the Orchestrator at all (Section~\ref{sec:setup}), so none of the
-retrieval numbers in this paper include a retry. The mechanism also interacts with
-the defect of Section~\ref{sec:localizing} in a way worth stating: before the
-remedy, a retry re-issued a second rewritten query in place of the user's
-question, so an insufficient result set was retried with the same substitution
-that caused it. Under the union acquisition of
-Section~\ref{sec:union-fetch} the retry inherits both phrasings.
-
-\subsection{Self-Improvement Behavior}
-
-Retrieval quality, as measured by the bespoke score, increased from a mean of
-0.756 in the first evaluation tertile ($Q_1$--$Q_{17}$) to 0.826 in the final
-tertile ($Q_{34}$--$Q_{50}$), corresponding to a 9.3\% increase.
-
-This comparison is confounded, and we report it with that caveat rather than as
-a result. Tertiles are ordered in time, and the system retrieves from live
-sources whose contents change over the course of a run, so corpus drift is not
-separable from adaptation in this design. Establishing the effect requires
-either a frozen corpus snapshot or an interleaved design in which memory is
-enabled and disabled across the question order. The mechanism is sound and its
-learned terms are interpretable (Table~\ref{tab:learned_terms}); the magnitude
-reported here is not established.
-
-A paired $t$-test comparing the first and last tertiles yielded
-$t(16)=2.18$ and $p=0.043$ (two-tailed). The corresponding effect size
-was Cohen's $d=0.83$ \cite{cohen1988power}.
-
-During evaluation, 27 query-expansion terms accumulated positive scores
-in the Self-Improvement Memory. Table~\ref{tab:learned_terms} lists the
-ten highest-scoring terms.
-
-\begin{table}[h]
-\centering
-\caption{Highest-Scoring Learned Terms}
-\label{tab:learned_terms}
-\resizebox{\columnwidth}{!}{%
-\begin{tabular}{llcl}
-\toprule
-\textbf{Rank} & \textbf{Term} & \textbf{Cumulative Score} & \textbf{Interpretation} \\
-\midrule
-1 & vulnerability & +2.20 & Security terminology \\
-2 & patch & +1.58 & Fix-related terminology \\
-3 & advisory & +1.23 & Advisory terminology \\
-4 & update & +1.15 & General update terminology \\
-5 & kernel & +0.98 & Vendor-specific terminology \\
-6 & release & +0.87 & Version-related terminology \\
-7 & bug & +0.76 & Defect-related terminology \\
-8 & fix & +0.71 & Resolution terminology \\
-9 & version & +0.68 & Version-related terminology \\
-10 & security & +0.64 & Security terminology \\
-\bottomrule
-\end{tabular}
-}
-\end{table}
-
-\subsection{Representative User Questions and Answers}
-
-Table~\ref{tab:examples} gives nine answers from the earlier evaluation set,
-three from each outcome we distinguish: correct, partially relevant, and
-incorrect. They are chosen to show what each outcome looks like in this domain,
-not sampled to estimate how often each occurs --- the rates for that are the
-correctness figures of Section~\ref{sec:scaled-eval}, which are computed on the
-questions carrying a reference answer.
-
-\begin{table*}[t]
-\centering\small
-\caption{Representative Questions Examples}
-\label{tab:examples}
-\setlength{\tabcolsep}{3pt}
-\renewcommand{\arraystretch}{1.1}
-%% Proportional widths rather than \resizebox: scaling a tabular changes the
-%% type size non-uniformly, which ACM discourages, and it cannot fix an overflow
-%% inside a p-column in any case.
-%% Ragged-right in the narrow columns: justified p-columns cannot break a long
-%% token such as a vendor slug, and overflow into the margin instead.
-\begin{tabular}{@{}R{0.245\textwidth}R{0.125\textwidth}R{0.295\textwidth}R{0.175\textwidth}R{0.05\textwidth}@{}}
-\toprule
-\textbf{Question} & \textbf{Vendor} & \textbf{Multi-Agent Answer} & \textbf{Evaluator Note} & \textbf{Res.} \\
-\midrule
-\multicolumn{5}{l}{\textit{(A) Correctly Answered}} \\
-\midrule
-Q1: What is the latest version of Firefox?
-   & firefox
-   & v149.0.1, released April~7~2026.
-   & Exact release note match.
-   & \textcolor{green!60!black}{\textbf{\ding{51}}} \\
-
-Q2: Are there known Siri issues following the iOS 26.4/26.4.1 updates?
-   & ios
-   & iOS~26.4 changed Siri offline mode. r/applehelp confirms.
-   & Multiple sources retrieved.
-   & \textcolor{green!60!black}{\textbf{\ding{51}}} \\
-
-Q3: G6 Bullet unstable?
-   & Ubiquiti
-   & Community reports instability; firmware update available.
-   & Alias resolved to vendor.
-   & \textcolor{green!60!black}{\textbf{\ding{51}}} \\
-\midrule
-\multicolumn{5}{l}{\textit{(B) Partially Relevant}} \\
-\midrule
-Q4: Would an IKEA hub update devices more reliably?
-   & home\-assistant
-   & Home Assistant integration information retrieved.
-   & Sub-vendor not represented in registry.
-   & \textcolor{orange!80!black}{\textbf{$\sim$}} \\
-
-Q5: Can't upload photos on iOS to Immich
-   & ios
-   & iOS information retrieved; limited Immich coverage.
-   & Third-party application not present in vendor sources.
-   & \textcolor{orange!80!black}{\textbf{$\sim$}} \\
-
-Q6: Do I have to say goodbye to Windows to switch to Linux?
-   & linux
-   & General Linux information retrieved.
-   & Opinion-oriented question.
-   & \textcolor{orange!80!black}{\textbf{$\sim$}} \\
-\midrule
-\multicolumn{5}{l}{\textit{(C) Incorrectly Answered}} \\
-\midrule
-Q7: What was the Linux version on January~1st~2026?
-   & linux
-   & Returned v7.0.0 instead of v6.18.0.
-   & Date constraint not applied.
-   & \textcolor{red!70!black}{\textbf{\ding{55}}} \\
-
-Q8: Synology NAS unreachable after upgrade
-   & (none)
-   & No vendor detected.
-   & Vendor extraction failure.
-   & \textcolor{red!70!black}{\textbf{\ding{55}}} \\
-
-Q9: What small IT task always turns into a nightmare?
-   & (none)
-   & No relevant documents retrieved.
-   & Non-factual question.
-   & \textcolor{red!70!black}{\textbf{\ding{55}}} \\
-\bottomrule
-\end{tabular}
-\end{table*}
-
-\subsection{Failure Analysis}
-
-The three incorrect answers in Table~\ref{tab:examples} fail in three
-different ways, and each names a distinct stage of the pipeline. We describe
-them because the stage is identifiable, which is the property
+\textbf{Failure modes.} Three incorrect answers from that evaluation fail at
+three identifiable stages, which is the traceability
 Section~\ref{sec:decomposition} argues decomposition buys and the retrieval
-metrics do not score. Three examples establish that these failures occur, not
-how often.
+metrics do not score. A date constraint in ``What was the Linux version on
+January 1st 2026?'' survived the rewrite and was dropped at the retrieval call
+--- the paper's finding in miniature, since repaired for the vendor release
+endpoint alone, and parsed from the rewrite rather than the question, the one
+place the rule of Section~\ref{sec:rewrite-roles} is inverted. ``Synology NAS
+unreachable after upgrade'' matched no vendor because preprocessing removed the
+terms that would have matched, upstream of anything retrieval could recover.
+``What small IT task always turns into a nightmare?'' retrieved nothing
+relevant, correctly, and reported the empty result rather than declining the
+question --- the gap the CRAG-style scoring rewards closing and the Evaluator
+could close. Three examples establish that these failures occur, not how often.
 
-\paragraph{Temporal Question Filtering.}
-Asked ``What was the Linux version on January 1st 2026?'', the pipeline
-returned the newest Linux release rather than the one current on that date. The
-rewriter kept the date; the retrieval call dropped it. This is the paper's own
-finding in miniature --- a constraint present in the query never reaches the
-endpoint --- and it is now partly repaired: \texttt{extract\_date\_from\_query}
-parses a target date and the vendor release lookup filters to the release
-current at it. Two limits remain, and both are visible in the code rather than
-in a score. The filter applies to that one endpoint, so the rest of
-Table~\ref{tab:endpoints} is unaffected; and the date is parsed from $\tilde{q}$ rather than $q$, the single
-place the rule of Section~\ref{sec:rewrite-roles} is inverted, so a rewrite
-that drops the date drops the constraint with it.
-
-\paragraph{Vendor Extraction Failure.}
-``Synology NAS unreachable after upgrade'' matched no vendor, so retrieval
-fell back to the general endpoints. Preprocessing had removed the terms that
-would have matched: the failure is in vendor extraction, upstream of retrieval,
-and no amount of retrieval or ranking work downstream of it recovers the
-vendor-specific sources.
-
-\paragraph{Opinion-Oriented Queries.}
-``What small IT task always turns into a nightmare?'' names no vendor and
-asks for no fact about an update. The pipeline retrieved nothing relevant, which
-is right, and reported the empty result rather than rejecting the question,
-which is the gap: it has a way to say that retrieval returned nothing and no way
-to say that a question is outside what it can answer. Declining is the behaviour the
-CRAG-style scoring of Section~\ref{sec:scaled-eval} rewards, and this case is
-where the architecture's evaluator could supply it and does not.
-
-\subsection{Implementation Comparison}
-
-The architecture was implemented using Pure Python, LangChain, and
-smolagents. The three implementations were observed to return the same ranked
-documents on the evaluation dataset. We record this as an implementation
-observation rather than an equivalence result: it was checked by inspection of
-the retrieved sets, not by a metric, and this paper's own subject is that
-whether two systems are ``equivalent'' depends on which measure is applied
-(Section~\ref{sec:metric-threat}).
-
-The three differ in what they expose rather than in what they retrieve. Pure
-Python gives the most direct execution trace and is the implementation every
-measurement in this paper was taken from. LangChain adds intermediate state
-through callback logging. Within smolagents, ToolCallingAgent ran reliably on
-Llama~3.1~8B while Code Agent intermittently emitted invalid tool calls and
-repeated execution cycles, which is a property of that agent under an 8B model
-and not of the architecture.
-
-\subsection{Qualitative Analysis}
-
-Reading execution traces is how the pipeline is debugged, and it is worth
-saying what that reading does and does not establish. The traces confirm the
-control flow: the Orchestrator delegates rewriting, retrieval and evaluation in
-turn, and no document reaches synthesis before the Evaluator has scored the set
-it belongs to. What they cannot show is the defect of
-Section~\ref{sec:localizing}. A trace displays the documents that were
-retrieved; the missing 22 were not in it to be noticed, and we read these traces
-throughout the pipeline's development without seeing them. That is the argument for recording the
-pre-ranking candidate pool as data rather than inspecting the pipeline as
-narrative. Full traces are recorded per question by the released harness rather
-than reproduced here; Figure~\ref{fig:execution_trace} shows one.
+\textbf{Implementations.} Pure Python, LangChain, and smolagents
+implementations returned the same ranked documents on the evaluation set,
+checked by inspection of the retrieved sets rather than by a metric. Every
+measurement in this paper is from the Pure Python implementation. Within
+smolagents, ToolCallingAgent ran reliably on Llama~3.1~8B while Code Agent
+intermittently emitted invalid tool calls, a property of that agent under an
+8B model rather than of the architecture.
 
 \subsection{Summary of Findings}\label{sec:results-summary}
 
@@ -3022,125 +2610,35 @@ other than removing the confound.
 
 \subsection{Observations That Survive}\label{sec:survives}
 
-Several observations from the original evaluation are unaffected by the
-corrections above, because they do not depend on the architecture comparison.
+Three observations from the original evaluation do not depend on the
+architecture comparison and are unaffected by either correction
+(Section~\ref{sec:carried-over}). Heterogeneous sources are complementary:
+release notes carry authoritative version and fix information, advisories the
+vulnerability detail, and community discussion the deployment experience that
+has not reached official documentation, so preserving provenance in the
+retrieved set improves coverage without conflating it. Source grounding
+constrains version-specific claims: across the version-specific answers we
+read, none stated a version, date, or patch identifier absent from its
+retrieved documents --- an observation on a small sample, not a guarantee.
+And retrieval-level adaptation operates without retraining, with interpretable
+learned terms; its magnitude is confounded with corpus drift and is not
+established.
 
-\begin{itemize}
-  \item \textbf{Heterogeneous sources provide complementary evidence.} Release
-  notes give authoritative version and fix information; advisories give
-  vulnerability details and mitigations; community discussions give deployment
-  experience, regressions, and workarounds that have not reached official
-  documentation. Users frequently ask about the operational effects of an update
-  rather than its documented contents: a release note may confirm a defect was
-  fixed while community discussion reveals users still experiencing it.
-  Treating these as complementary rather than competing, and preserving the
-  distinction in the retrieved set, improves coverage without conflating
-  provenance.
+\subsection{Threats to Validity}\label{sec:threats}
 
-  \item \textbf{Source grounding constrains version-specific claims.} Across the
-  version-specific evaluation, generated answers did not contain version
-  numbers, release dates, or patch identifiers absent from the retrieved
-  documents. Incorrect version information has direct operational consequences
-  for update planning and security decisions, so this property matters
-  independently of retrieval ranking. The sample is small and this is an
-  observation rather than a guarantee.
-
-  \item \textbf{Retrieval-level adaptation operates without retraining.} Query
-  expansion terms accumulate weights from retrieval outcomes and bias subsequent
-  reformulation, with no human preference labels and no parameter updates. The
-  learned terms are interpretable on inspection. We are more cautious than the
-  conference version about the size of the effect: the tertile comparison that
-  produced the 9.3\% figure is confounded with the live corpus drifting over the
-  course of a run, and we did not control for it. The mechanism is sound; the
-  magnitude is not established.
-\end{itemize}
-
-\subsection{Implications for Software Update Question Answering}
-
-The evaluation suggests that software update question answering differs
-from traditional fact-based question answering in several respects.
-Questions frequently reference evolving software versions, incomplete
-symptom descriptions, community terminology, and information dispersed
-across multiple document sources. Consequently, retrieval quality
-becomes a central factor influencing answer quality.
-
-We expect improvements in retrieval quality to translate into improved answer
-supportability, though our evaluation does not test it: Section~\ref{sec:scaled-eval}
-finds retrieval parity coexisting with an apparent faithfulness gap that proved
-to be an artifact of answer format. When relevant release
-notes, advisories, and community discussions are successfully
-retrieved, the generated answer is more likely to contain verifiable
-evidence and less likely to rely on unsupported assumptions. This
-relationship motivates further investigation of retrieval-focused
-architectures for software ecosystem applications.
-
-The findings also suggest that software update question answering
-benefits from explicit uncertainty management. Questions concerning
-future releases, undocumented issues, or emerging community reports may
-not always have definitive answers. In such situations, exposing
-retrieved evidence and confidence information may be more useful than
-forcing a categorical response. Future architectures should therefore
-consider retrieval confidence as a first-class component of answer
-generation.
-
-Seven limitations of the current system warrant discussion.
-
-\textbf{Data coverage lag.}
-Recent community posts may not yet be indexed in the data lake. In the
-live evaluation, some partial answers were attributable to source
-availability rather than retrieval failures. Similar issues may occur
-whenever upstream data sources introduce delays between publication and
-indexing.
-
-\textbf{Vendor alias coverage.}
-The \texttt{VENDOR\_ALIASES} dictionary currently maps common aliases
-to canonical vendor names. Queries containing unknown vendor names or
-product aliases fall back to broader retrieval logic, reducing
-precision. Future work will replace static aliases with embedding-based
-lookup over the full vendor registry.
-
-\textbf{Community-source reliability.}
-Community platforms such as Reddit provide useful information about
-deployment experiences, regressions, and workarounds, but posts are
-typically anonymous and may contain inaccurate, incomplete, or
-misleading information. A single post may not represent the broader
-experience of a software ecosystem. The current system mitigates this
-limitation by separating verified and community sources and considering
-multiple retrieved posts when available. Future work will investigate
-cross-post validation, agreement-based confidence estimation, and
-community-source credibility assessment.
-
-\textbf{Local LLM capacity.}
-Llama~3.1~8B via Ollama performs well on structured software update
-questions but occasionally over-interprets ambiguous or conversational
-queries. Larger or domain-adapted models may improve synthesis quality,
-particularly for questions requiring extensive contextual reasoning.
-
-\textbf{Evaluation scope and generalization.}
-The largest evaluation reported here is 100 questions spanning five categories
-and 21 software ecosystems; the diagnostic measurements that localize the defect
-rest on 10 questions, and the superseded bespoke score on 50. Although diverse,
-all of these remain small samples compared with real-world workloads. Additionally, all evaluation
-questions are English-language. Generalization to larger datasets,
-additional languages, and different software ecosystems remains an
-open question.
-
-The 10-question measurements carry the paper's inversion claim, so we are
-specific about what they support. The inversion itself survives exact paired
-testing (Section~\ref{sec:two-metrics}): the baseline wins every non-tied
-question, and the two-sided $p$ of $0.016$ is the smallest value attainable
-with seven nonzero pairs, which means the design is at its resolution limit
-rather than comfortably inside it. What ten questions cannot deliver is a
-magnitude: the bootstrap interval on the nDCG@3 deficit spans $[-0.865,
--0.348]$, so the point estimate of $-0.620$ should not be read as an
-effect-size estimate, and the smaller within-panel contrasts of
-Table~\ref{tab:ranking-ablation} --- notably the 0.024 between ranking against
-the rewrite and against the original question --- are not resolvable at this
-$n$ at all. We report them as observations rather than findings. The claim that
-does not rest on an interval estimate is the document count: 22 of 23 relevant
-documents missing is a census of the retrieved sets, not a sample statistic,
-and its scaled counterpart (13 of 172) was computed on 100 questions. What the
-census counted is the subject of Section~\ref{sec:leak}.
+\textbf{Construct validity.}
+Retrieval quality was first measured using a deterministic score emphasizing
+release-note relevance, community evidence, advisory evidence, and result
+coverage, and then with pooled-judgment IR metrics; Sections~\ref{sec:two-metrics}
+and~\ref{sec:leak} report that each in turn measured something other than
+retrieval of answers. The leak-free figures of Table~\ref{tab:clean} exclude the
+question's own source post but not near-duplicates of it --- cross-posts,
+quotations, or aggregator copies of the same post under a different URL --- so
+some residual leakage is possible and the 0.30 level is an upper bound on
+retrieval of independent evidence. Answer quality is judged by \texttt{llama3.1},
+which also synthesises two of the three arms; the template arm's correctness
+advantage in the clean run is a documented false positive of this overlap
+(Section~\ref{sec:leak}), and other, smaller ones may remain.
 
 \textbf{LLM relevance judge.}
 All relevance judgments reported here were produced by \texttt{llama3.1}, which
@@ -3176,77 +2674,6 @@ screening --- checking whether the judge can be fooled by query-string
 injection --- that Alaofi et al.\ show is not predicted by $\kappa$ and must be
 tested separately~\cite{alaofi2024fooled}.
 
-\textbf{Statistical impact.}
-The 17.2\% improvement on the bespoke score is statistically significant
-($p=0.020$), and this is precisely why significance is insufficient on its own:
-the effect is real, reproducible, and measured on a quantity that cannot observe
-the defect described in Section~\ref{sec:localizing}. A $p$-value bounds
-sampling error, not construct validity. The scaled evaluation
-(Section~\ref{sec:scaled-eval}) reports bootstrap confidence intervals on
-metrics whose definition is independent of this system, and under those the two
-architectures are indistinguishable.
-
-\subsection{Operational Considerations}
-
-The prototype highlights several deployment considerations. Vendor-aware
-caching improves retrieval efficiency by resolving vendor names,
-aliases, and community routes before retrieval begins. Separating
-verified and community sources provides useful distinctions between
-authoritative update information and user-reported experiences.
-
-The Evaluator Agent serves both as a retrieval scoring component and as
-a control point for retry and confidence estimation. This is
-particularly important for version-specific questions, where returning
-an explicit ``no matching source'' response may be preferable to
-generating unsupported information. The ability to reject unsupported
-answers is an important property for software maintenance applications, where
-incorrect information may directly impact decisions. We argue for it rather than
-demonstrate it: as Section~\ref{sec:decomposition} notes, our ground-truth
-coverage is too small for the abstention-versus-error asymmetry to be measured,
-even though the CRAG-style scoring implemented in the harness is designed to
-reward exactly that.
-
-Presenting retrieved evidence alongside generated answers improves
-answer provenance and supports auditing when errors occur. This is
-particularly useful when answers combine information from multiple
-sources because users can independently verify the supporting evidence.
-Local execution through Ollama also enables reproducible experiments
-and privacy-preserving deployment.
-
-\subsection{Reproducibility Notes}
-
-The architecture was designed so that major components can be evaluated
-independently. Vendor detection, retrieval, evaluation, and answer
-generation can each be inspected without requiring end-to-end
-execution. This modular structure simplifies debugging and enables
-systematic error analysis because failures can be associated with
-specific pipeline stages.
-
-For replication, the most important artifacts are the evaluation
-questions, vendor registry snapshot, API responses, retrieval scoring
-implementation, and system configuration. Because the system relies on
-live software ecosystem APIs, future studies should preserve response
-timestamps or snapshots. Static benchmark snapshots would facilitate
-controlled comparison across architectures, while live evaluations
-would continue to measure performance under evolving ecosystem
-conditions.
-
-\subsection{Threats to Validity}\label{sec:threats}
-
-\textbf{Construct validity.}
-Retrieval quality was first measured using a deterministic score emphasizing
-release-note relevance, community evidence, advisory evidence, and result
-coverage, and then with pooled-judgment IR metrics; Sections~\ref{sec:two-metrics}
-and~\ref{sec:leak} report that each in turn measured something other than
-retrieval of answers. The leak-free figures of Table~\ref{tab:clean} exclude the
-question's own source post but not near-duplicates of it --- cross-posts,
-quotations, or aggregator copies of the same post under a different URL --- so
-some residual leakage is possible and the 0.30 level is an upper bound on
-retrieval of independent evidence. Answer quality is judged by \texttt{llama3.1},
-which also synthesises two of the three arms; the template arm's correctness
-advantage in the clean run is a documented false positive of this overlap
-(Section~\ref{sec:leak}), and other, smaller ones may remain.
-
 \textbf{Benchmark validity.}
 The questions are real, and that is the source of the leak: they were mined
 from the population the system retrieves from. A benchmark constructed to avoid
@@ -3265,26 +2692,13 @@ query rewriting quality, and retrieval configuration may still
 influence the measured comparison.
 
 \textbf{External validity.}
-The evaluation focuses on English-language software update questions
-and publicly available software ecosystem data sources. Results may
+The largest evaluation here is 500 English-language questions over 24
+ecosystems; the diagnostic measurements rest on 10, and the superseded bespoke
+score on 50. All are small against real workloads, and the evaluation focuses
+on publicly available software ecosystem data sources. Results may
 differ for other languages, software ecosystems, enterprise
 repositories, or domains where release documentation and community
 discussions are limited.
-
-\subsection{Robustness of Heuristic Design Choices}
-
-Several components rely on handcrafted heuristics including retrieval
-weights, vendor aliases, retry thresholds, and confidence thresholds.
-Similar mechanisms are commonly used in corrective and adaptive RAG
-systems~\cite{yan2024crag,jiang2023flare,asai2024selfrag}.
-
-The scoring structure itself remains largely domain independent. The
-same architecture could be adapted to other document collections by
-replacing domain-specific keyword sets, aliases, and retrieval sources.
-The separation between retrieval, evaluation, and orchestration would
-remain unchanged. Future work will investigate learned reward models,
-adaptive threshold selection, and data-driven calibration methods to
-reduce manual tuning while preserving interpretability.
 
 \subsection{Future Work}
 
