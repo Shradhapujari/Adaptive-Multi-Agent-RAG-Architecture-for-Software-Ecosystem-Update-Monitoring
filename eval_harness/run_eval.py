@@ -330,6 +330,7 @@ def run(cfg: EvalConfig) -> str:
               f"scored for all {len(gens)} systems, "
               f"{len(records) - len(done_ids)} to go")
     stream = open(os.path.join(run_dir, PER_QUERY), "a")
+    pool_stream = open(os.path.join(run_dir, "pools.jsonl"), "a") if cfg.dump_pools else None
     # The judgments actually used to score THIS run, per query. Kept separate
     # from `qrels_cache`: the cache accumulates across every run and dataset
     # that shares the results dir, so dumping it as the run's qrels made the
@@ -460,6 +461,12 @@ def run(cfg: EvalConfig) -> str:
             stream.write(json.dumps(row) + "\n")
         stream.flush()
         os.fsync(stream.fileno())
+        if pool_stream:
+            for name, out in sys_outputs.items():
+                pool_stream.write(json.dumps({"query_id": rec["id"], "system": name,
+                                              "query": query, "docs": out["docs"],
+                                              "pool": out.get("pool") or []}) + "\n")
+            pool_stream.flush()
         _save_qrels_cache(cfg.results_dir, qrels_cache)
         json.dump(qrels_used, open(os.path.join(run_dir, "qrels.json"), "w"), indent=1)
 
@@ -565,6 +572,9 @@ def _parse_args() -> EvalConfig:
                         "pool (pre-2026-09-17 behaviour; FINDINGS.md Finding 7)")
     p.add_argument("--judge-pool", action="store_true", default=cfg.judge_pool,
                    help="judge every pre-rerank candidate, enabling pool recall")
+    p.add_argument("--dump-pools", action="store_true", default=cfg.dump_pools,
+                   help="write pools.jsonl: every candidate with its text, so "
+                        "rerankers can be re-scored offline on the same pools")
     p.add_argument("--corpus", default=cfg.corpus,
                    help="record:<dir> | replay:<dir> — freeze the live sources "
                         "so arms of an ablation see identical documents")
@@ -581,6 +591,7 @@ def _parse_args() -> EvalConfig:
     cfg.corpus = a.corpus
     cfg.resume = a.resume
     cfg.exclude_own_post = a.exclude_own_post
+    cfg.dump_pools = a.dump_pools
     return cfg
 
 
