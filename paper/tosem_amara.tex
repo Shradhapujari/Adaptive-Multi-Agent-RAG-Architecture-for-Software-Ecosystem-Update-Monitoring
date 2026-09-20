@@ -84,8 +84,9 @@ Generation (RAG) is a natural fit, and a common design pattern decomposes the
 pipeline into specialized agents, with a query-rewriting agent normalizing user
 terminology to the vocabulary of technical documents.
 
-This paper reports that this pattern contains a failure mode that is invisible
-to the metric most likely to be used to evaluate it. We built an adaptive
+This paper reports two evaluation defects, each of which made that pattern
+look decisively better or decisively worse than a single-agent baseline, and
+what the comparison looks like once both are removed. We built an adaptive
 multi-agent RAG architecture for software update questions --- specialized
 agents for query rewriting, retrieval, evaluation, and orchestration, with a
 retrieval-level feedback loop and a persistent term-weight memory --- and
@@ -93,39 +94,41 @@ measured a 17.2\% retrieval improvement over a single-agent baseline on a
 keyword-overlap quality score of our own design. Re-scored with standard
 information-retrieval metrics over pooled relevance judgments, the same system
 \emph{lost} to the same baseline (nDCG@3 0.145 versus 0.765; paired deficit
-0.620, exact Wilcoxon $p=0.016$, $n=10$). The
-disagreement was not a metric artifact. Because the rewritten query
-\emph{replaced} the user's wording at every retrieval endpoint, 22 of the 23
-relevant documents the baseline found were never fetched by the multi-agent
-pipeline at all. Three successively stronger rerankers raised mean reciprocal
-rank from 0.250 to 0.625 while leaving nDCG@3 near 0.19, because reranking
-cannot promote a document that was never retrieved. Issuing both the original
-and the rewritten phrasing and unioning the candidate pools raises nDCG@3 from
-0.188 to 0.765 in one step, and on a 100-question benchmark spanning 21 software
-ecosystems it reduces the share of the baseline's relevant documents missing
-from the candidate pool from 96\% to 7.6\%.
+0.620, exact Wilcoxon $p=0.016$, $n=10$). We traced the deficit to a wiring
+fault --- the rewritten query \emph{replaced} the user's wording at every
+retrieval endpoint, so documents matching the user's own phrasing were never
+fetched --- and repaired it by issuing both phrasings and unioning the pools,
+which brought the pipeline to parity. Then a 500-question run scored 0.34 lower
+than a 300-question run on the same questions with nothing changed, and the
+second defect surfaced: the benchmark's questions are the titles of real
+community posts, the live corpus returns the post a title came from, and the
+judge marks it relevant. The question's own source post sat in 72--98\% of the
+top-$k$ lists behind every retrieval number we had reported, and it was
+precisely the document the rewrite had been losing. Struck from the candidate
+pool at fetch time and re-measured on 500 questions across 24 ecosystems, every
+arm --- multi-agent, single-agent, and rewrite-only --- retrieves at nDCG@3
+0.30--0.31, with no paired difference exceeding 0.015.
 
 We draw four conclusions for practitioners building agentic software
-engineering tools. First, that query rewriting must augment retrieval rather than
-substitute for it is already known --- it is reported in the query-rewriting
-literature and the fuse-the-result-lists remedy dates to 2008 --- yet a deployed
-pipeline can violate it while every component behaves correctly and the metric
-its designers watch moves the right way. What we add is how to detect that: count
-the relevant documents that never entered the candidate pool, and read a rising
-MRR under stronger rerankers with a flat nDCG as the signature of a fetch fault
-rather than a ranking one. Second, a bespoke retrieval-quality metric can invert the
-ordering that standard IR metrics produce, so architectural claims resting on
-one are not safe. Third, an apparent 0.23 faithfulness deficit for the
+engineering tools. First, a benchmark mined from the same live sources a system retrieves from
+leaks its own answer key, and the leak is invisible to paired comparison because
+every arm draws on it equally; it shows only in absolute levels, and we found it
+only because a level moved between two runs that should have agreed. Second, a
+bespoke retrieval-quality metric can invert the ordering that standard IR
+metrics produce, and standard IR metrics computed over a leaking corpus can
+manufacture a five-fold deficit out of a fetch fault that, leak-free, costs
+nothing measurable --- so architectural claims resting on either are not safe
+without the candidate pool exposed and counted. Third, an apparent 0.23 faithfulness deficit for the
 multi-agent system proved to be an artifact of answer \emph{format} --- a
 structured template judged against fluent prose --- and vanished when the same
 retrieval was synthesized through the baseline's own prompt (0.919 versus
 0.929). Fourth, and least comfortable: with both defects repaired and the
 synthesis model held constant, the multi-agent pipeline \emph{matches} rather
-than beats the single-agent baseline on retrieval (nDCG@3 0.922 versus 0.924,
-$n=100$, frozen corpus) at roughly twice the latency, so decomposition per se is not what
-produced the original result. We release the architecture, the evaluation
-harness, and a 300-question benchmark mined from live release, advisory, and
-community sources; these are available to reviewers on request and will be
+than beats the single-agent baseline on retrieval (nDCG@3 0.304 versus 0.301,
+$n=500$, leak-free) at roughly twice the latency, so decomposition per se is not
+what produced the original result. We release the architecture, the evaluation
+harness with the leak excluded by construction, and a 500-question benchmark
+mined from live release, advisory, and community sources; these are available to reviewers on request and will be
 published on acceptance.
 \end{abstract}
 
@@ -199,9 +202,9 @@ coexisted with a factor-of-five deficit on another, over the same questions, the
 same corpus, and the same retrieved documents.
 
 Metric disagreements of this size usually indicate that one metric is measuring
-something other than what it claims. That was true here, but not in the
-direction we assumed. Investigating the gap produced the diagnosis this paper is
-built around:
+something other than what it claims. That was true here twice over, and neither
+time in the direction we assumed. Investigating the gap produced the diagnosis
+the first version of this paper was built around:
 
 \begin{quote}
 \emph{The query-rewriting agent's output replaced the user's wording at every
@@ -216,6 +219,35 @@ how the vocabulary-mismatch framing in the literature invites one to read it.
 It was constructing a different, smaller candidate set from which the answer was
 largely absent.
 
+That diagnosis was correct as far as it went, and the remedy it implied ---
+issue both phrasings, union the pools --- brought the multi-agent pipeline to
+parity with the baseline on every sample we drew, at $n=10$, $n=100$, and
+$n=300$. It was also, we later learned, measuring the wrong thing. The 23
+``relevant documents'' were, overwhelmingly, the questions' own source posts.
+
+The benchmark's questions are the titles of real community posts, chosen for
+that reason: they are the questions people actually asked. The system retrieves
+from the same live community feed those posts were drawn from. So the feed
+returns the post a title came from, the relevance judge --- correctly, by its
+instructions --- marks a document that \emph{is} the question as relevant to
+it, and every retrieval metric rewards the arm that found it. The single-agent
+baseline, issuing the title verbatim, found it on 7 of the 10 diagnostic
+questions; the multi-agent pipeline, issuing a paraphrase, found it on none.
+That is the five-fold deficit. The union fetch restored the verbatim phrasing,
+the own post came back, and nDCG@3 rose from 0.188 to 0.765 --- with the own
+post in all ten top-3 lists. Struck from the candidate pool, the same runs read
+0.309 before the ``repair'' and 0.216 after it.
+
+We did not find this by inspection. We found it because a 500-question run
+scored 0.34 lower than a 300-question run on the same 300 questions, with the
+code, judge, and reranker unchanged: the live feed had aged past most of the
+source posts in the two weeks between them, and the leak, which had inflated
+every arm equally and so never appeared in a paired comparison, appeared as a
+drop in the absolute level. Re-measured with the own post excluded at fetch time
+(Section~\ref{sec:leak}), every arm --- the full pipeline, the baseline, and a
+rewrite-only arm with no union fetch at all --- retrieves at nDCG@3 0.30--0.31
+on 500 questions, and no paired difference exceeds 0.015.
+
 That substitution harms retrieval is not a new result, and we want to be exact
 about what is ours. It is documented in the query-rewriting literature this
 paper itself cites: query2doc reports that retrieving with the generated text
@@ -224,54 +256,62 @@ the original query~\cite{wang2023query2doc}, DMQR-RAG retrieves with the origina
 alongside its rewrites and merges the results~\cite{gao2024dmqr}, and both the
 fuse-the-result-lists remedy and the argument that re-ranking cannot recover what
 a query never retrieved were published in 2008~\cite{zighelnic2008drift}. The
-contribution here is not that finding, nor the remedy. It is that a system can
-exhibit this defect in deployment while every component behaves correctly and the
-metric its designers watch moves the right way --- and a procedure for detecting
-that, which we arrived at only after building two rerankers on the wrong
-diagnosis. We confirmed the distinction by fixing ranking first: three
-successively stronger rerankers scored against the user's original question
-raised MRR monotonically from 0.250 to 0.500 to 0.625, while nDCG@3 stayed near
-0.19. A ranking fix that cannot close a ranking gap is evidence that the
-documents are not there to be ranked. Searching both the original and the
-rewritten phrasing and unioning the candidate pools moves nDCG@3 from 0.188 to
-0.765 in a single change.
+contribution here is not that finding, nor the remedy, and it is no longer the
+fetch-loss diagnosis either, since the documents the fetch lost turned out to be
+the questions themselves. It is the pair of evaluation defects and the order in
+which they hid each other: a bespoke metric that rewarded the rewriter's
+vocabulary made the architecture look better than the baseline; a benchmark
+that leaked its own questions into the corpus made the architecture look five
+times worse; and the second defect was invisible to exactly the paired,
+pooled-judgment methodology we adopted to escape the first, because it inflated
+every arm by the same amount. We report the procedure that found each --- expose
+the candidate pool and count documents rather than read scores; re-run identical
+questions at an interval and treat a moving absolute level as a finding --- and
+the leak-free measurement that results.
 
 \subsection{Contributions}
 
 \begin{itemize}
-  \item \textbf{A method for diagnosing where a retrieval pipeline loses
-  documents.} That substituting a rewritten query for the user's own hurts
-  retrieval is established: query2doc reports that retrieving with the generated
-  text alone scores below not rewriting at all, and recovers the loss by
-  concatenating the original~\cite{wang2023query2doc}; DMQR-RAG retrieves with
-  the original alongside its rewrites and merges the
-  results~\cite{gao2024dmqr}; and the fuse-the-two-result-lists remedy, together
-  with the argument that a re-ranker confined to one query's results cannot
-  recover what that query never retrieved, dates to
-  2008~\cite{zighelnic2008drift}. We claim neither the finding nor the fix.
+  \item \textbf{A benchmark--corpus leak specific to live-source RAG, and its
+  measurement.} A benchmark whose questions are mined from the sources the
+  system retrieves from returns the question's own source document as a
+  relevant hit. In every retrieval table we had reported, at $n=10$, 100, and
+  300, the question's own post occupied 72--98\% of top-$k$ lists and was the
+  only judged-relevant document for a third to a half of the questions. Because
+  every arm retrieved it at the same rate, paired comparisons never showed it;
+  a drop in absolute level between two runs on identical questions did. We give
+  the mechanism, a post-hoc correction that strikes the document from ranking
+  and judgments, a fetch-time exclusion that removes it by construction, and a
+  leak-free measurement on 500 questions (Section~\ref{sec:leak}).
 
-  What we contribute is how the defect was \emph{located}. In a deployed
-  multi-agent pipeline the substitution is a wiring property, invisible in every
-  component's own output and in the aggregate score the designers were watching.
-  We localize it by counting the relevant documents that never entered the
-  candidate pool rather than by reading scores, and we identify a signature that
-  distinguishes this fault from a ranking fault: MRR rising monotonically under
-  successively stronger rerankers while nDCG@$k$ stays flat
-  (Section~\ref{sec:localizing}). That signature is what told us the prior work
-  above applied to our system, after two of the three rerankers had already been
-  built on the wrong diagnosis.
+  \item \textbf{A reading of query-rewriting drift that the leak reverses.}
+  Substituting a rewritten query for the user's own is known to hurt
+  retrieval~\cite{wang2023query2doc,gao2024dmqr,zighelnic2008drift}, and we
+  observed the textbook signature: 22 of 23 relevant documents never fetched,
+  MRR rising under three successively stronger rerankers while nDCG@$k$ stayed
+  flat. What the rewrite lost, on this benchmark, was the document that matched
+  the user's wording \emph{because it was the user's wording} --- the source
+  post. Leak-free, a rewrite-only arm with no union fetch retrieves within 0.006
+  nDCG@3 of the verbatim baseline (Section~\ref{sec:leak}). We report the
+  diagnostic because it worked --- it located the lost documents --- and the
+  reversal because the documents it located were not answers.
 
   \item \textbf{Evidence that a domain-specific retrieval metric can invert the
   conclusion.} The same architecture, questions, and documents yield opposite
   orderings under our keyword-overlap score and under pooled-judgment IR
   metrics. We report both, with the pooling protocol and judge configuration, as
-  a caution for agentic-system evaluations that define their own quality scores.
+  a caution for agentic-system evaluations that define their own quality scores
+  --- and we report that the pooled-judgment metrics, computed over a leaking
+  corpus, were themselves measuring a lookup rate.
 
   \item \textbf{An honest accounting of what multi-agent decomposition bought.}
-  With both defects repaired, the multi-agent pipeline reaches parity with the
-  single-agent baseline at approximately twice the latency. We report this
-  rather than the improvement the original metric showed, and discuss what would
-  constitute evidence for decomposition in this domain.
+  Leak-free, on 500 questions, the multi-agent pipeline retrieves at nDCG@3
+  0.304 against the baseline's 0.301, with 418 of 500 questions tied and no
+  metric differing by more than 0.015, at approximately twice the latency. The
+  parity held in every leaking sample as well; it is the one result the leak did
+  not touch. We report it rather than the improvement the original metric
+  showed, and discuss what would constitute evidence for decomposition in this
+  domain.
 
   \item \textbf{An architecture and adaptation mechanism for software ecosystem
   monitoring.} Vendor-aware retrieval across release notes, security advisories,
@@ -279,12 +319,13 @@ rewritten phrasing and unioning the candidate pools moves nDCG@3 from 0.188 to
   retrieval retries, and a persistent term-weight memory that adapts retrieval
   behavior without human feedback or model retraining (Section~\ref{sec:method}).
 
-  \item \textbf{A reusable benchmark and harness.} 300 questions spanning 24
+  \item \textbf{A reusable benchmark and harness.} 500 questions spanning 24
   software ecosystems and five question categories, mined from live release,
   advisory, and community sources, with the upstream data defects we found
-  documented and handled; plus an evaluation harness computing IR metrics,
-  CRAG-style correctness labels, and paired statistics, released with the
-  ablation arms that produced every number in this paper.
+  documented and handled and the own-post leak excluded at fetch time; plus an
+  evaluation harness computing IR metrics, CRAG-style correctness labels, and
+  paired statistics, released with the ablation arms that produced every number
+  in this paper and the script that recomputes any earlier run leak-free.
 \end{itemize}
 
 \subsection{Paper Organization}
@@ -293,7 +334,8 @@ Section~\ref{sec:related} reviews related work on RAG, multi-agent
 decomposition, corrective retrieval, and query rewriting.
 Section~\ref{sec:method} describes the architecture and the data sources.
 Section~\ref{sec:results} presents the evaluation: the metric disagreement, the
-localization of its cause, the ranking ablation, and the effect of the remedy.
+localization of its cause, the ranking ablation, the effect of the remedy, and
+then the leak that the remedy had been repairing and the leak-free measurement.
 Section~\ref{sec:discussion} discusses what generalizes, the limitations we are
 able to bound, and the threats we cannot.
 Section~\ref{sec:conclusion} concludes.
@@ -386,6 +428,18 @@ rerankers do not recover them. Prior work establishes that expansion can drift.
 It does not establish where in an agentic pipeline the loss lands, nor that the
 loss survives arbitrarily good ranking.
 
+A fourth difference emerged later and bounds the first three. The documents the
+rewrite lost were, on this benchmark, almost entirely the questions' own source
+posts --- documents that matched the user's phrasing because they \emph{were}
+the user's phrasing (Section~\ref{sec:leak}). Drift, in the classical sense of
+the expanded query moving away from the documents that answer it, is
+established in the literature; what we measured was the expanded query moving
+away from the document that \emph{is} the question. With that document
+excluded, rewriting alone costs 0.006 nDCG@3 against issuing the question
+verbatim. We keep the fetch-time argument because the mechanism is real ---
+substitution does remove verbatim matches from a provider-determined pool, and
+no ranker recovers them --- and we withdraw the magnitude.
+
 \subsection{Rewriting for Recall, Reranking for Precision}
 
 Retrieval systems have long been staged: an inexpensive first pass over the
@@ -420,7 +474,10 @@ union that makes the two compatible, and that the omission was invisible in the
 aggregate score the system was tuned against. The ranking ablation measures the
 invariant directly: MRR rises from 0.250 to 0.625 across three rerankers, because
 ranking within the fetched pool does improve, while nDCG@3 stays near 0.19,
-because the pool does not contain the documents the metric is asking for.
+because the pool does not contain the documents the metric is asking for. That
+the documents it was asking for turned out to be the questions' own source
+posts (Section~\ref{sec:leak}) changes what the invariant was worth here, not
+whether it held.
 
 \subsection{Language-Model Agents for Software Engineering}
 
@@ -1251,9 +1308,13 @@ scrutiny.
 
 \subsubsection{Construction}
 
-The benchmark contains 300 questions arranged as a $24 \times 5$ grid of
-software ecosystem by question category, filled to 12 or 13 questions per
-ecosystem and exactly 60 per category. The 24 ecosystems span mobile and desktop
+The benchmark contains 500 questions arranged as a $24 \times 5$ grid of
+software ecosystem by question category, filled to 20 or 21 questions per
+ecosystem and exactly 100 per category. It was built in two stages from one
+cache and one seed --- 300 questions first, then 500 --- and the selection is
+greedy over deterministically ordered pools, so the 300 are a strict subset of
+the 500; where a measurement below is reported at $n=300$, it is on that
+subset. The 24 ecosystems span mobile and desktop
 platforms (Apple iOS, Apple macOS, Android, Windows), four Linux distributions
 (Ubuntu, Debian, Fedora, Arch) and the kernel itself, browsers (Firefox,
 Chrome), container infrastructure (Docker, Kubernetes), language package
@@ -1311,12 +1372,19 @@ one.
 
 \subsubsection{Ground Truth and Its Limits}
 
-Of the 300 questions, 51 carry a reference answer, and only those generated from
-release or advisory records do --- a community post title states a question but
-does not come with an authoritative answer. Ground-truth coverage is therefore
-concentrated in the releases and security categories, and any correctness or
-hallucination measurement over this benchmark is computed on that subset rather
-than on all 300 questions.
+Of the 500 questions, 72 carry a reference answer (51 of the first 300), and
+only those generated from release or advisory records do --- a community post
+title states a question but does not come with an authoritative answer.
+Ground-truth coverage is therefore concentrated in the releases and security
+categories, and any correctness or hallucination measurement over this
+benchmark is computed on that subset rather than on all 500 questions.
+
+A community post title comes with something else: the URL of the post it was
+taken from, which the live community feed the system retrieves from will return
+as a document. Section~\ref{sec:leak} reports what that did to every retrieval
+measurement and how the harness now excludes it; the benchmark file carries the
+URL on every record so that the exclusion, and the post-hoc correction of runs
+made without it, are reproducible.
 
 This has a consequence for sampling that we did not anticipate and that a
 reader reusing the benchmark should know. A subset selected to balance ecosystem
@@ -1348,10 +1416,11 @@ superseded bespoke score was measured (Section~\ref{sec:two-metrics}). The
 \emph{ground-truth} set is 10 questions carrying reference answers, used for the
 diagnostic measurements in Sections~\ref{sec:two-metrics}
 and~\ref{sec:localizing} because relevance judgments and document-level counting
-are tractable at that size. The \emph{benchmark} set is the 300 questions of
+are tractable at that size. The \emph{benchmark} set is the 500 questions of
 Section~\ref{sec:benchmark}, from which a 100-question subset balanced across
 category and ecosystem carries the scaled evaluation
-(Section~\ref{sec:scaled-eval}). Sample sizes are stated with every reported
+(Section~\ref{sec:scaled-eval}), the first 300 carry the large live run, and
+all 500 carry the leak-free measurement (Section~\ref{sec:leak}). Sample sizes are stated with every reported
 number, since they differ across these three. The local fallback dataset contains 324 Reddit
 posts collected through the software ecosystem data lake and filtered
 using minimum quality criteria of at least 10 comments, 3 author
@@ -1553,6 +1622,16 @@ inversion, which is the claim this section makes, and they do not pin its
 magnitude. The magnitude claim we do make quantitatively is the document count
 in Section~\ref{sec:localizing}, which does not depend on an interval estimate.
 
+A third caveat, learned after the table was made and larger than the other
+two, is that the IR columns measure something the bespoke column does not: how
+often a system retrieved the question's own source post. On these ten questions
+the baseline placed that post in its top~3 for seven, the multi-agent arm for
+none (Section~\ref{sec:leak}). With the own post struck from ranking and
+judgments the same run reads nDCG@3 0.397 for the baseline against 0.263 for the
+multi-agent arm --- the ordering survives, the factor of five does not. We
+retain the table as the measurement that started the investigation, and read
+its magnitude as mostly leak.
+
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{Figures/inversion-per-query.pdf}
@@ -1684,6 +1763,17 @@ relevant documents the baseline missed; its candidate set was not worse so much
 as \emph{different and smaller}, which is why unioning rather than replacing
 recovers the loss.
 
+What it recovers is the question. Every row of Table~\ref{tab:ranking-ablation}
+was re-scored with the question's own source post struck from the ranked list
+and from the judgments (Section~\ref{sec:leak}). In panel~(a) the embedding row
+reads 0.309 leak-free rather than 0.188; in panel~(b) it reads 0.216 rather than
+0.765, with the own post present in all ten of its top-3 lists. The union fetch
+did not move the pipeline from 0.188 to 0.765 on documents that answer the
+question; it moved it from 0.309 to 0.216 on those, and restored the one
+document that matched the user's wording exactly because it was the user's
+wording. The 22 of 23 count is a census and still stands as one; what it counted
+was, for the most part, source posts.
+
 \subsubsection*{The divergence signature disappears once the defect is repaired}
 
 Table~\ref{tab:ranking-ablation} carries two weaknesses that the diagnosis rests
@@ -1702,7 +1792,10 @@ frozen corpus snapshot replayed identically for all three arms
 Table~\ref{tab:ranking-ablation} these rows are strictly paired. With the union
 fetch in place, stronger ranking now moves nDCG@3 and MRR \emph{together} ---
 the divergence that localized the defect is absent, which is what the diagnosis
-predicts.}
+predicts. Levels in this table are inflated by the own-post leak of
+Section~\ref{sec:leak} (72--73\% of top-$k$ lists on this frozen corpus); the
+within-table contrasts, which compare arms that leak at the same rate, are what
+it is cited for.}
 \label{tab:scaled-ablation}
 \begin{tabular}{llrrrr}
 \toprule
@@ -1772,7 +1865,12 @@ corpus their ranked top-$k$ sets and their candidate pools now coincide on all
 earlier live-endpoint measurement of this table agreed on top-$k$ but on pools
 only on 88 of the 93 questions where a pool existed --- that residual was
 endpoint variability between two arms querying live, not a difference between
-the systems, which is what freezing the corpus establishes.}
+the systems, which is what freezing the corpus establishes. \emph{These levels
+are not retrieval quality:} the question's own source post is in the top-$k$
+list of every arm on 98 of the 100 questions and is the only judged-relevant
+document for 58. Leak-free (Section~\ref{sec:leak}) the three rows read nDCG@3
+0.320 / 0.320 / 0.331. The parity the table shows is real; its height is the
+leak.}
 \label{tab:scaled-retrieval}
 \begin{tabular}{lrrrr}
 \toprule
@@ -1791,10 +1889,11 @@ difference is well within overlapping confidence intervals, and the baseline is
 nominally ahead on all four metrics. The fetch-time diagnostic of Section~\ref{sec:localizing} --- the share of the
 baseline's relevant documents absent from the multi-agent \emph{candidate pool}
 --- stands at 22 of 23 on the ten ground-truth questions and at \textbf{13 of
-172 (7.6\%)} here, recomputed on the frozen corpus. The two figures come from different question sets rather
-than from recomputing one on the other, but they are the same measurement, and
-the union remedy holds at this scale; the residual is the ordinary variation of
-two systems retrieving from live sources.
+172 (7.6\%)} here, recomputed on the frozen corpus. The two figures come from
+different question sets rather than from recomputing one on the other, but they
+are the same measurement. Both, we now know, count mostly source posts
+(Section~\ref{sec:leak}): the union fetch's effect on this diagnostic is that
+the multi-agent pool once again contains the question.
 
 These figures supersede an earlier measurement of the same comparison, and the
 difference is worth stating because it is large. The release-fetching path
@@ -1844,7 +1943,9 @@ snapshot hits, no miss on a document host). Values are mean $\pm$ 95\% CI;
 correctness is computed only where a reference answer exists, with $n$ given
 per arm; latency is the median from the live recording pass. The nominal
 ordering on retrieval is the reverse of Table~\ref{tab:scaled-retrieval}, and
-remains so after the repair --- which is the point of reporting this sample.}
+remains so after the repair --- which is the point of reporting this sample.
+Retrieval levels carry the own-post leak (72--73\% of top-$k$ lists; leak-free
+nDCG@3 0.330 / 0.330 / 0.333).}
 \label{tab:gt-run}
 \begin{tabular}{lrrrr}
 \toprule
@@ -1929,7 +2030,9 @@ Tables~\ref{tab:scaled-retrieval} to~\ref{tab:gt-run} are now reported.
 frozen corpus. A4 reproduces A3 to three decimals on every metric because its
 retry never triggered. A0 retrieves nothing, so its faithfulness has no
 retrieved documents to be unfaithful to and is not comparable to the rest of
-the column.}
+the column. Retrieval levels carry the own-post leak (Section~\ref{sec:leak}):
+the source post is in 72--73\% of top-$k$ lists for every arm except A2, where
+it is in 4\%. Leak-free nDCG@3: A1 0.269, A1g 0.321, A2 0.263, A3--A5 0.267.}
 \label{tab:ladder-results}
 \begin{tabular}{llrrrrr}
 \toprule
@@ -1988,13 +2091,15 @@ the absence of one, and it agrees with the live-endpoint result of
 Table~\ref{tab:scaled-retrieval} under a condition that removes corpus drift as
 an explanation.
 
-\textbf{Grounding the question does.} A1~$\to$~A1g is significant at $k=3$ and
-$k=5$, and the gain is concentrated in the \texttt{releases} category
-(nDCG@1 0.567 to 0.700), which is where the record-type confusion of
-Section~\ref{sec:datasources} does its damage. The comparison A1g versus A3
-completes the argument from the other side: a single agent that understands the
-question is statistically indistinguishable from the full pipeline
-($p=0.22$).
+\textbf{Grounding the question may.} A1~$\to$~A1g is significant at $k=3$ and
+$k=5$ as tabulated, and the gain is concentrated in the \texttt{releases}
+category (nDCG@1 0.567 to 0.700), which is where the record-type confusion of
+Section~\ref{sec:datasources} does its damage. Leak-free the gain is $+0.052$
+nDCG@3 (13~better, 7~worse) and does not survive correction across the 21
+comparisons the leak-free re-scoring runs; it wants a pre-registered test of its
+own before it is quoted. The comparison A1g versus A3 is unaffected in
+direction: a single agent that understands the question is statistically
+indistinguishable from the full pipeline ($p=0.22$).
 
 \textbf{The Orchestrator's retry never triggered.} A4 returned identical
 documents \emph{and} identical answers to A3 on all 100 questions. The retry
@@ -2004,13 +2109,19 @@ never triggered rather than as measured with no effect --- the distinction
 matters, because a benchmark that exercises the retry would have to contain
 questions this retriever handles badly, and this one does not.
 
-\textbf{Rewriting alone is destructive, and the union is its repair.} A2 scores
-nDCG@5 0.231 against A1's 0.742: rewriting without the union fetch collapses
-retrieval. A3 adds the union and returns to 0.761, level with the baseline.
-This reframes the union fetch of Section~\ref{sec:union-fetch}. It is not an
-improvement over single-agent retrieval; it is the mechanism that repairs the
-damage rewriting causes, and the pair reads as progress only when A2 is omitted
-from the ladder.
+\textbf{Rewriting alone loses the source post, and the union is what
+restores it.} A2 scores nDCG@5 0.231 against A1's 0.742, and A3 adds the union
+and returns to 0.761, level with the baseline. When the first version of this
+paper reported that row, it read it as rewriting collapsing retrieval and the
+union repairing the collapse. It is not that. The question's own source post is
+in A1's top-$k$ on 72 of 100 questions and in A2's on 4: a rewritten query no
+longer matches the post's title verbatim, so the feed no longer returns it.
+With the own post struck from ranking and judgments (Section~\ref{sec:leak}),
+A2 reads nDCG@3 0.263 against A1's 0.269 --- a paired difference of $-0.006$,
+8~questions better and 9~worse --- and Recall@5 is $+0.032$ in A2's favour. The
+ladder's most dramatic contrast, 0.21 against 0.73, is the leak; leak-free,
+rewriting alone is level with issuing the question verbatim, and the union fetch
+adds nothing measurable to either.
 
 Finally, the fourth cell of the rendering~$\times$~retrieval design is now
 populated, and rendering is estimable as a main effect rather than inferred
@@ -2022,6 +2133,173 @@ which confirms it as a property of the rendering and not of the architecture.
 Any comparison that places a template arm against a prose arm measures this
 before it measures retrieval.
 
+\subsection{The Own-Post Leak}\label{sec:leak}
+
+Everything above this point was measured on a corpus that contained the
+questions. This section reports how we found that out, how much of each
+preceding table it accounts for, and what the comparison looks like with it
+removed.
+
+\subsubsection{How it surfaced}
+
+To extend the 300-question run of Section~\ref{sec:scaled-eval} we built a
+500-question benchmark by the same procedure, from the same cache and seed, so
+that the 300 questions are a strict subset of the 500, and ran the same three
+arms with the same judge, reranker, and configuration. On the 300 shared
+questions the baseline's nDCG@3 fell from 0.818 to 0.494, and the multi-agent
+arm's from 0.827 to 0.483. Nothing in the pipeline had changed. A uniform drop of
+0.33 on every arm, on identical questions, is not a systems effect, and looking
+for its cause exposed why the numbers had been high in the first place.
+
+\subsubsection{Mechanism}
+
+Of the benchmark's questions, 445 of 500 are the titles of real community
+posts, and each carries the URL of the post it was taken from. The system
+retrieves, among other sources, from the live feed those posts were mined from.
+The feed returns the post the title came from; the harness derives the
+document's identifier from its URL, so it is the same document the benchmark
+record points to; and the relevance judge, asked whether a document is relevant
+to a question, correctly marks the document that \emph{is} the question as
+relevant. In the 300-question run the question's own post was in the candidate
+pool for 247 of the 262 community-mined questions, was judged relevant for 232,
+and was the \emph{only} judged-relevant document for 140. By the time of the
+500-question run, two weeks later, the feed had aged past most of those posts:
+171 of 445 in the pool, the only relevant document for 82. The score fell with
+the leak.
+
+The leak has a property that made it hard to see. Every arm that issues the
+user's phrasing retrieves the own post at the same rate --- 72--73\% of top-$k$
+lists on the frozen 100-question corpus, 82--83\% on the live 300, 98\% on the
+frozen scaled-evaluation replay --- so the paired differences between such arms,
+which is what every statistical test in this paper computes, never contained
+it. It appears only in the absolute level, and only if the level is compared
+across runs, which the frozen-corpus protocol we adopted for comparability
+specifically discourages. The one arm that does \emph{not} issue the user's
+phrasing is the rewrite-only arm, and it retrieves the own post 4\% of the time;
+that is the whole of the 0.21-against-0.73 contrast in
+Table~\ref{tab:ladder-results}.
+
+\subsubsection{Post-hoc correction}
+
+A script strikes the question's own post from each arm's ranked list and from
+the judgments before recomputing the metrics. Table~\ref{tab:leak} applies it
+to every retrieval table above.
+
+\begin{table}[t]
+\caption{Each retrieval measurement in this paper, as reported and with the
+question's own source post struck from ranking and judgments. ``Own post in
+top-$k$'' is the share of the arm's ranked lists containing it. Leak-free, every
+arm at every sample size lies between 0.26 and 0.34, and the arms that leak at
+the same rate keep their ordering; the rewrite-only arm, which leaks least,
+rises to meet them. Recomputed by \texttt{scripts/leak\_report.py} from each
+run's own per-query rows and judgments.}
+\label{tab:leak}
+\begin{tabular}{llrrr}
+\toprule
+Sample & Arm & nDCG@3 & leak-free & own post in top-$k$ \\
+\midrule
+$n=10$, Table~\ref{tab:inversion} & single-agent & 0.736 & 0.397 & 7/10 \\
+                                  & multi-agent  & 0.145 & 0.263 & 0/10 \\
+$n=10$, Table~\ref{tab:ranking-ablation}(a) embed & multi-agent & 0.188 & 0.309 & 0/10 \\
+$n=10$, Table~\ref{tab:ranking-ablation}(b) embed & multi-agent & 0.765 & 0.216 & 10/10 \\
+$n=100$ frozen, Table~\ref{tab:scaled-retrieval} & single-agent & 0.924 & 0.331 & 98\% \\
+                                                 & multi-agent  & 0.922 & 0.320 & 98\% \\
+$n=100$ frozen ladder, Table~\ref{tab:ladder-results} & A1 single-agent & 0.731 & 0.269 & 72\% \\
+                                                      & A1g grounded    & 0.780 & 0.321 & 73\% \\
+                                                      & A2 rewrite-only & 0.210 & 0.263 & 4\% \\
+                                                      & A3 multi-agent  & 0.752 & 0.267 & 73\% \\
+$n=300$ live & single-agent & 0.818 & 0.324 & 82\% \\
+             & multi-agent  & 0.827 & 0.319 & 83\% \\
+$n=500$ live & single-agent & 0.494 & 0.309 & 34\% \\
+             & multi-agent  & 0.483 & 0.294 & 34\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two things in the table are the point. First, the leak-free column is nearly
+flat: a system whose reported retrieval quality ranged from 0.15 to 0.92
+depending on the table has, on documents that are not the question, retrieved
+at roughly 0.3 throughout. Second, the corrections preserve the parity results
+and reverse the drift result. The multi-agent and single-agent arms remain
+within 0.015 of each other in every sample; the rewrite-only arm, which was 0.52
+behind the baseline as reported, is 0.006 behind it leak-free, with 8 questions
+better and 9 worse.
+
+\subsubsection{Fetch-time exclusion and the leak-free measurement}
+
+Post-hoc correction changes the score but not what the systems saw: an arm that
+retrieved the own post spent a top-$k$ slot on it, and the judge's other labels
+were pooled from lists that contained it. We therefore added the exclusion to
+the retriever --- the question's own URL is struck from every arm's candidate
+pool before ranking, and the run records that it was --- and re-ran the 500
+questions with nothing else changed. The own post appeared in none of the 445
+pools. Table~\ref{tab:clean} reports the result, and it is the retrieval
+measurement this paper stands on.
+
+\begin{table}[t]
+\caption{The 500-question benchmark with the question's own source post
+excluded from every arm's candidate pool at fetch time
+(\texttt{exclude\_own\_post}, 0 of 445 pools affected). Synthesis held at
+Llama~3.1 for every generation call, reranker \texttt{embed:nomic-embed-text},
+judge \texttt{llama3.1}, $\text{top-}k=4$. Mean over 500 questions; latency is
+the per-question median. The lower rows give the paired difference against
+\texttt{single\_agent}, the questions won/tied/lost, and the Holm-corrected
+$p$ across the family. Correctness ($n=72$, the ground-truth subset) is
+omitted from the paired rows for the reason given in the text.}
+\label{tab:clean}
+\small\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrrr}
+\toprule
+System & nDCG@3 & Recall@5 & MRR & Faithfulness & Ans.\ relevance & Latency (s) \\
+\midrule
+marag (template)  & 0.304 & 0.351 & 0.344 & 0.844 & 0.923 & 53.9 \\
+marag\_llm (prose) & 0.306 & 0.353 & 0.345 & 0.915 & 0.968 & 53.6 \\
+single\_agent     & 0.301 & 0.366 & 0.344 & 0.910 & 0.966 & 26.4 \\
+\midrule
+$\Delta$ marag        & $+0.003$ & $-0.015$ & $0.000$ & $\mathbf{-0.066}$ & $-0.043$ & \\
+\quad W/T/L           & 40/418/42 & 39/408/53 & 28/434/38 & 28/189/283 & 34/225/241 & \\
+\quad $p_{\text{Holm}}$ & 1.000 & 0.654 & 1.000 & $\mathbf{<0.001}$ & $<0.001$ & \\
+$\Delta$ marag\_llm   & $+0.004$ & $-0.013$ & $+0.001$ & $+0.005$ & $+0.002$ & \\
+\quad W/T/L           & 39/419/42 & 39/409/52 & 28/434/38 & 79/364/57 & 48/420/32 & \\
+\quad $p_{\text{Holm}}$ & 1.000 & 0.654 & 1.000 & 0.376 & 0.685 & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The post-hoc estimate for this measurement was 0.29--0.32; it came in at
+0.301--0.306. Three readings follow.
+
+\textbf{The honest retrieval figure is about 0.30, for every arm.} On 273 of
+the 500 questions no arm's candidate pool contains a document the judge marks
+relevant: for most questions people actually ask about software updates, the
+live release, advisory, and community feeds do not contain an answer, and no
+arm changes that. Retrieval parity should be read against that ceiling.
+
+\textbf{Parity is exact, and it is not the arms retrieving the same
+documents.} Only 113 of 500 top-$k$ lists are identical across the multi-agent
+and single-agent arms; the multi-agent candidate pool averages 19.3 documents
+against the baseline's 12.8. The pipeline fetches half again as many
+candidates, different ones, and no retrieval metric moves by more than 0.015.
+This is the result that survived every correction in this paper unchanged, at
+$n=10$, 100, 300, and 500, leaking and leak-free.
+
+\textbf{The format effect is real and smaller than the leaking runs made it.}
+Template rendering costs 0.066 faithfulness here (283 questions worse, 28
+better, $p<0.001$) against 0.110 in the leaking 500-question run and 0.196 at
+$n=300$. Part of the earlier gap was the template rendering the own post's
+title verbatim under a ``verified'' banner. The same retrieval rendered as prose
+is indistinguishable from the baseline ($+0.005$, $p=0.38$).
+
+One number in the clean run we decline to report as a result. On the 72
+questions with a reference answer, the template arm scores 0.129 higher on
+correctness than either prose arm (16 better, 2 worse, $p=0.002$). Reading the
+winning answers, they state that the sources do not cover the question --- the
+same abstention the prose arms make --- rendered under a ``VERIFIED from live
+APIs'' header and a list of version strings, and the judge scores that 0.7
+against a reference the answer does not contain. It is the judge-independence
+threat of Section~\ref{sec:threats} appearing as a false positive, and it wants
+a judge from a different model family before it means anything.
+
 \subsection{Observations Carried Over From the Earlier Evaluation}
 \label{sec:carried-over}
 
@@ -2030,7 +2308,7 @@ in the conference version. They are retained because they do not depend on the
 architecture comparison and are not affected by the corrections above: they
 concern how the system behaves, not whether it beats a baseline. Where a
 measurement has been weakened or qualified by what Sections~\ref{sec:two-metrics}
-to~\ref{sec:scaled-eval} establish, that is stated at the point it appears
+to~\ref{sec:leak} establish, that is stated at the point it appears
 rather than left for the reader to notice.
 
 \subsection{Answer Accuracy}
@@ -2507,34 +2785,43 @@ than reproduced here; Figure~\ref{fig:execution_trace} shows one.
 \begin{enumerate}
   \item The bespoke retrieval-quality score and standard IR metrics order the
   two architectures oppositely on the same data (Table~\ref{tab:inversion}).
-  \item The multi-agent pipeline's deficit under IR metrics was caused by
-  retrieval, not ranking: 22 of 23 relevant documents were never retrieved,
+  \item The multi-agent pipeline's deficit under IR metrics was located at
+  fetch time, not ranking: 22 of 23 relevant documents were never retrieved,
   and three reranker generations could not recover them
-  (Table~\ref{tab:ranking-ablation}, panel~(a)). Once both phrasings are
-  retrieved, even the original weak ranking function recovers most of the
-  deficit, and which phrasing is ranked against adds little
-  (panel~(b)).
-  \item Issuing both the original and rewritten phrasings and unioning the
-  candidate pools removes the deficit, and the remedy holds on a
-  100-question multi-ecosystem benchmark, where the fetch-time loss falls from
-  96\% to 7.6\%.
-  \item With both defects repaired and the synthesis model held constant, the
-  multi-agent architecture \emph{matches} the single-agent baseline on retrieval
-  and on faithfulness, at roughly twice the latency
-  (Tables~\ref{tab:scaled-retrieval} and~\ref{tab:scaled-answer}). We do not
-  find evidence that decomposition improves retrieval quality in this domain.
+  (Table~\ref{tab:ranking-ablation}, panel~(a)). Issuing both phrasings and
+  unioning the pools recovered them (panel~(b)) and brought the pipeline to
+  parity on every subsequent sample.
+  \item The recovered documents were the questions' own source posts. The
+  benchmark's questions are community post titles, the live corpus returns the
+  post a title came from, and the judge marks it relevant. The own post
+  occupied 72--98\% of top-$k$ lists in every retrieval table and was the only
+  relevant document for a third to a half of the questions. Struck from ranking
+  and judgments, every arm in every sample retrieves at nDCG@3 0.26--0.34, the
+  parity results are unchanged, and the rewrite-only arm rises from 0.52
+  behind the baseline to 0.006 behind it (Table~\ref{tab:leak}).
+  \item Excluded at fetch time and re-measured on 500 questions, the
+  multi-agent architecture \emph{matches} the single-agent baseline on every
+  retrieval metric --- nDCG@3 0.304 against 0.301, 418 of 500 tied --- and, once
+  answer format is matched, on faithfulness, at twice the latency
+  (Table~\ref{tab:clean}). We do not find evidence that decomposition improves
+  retrieval quality in this domain, and on 273 of 500 questions no arm
+  retrieves anything the judge accepts.
   \item A substantial apparent faithfulness gap between the two architectures
-  was an artifact of answer format rather than answer content.
+  was an artifact of answer format rather than answer content; leak-free it is
+  0.066, and the same retrieval rendered as prose is indistinguishable from the
+  baseline.
 \end{enumerate}
 
 \section{Discussion}\label{sec:discussion}
 
 \subsection{What Generalizes}\label{sec:generalizes}
 
-The finding most likely to transfer to other systems is also the simplest to
-state: \emph{a rewriting agent must add to the retrieval it performs, not
-substitute for it.} The distinction is easy to lose because it is not visible
-in the agent's own output. A rewritten query inspected in isolation looks
+Two findings compete for the one most likely to transfer, and the second
+qualifies the first.
+
+The first is simple to state: \emph{a rewriting agent must add to the retrieval
+it performs, not substitute for it.} The distinction is easy to lose because it
+is not visible in the agent's own output. A rewritten query inspected in isolation looks
 correct --- it names the vendor, uses release-note vocabulary, and reads like a
 well-formed search. What is invisible at that level is that issuing it
 \emph{instead of} the user's question silently narrows the candidate set, and
@@ -2574,15 +2861,61 @@ directly. We therefore instrumented the pipeline to expose its pre-rerank pool,
 so that ``the reranker mis-ordered it'' and ``it was never retrieved'' are
 separable diagnoses rather than a single unexplained score.
 
+The second finding is that this diagnostic, applied correctly, located
+documents that were not answers. \emph{A benchmark mined from the sources a
+system retrieves from contains its own answer key.} The property that makes
+live-source RAG attractive for software ecosystems --- the corpus is the
+current state of the feeds, not a snapshot --- is the property that lets a
+question mined from those feeds retrieve itself. We think this generalizes to
+any evaluation whose questions and whose corpus are drawn from the same live
+population: community forums, issue trackers, mailing lists, changelogs. Three
+things about it are worth stating for anyone building such an evaluation.
+
+\begin{itemize}
+  \item \textbf{It is invisible to paired comparison.} Every arm that issues
+  the user's wording retrieves the source post at the same rate, so the paired
+  deltas and their tests --- the methodology this paper adopted to escape the
+  bespoke-metric problem --- were clean throughout. Pooled judging, frozen
+  corpora, and Holm-corrected Wilcoxon tests all worked exactly as intended on
+  a quantity that was mostly a lookup. A leak that inflates all arms equally is
+  a threat to the \emph{level}, and the level is what a frozen-corpus protocol
+  teaches one not to compare across runs.
+
+  \item \textbf{It is selectively visible to arms that do not issue the user's
+  wording.} The rewrite-only arm retrieved the source post 4\% of the time
+  against the baseline's 72\%, and so appeared to have collapsed retrieval by
+  0.52 nDCG@3. Any intervention that changes the query string --- rewriting,
+  expansion, translation, decontextualization --- will show a spurious deficit
+  against a verbatim baseline on a leaking benchmark, and the deficit will have
+  the textbook signature of query drift. We had the literature, the mechanism,
+  and the measurement, and they agreed with each other; what they agreed on was
+  the wrong document.
+
+  \item \textbf{The detection signal is an absolute level that moves when it
+  should not.} We found the leak because the same 300 questions scored 0.33
+  lower two weeks later. A benchmark re-run at an interval, on a live corpus,
+  with the absolute level reported alongside the paired deltas, would have
+  exposed it at $n=10$. The exclusion, once known, is one filter at fetch time.
+\end{itemize}
+
+The two findings are not in tension. Substitution does remove verbatim matches
+from a provider-determined pool, and the pool-exposure instrumentation is what
+made the leak countable once we knew to count it. What the second finding
+changes is the magnitude that can be attributed to the first: leak-free, on this
+benchmark, substituting the rewrite for the question costs 0.006 nDCG@3.
+
 \subsection{What Multi-Agent Decomposition Did and Did Not Buy}
 \label{sec:decomposition}
 
-With both defects repaired and the synthesis model held constant, the
-multi-agent architecture matches the single-agent baseline on retrieval quality,
-and --- once answer format is matched, in the \texttt{marag\_llm} arm --- on
-faithfulness, at approximately twice the latency
-(Section~\ref{sec:scaled-eval}). We report this as the result rather than
-searching for a configuration that reverses it.
+With both evaluation defects removed and the synthesis model held constant,
+the multi-agent architecture matches the single-agent baseline on retrieval
+quality --- nDCG@3 0.304 against 0.301 on 500 questions, 418 tied --- and, once
+answer format is matched, in the \texttt{marag\_llm} arm, on faithfulness, at
+approximately twice the latency (Section~\ref{sec:leak}). The parity is the one
+result in this paper that no correction touched: it held at $n=10$ once the
+fetch was repaired, at $n=100$ frozen, at $n=300$ and $n=500$ live, and
+leak-free. We report it as the result rather than searching for a configuration
+that reverses it.
 
 This does not establish that decomposition is worthless, and we are careful not
 to claim it does. It establishes that on this benchmark, for this domain, with
@@ -2650,6 +2983,18 @@ validated against them rather than assumed to be
 equivalent~\cite{just2014mutants,papadakis2018mutation}. Keyword overlap standing in
 for retrieval quality is the same structure, and the same remedy applies:
 validate the proxy against the thing it replaces, or report both.
+
+The standard IR metrics we adopted in response failed construct validity in
+their turn, and in a way the construct-validity literature above would
+recognise: the measure was correct, the judge was correct, and the population
+it was computed over contained the answer key. nDCG over pooled graded
+relevance measures retrieval of judged-relevant documents; when the judged-
+relevant document is the question, it measures whether the query string still
+matches the question, which is a property of the rewriter's paraphrase
+distance and of the feed's retention window, not of retrieval. The proxy was
+validated --- against a leaking population. The remedy is the same one the
+coverage and mutation literature arrived at: inspect what the measure is
+actually being computed over, not only how it is defined.
 
 Domain-specific systems will continue to define domain-specific quality measures,
 with good justification, since standard IR metrics require relevance judgments and
@@ -2794,7 +3139,8 @@ the rewrite and against the original question --- are not resolvable at this
 $n$ at all. We report them as observations rather than findings. The claim that
 does not rest on an interval estimate is the document count: 22 of 23 relevant
 documents missing is a census of the retrieved sets, not a sample statistic,
-and its scaled counterpart (13 of 172) was computed on 100 questions.
+and its scaled counterpart (13 of 172) was computed on 100 questions. What the
+census counted is the subject of Section~\ref{sec:leak}.
 
 \textbf{LLM relevance judge.}
 All relevance judgments reported here were produced by \texttt{llama3.1}, which
@@ -2885,14 +3231,30 @@ controlled comparison across architectures, while live evaluations
 would continue to measure performance under evolving ecosystem
 conditions.
 
-\subsection{Threats to Validity}
+\subsection{Threats to Validity}\label{sec:threats}
 
 \textbf{Construct validity.}
-Retrieval quality is measured using a deterministic score emphasizing
-release-note relevance, community evidence, advisory evidence, and
-result coverage. While this enables reproducible evaluation, it may not
-capture all dimensions of answer quality such as usefulness,
-readability, user trust, or task completion effectiveness.
+Retrieval quality was first measured using a deterministic score emphasizing
+release-note relevance, community evidence, advisory evidence, and result
+coverage, and then with pooled-judgment IR metrics; Sections~\ref{sec:two-metrics}
+and~\ref{sec:leak} report that each in turn measured something other than
+retrieval of answers. The leak-free figures of Table~\ref{tab:clean} exclude the
+question's own source post but not near-duplicates of it --- cross-posts,
+quotations, or aggregator copies of the same post under a different URL --- so
+some residual leakage is possible and the 0.30 level is an upper bound on
+retrieval of independent evidence. Answer quality is judged by \texttt{llama3.1},
+which also synthesises two of the three arms; the template arm's correctness
+advantage in the clean run is a documented false positive of this overlap
+(Section~\ref{sec:leak}), and other, smaller ones may remain.
+
+\textbf{Benchmark validity.}
+The questions are real, and that is the source of the leak: they were mined
+from the population the system retrieves from. A benchmark constructed to avoid
+it --- questions from a source the corpus cannot return, or a corpus frozen
+before the questions were posted --- would measure a different, harder task, and
+we have not built one. On the present benchmark 273 of 500 questions have no
+judged-relevant document in any arm's pool, so more than half the benchmark
+measures abstention behaviour rather than retrieval.
 
 \textbf{Internal validity.}
 The single-agent baseline uses the same retrieval endpoints and answer
@@ -2953,39 +3315,53 @@ happened when we measured it properly.
 Evaluated on a keyword-overlap retrieval score of our own design, the
 architecture improved on a single-agent baseline by 17.2\% ($t(49)=2.32$,
 $p=0.020$). Evaluated with standard IR metrics over pooled relevance judgments,
-it lost to the same baseline by roughly a factor of five. The disagreement was
-not a metric artifact: the query-rewriting agent's output was being issued to
-every retrieval endpoint \emph{in place of} the user's question, and 22 of the
-23 relevant documents the baseline retrieved were never retrieved by the
-multi-agent pipeline at all. Three progressively stronger rerankers raised MRR
-from 0.250 to 0.625 while leaving nDCG@3 near 0.19, because no ranking function
-can promote a document that was never a candidate.
+it lost to the same baseline by roughly a factor of five. We traced the deficit
+to the query-rewriting agent's output being issued to every retrieval endpoint
+\emph{in place of} the user's question --- 22 of the 23 relevant documents the
+baseline retrieved were never candidates, and three progressively stronger
+rerankers could not promote them --- and repaired it by issuing both phrasings
+and unioning the pools, which brought the pipeline to parity on every sample we
+drew.
 
-Issuing both phrasings and unioning the candidate pools resolves it. On a
-100-question benchmark spanning 21 software ecosystems, the fetch-time loss
-falls from 96\% to 7.6\%, and the repaired pipeline reaches nDCG@3 of 0.922
-against the baseline's 0.924 --- parity, at approximately twice the latency. We report this rather than the
-improvement our original metric showed. On this benchmark, in this domain,
-architectural decomposition did not improve retrieval quality over a
-well-configured single-agent baseline; what the original evaluation measured was
-the correlation between a bespoke metric and the vocabulary its own rewriting
-agent produced.
+Then a 500-question run scored 0.33 below a 300-question run on the same
+questions with nothing changed, and the documents the repair had recovered
+turned out to be the questions. The benchmark's questions are community post
+titles; the live corpus returns the post a title came from; the judge marks it
+relevant. That post occupied 72--98\% of the top-$k$ lists behind every
+retrieval number we had reported, and it was exactly the document a paraphrase
+loses. Excluded at fetch time and re-measured on 500 questions across 24
+ecosystems, every arm retrieves at nDCG@3 0.30 --- the multi-agent pipeline
+0.304, the baseline 0.301, a rewrite-only arm with no union fetch 0.263 on the
+frozen ladder against the baseline's 0.269 --- at approximately twice the
+latency for the pipeline. On this benchmark, in this domain, architectural
+decomposition did not improve retrieval quality over a well-configured
+single-agent baseline, and neither did the repair we had built; what the
+original evaluation measured was the correlation between a bespoke metric and
+the vocabulary its own rewriting agent produced, and what our corrected
+evaluation measured, until the last run, was how often each arm found the
+question.
 
-Two further results bear on how such systems should be evaluated. An apparent
+Three further results bear on how such systems should be evaluated. An apparent
 0.23 faithfulness deficit for the multi-agent architecture proved to be an
 artifact of answer format --- a structured template judged against fluent prose
---- and vanished when the same retrieved documents were synthesized through the
-baseline's prompt. And the failure that caused all of this was invisible at the
-component level: every agent performed its own task correctly, and only the
-retrieved set revealed the defect. We suggest that agentic pipelines be
-instrumented to expose intermediate state, in particular the pre-ranking
-candidate set, so that ``mis-ranked'' and ``never retrieved'' remain separable
-diagnoses.
+--- and shrinks to 0.066 leak-free, vanishing when the same documents are
+synthesized through the baseline's prompt. The fetch fault was invisible at the
+component level, and the leak was invisible to paired comparison: one hid in
+the wiring between agents that each behaved correctly, the other inflated every
+arm equally and so never appeared in a difference. And both were found by the
+same move --- exposing the candidate pool and counting documents rather than
+reading scores --- applied once to a single run and once across two runs that
+should have agreed. We suggest that agentic pipelines be instrumented to expose
+the pre-ranking candidate set, that evaluations on live corpora report absolute
+levels alongside paired deltas and re-run identical questions at an interval,
+and that a benchmark mined from a system's own sources be assumed to leak until
+the question's source document is shown absent from every pool.
 
-We release the architecture, the evaluation harness, the ranking and fetching
-ablation arms, and a 300-question benchmark spanning 24 software ecosystems and
-five question categories, mined from live release, advisory, and community
-sources.
+We release the architecture, the evaluation harness with the exclusion built
+in, the ranking and fetching ablation arms, the script that recomputes any
+earlier run leak-free, and a 500-question benchmark spanning 24 software
+ecosystems and five question categories, mined from live release, advisory, and
+community sources.
 
 Future work includes head-to-head comparison against Self-RAG, CRAG, and
 Adaptive-RAG through the FlashRAG and RAGLAB toolkits; an independent judge to
