@@ -34,6 +34,8 @@
 > ranking scored against the original question, nDCG@3 goes **0.188 → 0.765** in
 > one step, and on the 100-question benchmark the share of the baseline's
 > relevant documents missing from the candidate pool falls from **96% to 12%**.
+> (Read with the leak note below: most of what the rewrite lost, and the union
+> fetch recovered, was the question's own source post.)
 >
 > That reaches **parity, not superiority**: with both defects repaired and the
 > synthesis model held constant, marag scores nDCG@3 **0.859 against the
@@ -80,9 +82,10 @@
 > the same rate, so the paired *differences* between arms were never affected.
 > It does retract one earlier reading — the `rewrite_only` "drift" result was
 > mostly the rewritten query missing the answer-key post, not a retrieval
-> regression. Fixed going forward (`exclude_own_post`, on by default); a clean
-> n=500 rerun is in flight. Details: [Finding 7 in
-> `eval_harness/FINDINGS.md`](eval_harness/FINDINGS.md).
+> regression. Fixed going forward (`exclude_own_post`, on by default). The clean n=500
+> rerun puts every arm at nDCG@3 **0.30** (0.304 / 0.306 / 0.301), all paired
+> deltas within 0.015; template faithfulness −0.066. Details: Findings 7–8 in
+> [`eval_harness/FINDINGS.md`](eval_harness/FINDINGS.md).
 
 ---
 
@@ -610,7 +613,7 @@ We're explicit about these in the paper (§5) — they're real, and good directi
 - [x] Cited prose answers in the demo (`answer_agent.py`), replacing the bullet template.
 - [x] Finish the 300-question run — completed at 300/300 via `--resume`; retrieval parity holds and the format confound is confirmed at full sample.
 - [x] Fix the own-post retrieval leak (Reddit-mined questions retrieving their own source post) — `exclude_own_post`, on by default since 2026-09-17.
-- [ ] Clean, leak-free n=500 rerun — in flight, first measurement since the fix above.
+- [x] Clean, leak-free n=500 rerun — `run_1789703506`: nDCG@3 0.30 on every arm, parity exact (Finding 8).
 - [ ] Run the 1,000-question benchmark (`data/benchmark_1000.json`) — built, not yet run.
 - [ ] Report the self-reflective (Self-RAG / CRAG) baseline arm — implemented, run incomplete
 - [ ] Measure self-improvement against a frozen corpus, so adaptation is separable from corpus drift
