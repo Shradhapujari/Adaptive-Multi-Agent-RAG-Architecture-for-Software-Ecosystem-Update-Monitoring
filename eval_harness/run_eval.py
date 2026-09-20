@@ -494,6 +494,8 @@ def run(cfg: EvalConfig) -> str:
     cfg_dict["exclude_own_post"] = cfg.exclude_own_post
     cfg_dict["rerank_spec"] = _rr.spec
     cfg_dict["rerank_degraded"] = bool(_rr.degraded)
+    cfg_dict["rank_tiers"] = marag.resolve_rank_tiers()
+    cfg_dict["rank_query"] = os.environ.get("MARAG_RANK_QUERY", "original")
     # Same rule for the rules factor: ask the generator what it used. The sha
     # is the part that matters across arms -- AGENT_RULES.md is a file anyone
     # can edit between two passes, and two arms built from different rule text

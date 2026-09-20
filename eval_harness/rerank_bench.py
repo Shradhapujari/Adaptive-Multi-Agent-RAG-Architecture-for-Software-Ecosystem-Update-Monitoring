@@ -22,7 +22,8 @@ Rankers are `<mode>:<scorer>`:
   scorer  none | bm25 | embed[:model] | rrf (bm25+embed, k=60)
           llm:<provider:model>  -- pointwise 0-2 grade on the top-N of rrf,
                      ties broken by rrf. The cascade keeps the model-call count
-                     at N per pool instead of |pool|.
+                     at N per pool instead of |pool|. `llm20@embed:...` grades
+                     the top-20 of the embed order instead (N default 12).
 
 A document promoted into the top-k that no earlier run judged scores 0 here
 and is counted in `unjudged@k`. `--judge` labels those with the harness judge
@@ -82,10 +83,16 @@ class Scorer:
         self.llm_calls = 0
         if spec.startswith("embed"):
             self.embed = rerank.make_reranker(spec)
-        elif spec in ("rrf",) or spec.startswith("llm:"):
+        elif spec in ("rrf",) or spec.startswith("llm"):
             self.embed = rerank.make_reranker("embed")
-        if spec.startswith("llm:"):
-            self.llm = make_client(spec[4:])
+        self.llm_n, self.llm_base = LLM_TOP_N, "rrf"
+        if spec.startswith("llm"):
+            head, model = spec.split(":", 1)
+            if "@" in head:
+                head, self.llm_base = head.split("@", 1)
+            if head[3:]:
+                self.llm_n = int(head[3:])
+            self.llm = make_client(model)
             self._grade_cache: Dict[str, int] = {}
 
     def order(self, query: str, docs: List[dict]) -> List[int]:
@@ -107,10 +114,13 @@ class Scorer:
         base = sorted(range(n), key=lambda i: -fused[i])
         if self.spec == "rrf":
             return base
-        head = base[:LLM_TOP_N]
+        if self.llm_base == "embed":
+            fused = e
+            base = sorted(range(n), key=lambda i: -e[i])
+        head = base[:self.llm_n]
         grades = {i: self._grade(query, docs[i]) for i in head}
         head.sort(key=lambda i: (-grades[i], -fused[i]))
-        return head + base[LLM_TOP_N:]
+        return head + base[self.llm_n:]
 
     def _grade(self, query: str, d: dict) -> int:
         key = qrels_key(query, d["doc_id"])

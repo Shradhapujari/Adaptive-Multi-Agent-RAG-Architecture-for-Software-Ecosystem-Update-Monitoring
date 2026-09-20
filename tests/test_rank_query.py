@@ -70,3 +70,21 @@ def test_bad_environment_variable_raises(monkeypatch):
 
 def test_choices_are_exactly_the_two_documented_arms():
     assert marag.RANK_QUERY_CHOICES == ("original", "rewritten")
+
+
+# ---- resolve_rank_tiers: whether the verified-before-community prior ranks --
+
+def test_rank_tiers_default_is_the_historical_tiered_order(monkeypatch):
+    monkeypatch.delenv("MARAG_RANK_TIERS", raising=False)
+    assert marag.resolve_rank_tiers() == "tiered"
+
+
+def test_rank_tiers_flat_from_env_or_argument(monkeypatch):
+    monkeypatch.setenv("MARAG_RANK_TIERS", "FLAT")
+    assert marag.resolve_rank_tiers() == "flat"
+    assert marag.resolve_rank_tiers("flat") == "flat"
+
+
+def test_rank_tiers_rejects_typos():
+    with pytest.raises(ValueError):
+        marag.resolve_rank_tiers("flatt")

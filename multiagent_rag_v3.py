@@ -1157,6 +1157,23 @@ def fetch_vendor_reddit(vendor: str, query: str = "", limit: int = 10) -> list:
 
 
 RANK_QUERY_CHOICES = ("original", "rewritten")
+RANK_TIERS_CHOICES = ("tiered", "flat")
+
+
+def resolve_rank_tiers(mode: str = None) -> str:
+    """Whether ranking respects the verified-before-community tier prior.
+
+    `tiered` is what every run before 2026-09-20 did. `flat` ranks the pool as
+    one list. Raises on an unrecognised value for the same reason
+    resolve_rank_query does.
+    """
+    if mode is None:
+        mode = os.environ.get("MARAG_RANK_TIERS", "tiered")
+    mode = str(mode).strip().lower()
+    if mode not in RANK_TIERS_CHOICES:
+        raise ValueError(
+            f"MARAG_RANK_TIERS={mode!r} (expected {'|'.join(RANK_TIERS_CHOICES)})")
+    return mode
 
 
 def resolve_rank_query(original_query: str, rewritten_query: str,
@@ -1495,14 +1512,19 @@ class RetrieverAgent:
                 except Exception:
                     return list(docs)
 
-        # Rank *within* tier, then concatenate. Ranking the flat pool discards
-        # the verified-before-community prior: BM25 favours long Reddit bodies
-        # that repeat the query terms, so a release question could come back as
-        # four community posts and zero verified records -- which flips the
-        # Evaluator's tier1_hits/has_live branches and empties the
-        # "VERIFIED SOURCES" block. The top_k cut still happens once, at the
-        # return.
-        results = _safe_rank(tier1) + _safe_rank(tier2)
+        # Tiered (default): rank *within* tier, then concatenate, so a
+        # community post can never outrank a verified record. That prior
+        # protects the template's "VERIFIED SOURCES" block and the Evaluator's
+        # tier1_hits branch -- and on the 500-question benchmark it is what
+        # costs retrieval: with it the top-4 is 0% community on a question set
+        # that is 60% Reddit-mined, and every scorer sits at nDCG@3 0.22-0.25;
+        # ranked flat the same embedding scorer reaches 0.46
+        # (eval_harness/rerank_bench.py, run_1789892227). MARAG_RANK_TIERS=flat
+        # ranks the whole pool once; the top_k cut still happens at the return.
+        if resolve_rank_tiers() == "flat":
+            results = _safe_rank(tier1 + tier2)
+        else:
+            results = _safe_rank(tier1) + _safe_rank(tier2)
 
         # Fallback to local if live APIs return nothing
         if not results:
