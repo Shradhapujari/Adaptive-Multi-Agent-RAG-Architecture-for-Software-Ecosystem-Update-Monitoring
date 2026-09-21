@@ -1341,6 +1341,10 @@ class RetrieverAgent:
     last_rank_query: str = ""
     last_rerank_spec: str = ""
     last_rerank_degraded: bool = False
+    # A reranker for this instance only; None means the process-wide one
+    # (MARAG_RERANK). The multi-agent arm sets this so the Checker's grading
+    # pass applies to it and not to the baseline that shares this class.
+    reranker = None
     # URLs to strike from the candidate pool before ranking. The eval harness
     # sets this to the benchmark question's own source post: a question mined
     # from a Reddit title otherwise retrieves that very post, the judge grades
@@ -1484,7 +1488,7 @@ class RetrieverAgent:
         # One reranker per process. EmbeddingReranker memoises embeddings and
         # make_reranker() spends an extra probe embedding on every call, so
         # building one per retrieval threw the cache away before it could hit.
-        _reranker = _rerank.get_reranker()
+        _reranker = self.reranker or _rerank.get_reranker()
         self.last_rerank_spec = _reranker.spec
         self.last_rerank_degraded = bool(_reranker.degraded)
         print(f"  Ranking  : {_reranker.spec} over {len(pool)} candidates "

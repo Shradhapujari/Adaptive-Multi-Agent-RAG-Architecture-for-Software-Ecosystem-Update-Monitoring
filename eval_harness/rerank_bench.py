@@ -19,6 +19,7 @@ Rankers are `<mode>:<scorer>`:
   mode    tiered  -- rank within tier1 (verified) then tier2 (community), as
                      RetrieverAgent does today; tier2 can never outrank tier1
           flat    -- one ranking over the whole pool
+          flat-nonews -- flat, but google_news documents ranked last
   scorer  none | bm25 | embed[:model] | rrf (bm25+embed, k=60)
           llm:<provider:model>  -- pointwise 0-2 grade on the top-N of rrf,
                      ties broken by rrf. The cascade keeps the model-call count
@@ -149,9 +150,18 @@ class Scorer:
         return g
 
 
+NEWS_SOURCES = {"google_news", "news"}
+
+
 def rank(mode: str, scorer: Scorer, query: str, pool: List[dict], top_k: int) -> List[dict]:
     if mode == "flat":
         return [pool[i] for i in scorer.order(query, pool)][:top_k]
+    if mode == "flat-nonews":
+        # News last: a headline about a product is rarely the document that
+        # answers a question about its update, and it is 17% of the flat top-4.
+        ranked = [pool[i] for i in scorer.order(query, pool)]
+        return ([d for d in ranked if d.get("source") not in NEWS_SOURCES]
+                + [d for d in ranked if d.get("source") in NEWS_SOURCES])[:top_k]
     t1 = [d for d in pool if tier(d) == 1]
     t2 = [d for d in pool if tier(d) == 2]
     return ([t1[i] for i in scorer.order(query, t1)]

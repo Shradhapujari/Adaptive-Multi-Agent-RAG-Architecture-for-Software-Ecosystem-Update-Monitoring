@@ -246,6 +246,14 @@ class MultiAgentRAGGenerator(Generator):
         self.marag = marag
         self.rewriter = marag.QueryRewriterAgent()
         self.retriever = marag.RetrieverAgent()
+        # MARAG_RERANK_MULTI gives the multi-agent arm its own ranker while the
+        # baseline keeps MARAG_RERANK: the arms share RetrieverAgent, and the
+        # Checker's grading pass (llm<N>@embed:<model>) is meant to be the
+        # thing that makes them differ, not a shared default that lifts both.
+        multi_spec = os.environ.get("MARAG_RERANK_MULTI", "").strip()
+        if multi_spec:
+            import rerank as _rerank
+            self.retriever.reranker = _rerank.get_reranker(multi_spec)
         self.evaluator = marag.EvaluatorAgent()
         self.top_k = top_k
         self.synth = synth
