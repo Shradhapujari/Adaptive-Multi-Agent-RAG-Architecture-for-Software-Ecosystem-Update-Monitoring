@@ -47,6 +47,7 @@ if _ROOT not in sys.path:
 
 import corpus_snapshot
 import rerank
+import tokens
 
 from .config import EvalConfig
 from .dataset import load_dataset, dataset_hash
@@ -359,6 +360,7 @@ def run(cfg: EvalConfig) -> str:
         sys_outputs: Dict[str, dict] = {}
         for g in gens:
             t0 = time.time()
+            tokens.reset()
             try:
                 out = g.generate(query)
             except corpus_snapshot.CorpusMiss:
@@ -370,6 +372,7 @@ def run(cfg: EvalConfig) -> str:
             except Exception as e:  # noqa: BLE001
                 out = {"answer": f"[system error: {e}]", "docs": [], "self_quality": None}
             out["latency_s"] = round(time.time() - t0, 2)
+            out["tokens"] = tokens.snapshot()
             sys_outputs[g.name] = out
             print(f"    {g.name:28s} {len(out['docs'])} docs  {out['latency_s']}s")
 
@@ -444,6 +447,10 @@ def run(cfg: EvalConfig) -> str:
                 "rerank_spec": out.get("rerank_spec", ""),
                 "rerank_degraded": out.get("rerank_degraded", False),
                 "latency_s": out["latency_s"],
+                # This arm's own model spend on this question: calls and
+                # Ollama-reported prompt/completion tokens by role (rewrite,
+                # rerank, synth), plus embedding calls. The judge is excluded.
+                "tokens": out.get("tokens"),
                 "self_quality": out.get("self_quality"),
                 "answer": out["answer"],
                 # Only set by the synthesising multi-agent arm: which model wrote

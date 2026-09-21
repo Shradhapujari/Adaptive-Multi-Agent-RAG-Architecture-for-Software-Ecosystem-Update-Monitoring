@@ -54,6 +54,8 @@ import urllib.error
 import urllib.request
 from typing import Dict, List, Optional, Sequence
 
+import tokens
+
 DEFAULT_EMBED_MODEL = "nomic-embed-text"
 DEFAULT_SPEC = os.environ.get("MARAG_RERANK", "embed")
 
@@ -230,6 +232,7 @@ class EmbeddingReranker(Reranker):
         )
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
             body = json.loads(resp.read().decode())
+        tokens.record_embed()
         vec = body.get("embedding") or []
         if not vec:
             raise RuntimeError(f"empty embedding from {self.model}")
@@ -322,7 +325,9 @@ class LLMCascadeReranker(Reranker):
         req = urllib.request.Request(f"{self.host}/api/generate", data=payload,
                                      headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            return json.loads(resp.read().decode()).get("response", "")
+            body = json.loads(resp.read().decode())
+        tokens.record(body, "rerank")
+        return body.get("response", "")
 
     def grade(self, query: str, doc: dict) -> int:
         key = f"{query.strip().lower()[:200]}|{doc_text(doc)[:300]}"

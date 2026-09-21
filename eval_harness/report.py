@@ -47,6 +47,10 @@ def aggregate(rows: List[dict], ks: List[int]) -> dict:
         if r.get("self_quality") is not None:
             by_system[sysname]["self_quality"].append(r["self_quality"])
         by_system[sysname]["latency_s"].append(r.get("latency_s", 0.0))
+        tk = r.get("tokens")
+        if tk:
+            by_system[sysname]["model_calls"].append(tk.get("calls", 0))
+            by_system[sysname]["tokens"].append(tk.get("total_tokens", 0))
 
     def summarize(d):
         out = {}
@@ -66,7 +70,7 @@ def aggregate(rows: List[dict], ks: List[int]) -> dict:
 
 def write_csv(agg: dict, path: str) -> None:
     cols = (["system"] + agg["ir_keys"] + agg["answer_keys"]
-            + ["self_quality", "latency_s"])
+            + ["self_quality", "latency_s", "model_calls", "tokens"])
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(cols)
@@ -123,8 +127,8 @@ def write_markdown(agg: dict, cfg: dict, path: str) -> None:
 
     # Main comparison table.
     metrics = agg["ir_keys"] + agg["answer_keys"]
-    header = "| System | " + " | ".join(metrics) + " | self_quality | latency_s |"
-    sep = "|" + "---|" * (len(metrics) + 3)
+    header = "| System | " + " | ".join(metrics) + " | self_quality | latency_s | calls | tokens |"
+    sep = "|" + "---|" * (len(metrics) + 5)
     L.append("## Head-to-head\n")
     L.append(header)
     L.append(sep)
@@ -135,7 +139,9 @@ def write_markdown(agg: dict, cfg: dict, path: str) -> None:
         thin = thin or any("n=" in c for c in cells)
         sq = f"{m['self_quality'][0]:.3f}" if "self_quality" in m else "—"
         lat = f"{m['latency_s'][0]:.2f}" if "latency_s" in m else "—"
-        L.append(f"| {s} | " + " | ".join(cells) + f" | {sq} | {lat} |")
+        calls = f"{m['model_calls'][0]:.1f}" if "model_calls" in m else "—"
+        tok = f"{m['tokens'][0]:.0f}" if "tokens" in m else "—"
+        L.append(f"| {s} | " + " | ".join(cells) + f" | {sq} | {lat} | {calls} | {tok} |")
     L.append("")
 
     # Per-category nDCG@k (k = first in list) if present.

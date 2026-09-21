@@ -10,6 +10,7 @@ Run:
 """
 
 import json, os, re, time, sys, urllib.request
+import tokens as _tokens
 from pathlib import Path
 from agent_rules import rules_block
 
@@ -1274,6 +1275,7 @@ def call_llama(prompt: str, model: str = "llama3.1") -> str:
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             result = json.loads(resp.read())
+            _tokens.record(result, "rewrite")
             return result.get("response", "").strip()
     except Exception as e:
         return f"[Ollama error: {e}]"
