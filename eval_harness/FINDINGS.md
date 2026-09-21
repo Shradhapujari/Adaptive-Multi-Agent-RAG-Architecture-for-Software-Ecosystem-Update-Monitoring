@@ -283,6 +283,74 @@ result.
 
 ---
 
+## Finding 9 — The ranking stage has a second defect: the tier prior keeps every community post out of the top-k
+
+Started from the clean n=500 run's own pools. The multi-agent arm's candidate
+pool held **455** judged-relevant documents to the baseline's **425**, then
+left **48** of them outside its top-4 (baseline: 6). Ranked by oracle, the same
+pools score nDCG@3 0.419 vs 0.389. The retrieval edge exists; ranking loses it.
+
+`RetrieverAgent` ranks within tier — every verified record (release note,
+CISA, CVE) before every community post — and cuts top-k afterwards. On the
+benchmark that means the top-4 is **0% Reddit** across 500 questions, for a
+question set that is 60% Reddit-mined. The comment justifying it was about the
+template's "VERIFIED SOURCES" block.
+
+`eval_harness/rerank_bench.py` re-ranks the dumped pools (`--dump-pools`,
+`run_1789892227_8fda4edb2d21`, strict replay of the b500 snapshot) with every
+scorer in both modes, and `--judge` labels every document any ranker promotes
+into a top-4 (3,142 new `llama3.1` judgments), so a new ranker is not scored
+zero for surfacing something the incumbent never showed the judge.
+
+| Ranker (marag_llm, n=500) | nDCG@3 | Recall@5 | MRR |
+|---|---:|---:|---:|
+| as run — `tiered:embed` | 0.250 | 0.197 | 0.353 |
+| `tiered:bm25` / `tiered:rrf` / `tiered:llm` | 0.153 / 0.221 / 0.238 | | |
+| `flat:bm25` | 0.322 | 0.318 | 0.429 |
+| `flat:rrf` | 0.410 | 0.386 | 0.502 |
+| `flat:embed` | **0.458** | 0.418 | 0.543 |
+| `flat:llm20@embed` (qwen2.5-7b grades embed's top-20) | **0.489** | 0.441 | 0.562 |
+
+The scorer barely matters; the tier prior does. Every `tiered:*` sits at
+0.15-0.25, every `flat:*` at 0.32-0.49. The baseline moves identically
+(0.248 -> 0.452 under `flat:embed`). Strict relevance (grade 2 only) tells the
+same story, 0.087 -> 0.176. The bench reproduces the run exactly first:
+`tiered:embed` equals `as_run` on 500/500 for both arms.
+
+End to end (`MARAG_RANK_TIERS=flat`, commit `f405e59`), 100 questions
+stratified by category, seed 42, both modes on the same frozen snapshot
+(`run_1789951801` tiered, `run_1789951917` flat):
+
+| Arm | nDCG@3 tiered -> flat | paired delta (95% CI) | W/T/L | Faithfulness | Ans. rel. |
+|---|---:|---:|---:|---:|---:|
+| marag_llm | 0.357 -> 0.584 | **+0.227** [+0.146, +0.316] | 44/41/15 | -0.022 [-0.040, +0.001] | -0.026 [-0.043, -0.001] |
+| single_agent | 0.388 -> 0.616 | **+0.227** [+0.144, +0.319] | 40/42/18 | -0.026 [-0.041, -0.011] | -0.034 [-0.044, -0.023] |
+
+Three things this settles:
+
+1. **It is a defect fix, not a multi-agent win.** Both arms gain the same
+   +0.23. Under `flat` the parity is unchanged (n=500 offline: 0.458 vs
+   0.452; n=100 end to end: -0.031, 6/78/16).
+2. **Reading the candidates is the first per-candidate model call in this
+   project that buys ranking.** `flat:llm20@embed` over `flat:embed`: +0.027,
+   95% CI [+0.016, +0.039], 57/423/20, 20 calls per question. Gains are on
+   `releases` (+0.043) and `security` (+0.040), nil on `general`. This is
+   the Checker's natural job — grade the top-20, not count sources — and the
+   only lever found so far by which the multi-agent arm's larger pool (1,439
+   relevant documents to the baseline's 1,232 under the enlarged qrels; 303
+   fetched only by marag) could be cashed.
+3. **Community documents in context cost a little grounding.** Faithfulness
+   -0.02 and answer relevance -0.03 for both arms; the flat top-4 is 38%
+   Reddit and 17% Google News. News is the obvious next thing to demote.
+
+Caveats: the new judgments come from the same `llama3.1` judge as every run;
+the replay snapshot is not frozen (pools are 20-30% larger than the original
+run's), so the offline numbers are comparable to each other, not to Finding 8;
+and Reddit-mined questions may favour neighbours of their source post even with
+the post itself excluded.
+
+---
+
 ## Confounds, and what has been done about them
 
 | Confound | Status |
