@@ -2524,27 +2524,92 @@ multi-agent arm alone.
 
 Run end to end on all 500 benchmark questions with flat ranking throughout and
 the grading cascade on the multi-agent arm, that arm leads the baseline on
-every rank-sensitive metric: nDCG@1 $+0.049$ $[+0.022, +0.077]$, nDCG@3
-$+0.033$ $[+0.012, +0.053]$, MRR $+0.025$ $[+0.007, +0.044]$, each surviving a
+every rank-sensitive metric: nDCG@1 $+0.049$ $[+0.023, +0.077]$, nDCG@3
+$+0.032$ $[+0.012, +0.053]$, MRR $+0.025$ $[+0.007, +0.044]$, each surviving a
 Holm correction, with 94 wins to 63 losses at rank 3. Recall@5 does not move
 ($+0.014$, CI spanning zero), which is consistent with the mechanism: the
 documents were already in the pool, and what changed is where they sit in it.
 Faithfulness is indistinguishable from the baseline once answer format is
 matched ($+0.001$).
 
-We state plainly what this comparison does and does not establish. The grading
-cascade runs on the multi-agent arm and not on the baseline, which is the
-treatment---it is the Evaluator reading what was retrieved instead of
-counting its sources---but it is also 20
-model calls the baseline does not make, and a ranking gain from reading
-candidates is not obviously a gain from decomposing the pipeline. The
-attributing comparison is the baseline given the same cascade, on the same
-questions and the same recorded corpus.
-%% TODO(control): run_1790117750 -- single_agent + flat + llm20@embed, n=500,
-%% strict replay of corpus_snapshot_b500_flat_0921. Score with
-%% scripts/cross_run_compare.py against the pooled qrels of run_1789976732.
-%% If it lands near 0.486, the +0.033 is the multi-agent pool; if near 0.52,
-%% the gain is the reranker and this subsection's claim must be withdrawn.
+That comparison on its own does not establish what produced the lead. The
+grading cascade runs on the multi-agent arm and not on the baseline, which is
+the treatment---it is the Evaluator reading what was retrieved instead of
+counting its sources---but it is also 20 model calls the baseline does not
+make, and a ranking gain from reading candidates is not obviously a gain from
+decomposing the pipeline. Every earlier candidate for a multi-agent advantage
+in this paper dissolved at exactly this point, under exactly this question.
+
+\subsubsection{The Attributing Control}\label{sec:tier-control}
+
+We therefore ran the baseline a second time with the grading cascade attached
+to it, over the same 500 questions, in strict replay against the corpus
+snapshot the previous run recorded---10{,}310 document reads served from disk
+and no miss on any corpus host, so the two arms read the same documents by
+construction. The arms are then identical in ranking function, corpus, judge,
+and per-question model cost, and differ only in whether retrieval was
+decomposed. Because the arms ran in separate runs, each with its own judged
+pool, all three are re-scored against the union of both runs' judgments before
+pairing; the union is what Table~\ref{tab:tier-control} reports, which shifts
+the values of the preceding paragraph by at most 0.001.
+
+\begin{table}[t]
+\caption{The grading cascade given to each architecture in turn. $n=500$,
+scored against the pooled judgments of both runs, paired over questions with
+percentile bootstrap 95\% CI and Holm correction. The cascade does not help
+the baseline: given the same 20 model calls per question, the single-agent arm
+does not improve, and on recall it degrades. The same cascade on the
+multi-agent arm's larger pool gains on every metric.}
+\label{tab:tier-control}
+\begin{tabular}{llrrrr}
+\toprule
+Arm & Ranking function & nDCG@1 & nDCG@3 & Recall@5 & MRR \\
+\midrule
+Single-agent & \texttt{flat:embed}      & 0.460 & 0.479 & 0.513 & 0.550 \\
+Single-agent & \texttt{flat:llm20@embed} & 0.441 & 0.467 & 0.478 & 0.528 \\
+Multi-agent  & \texttt{flat:llm20@embed} & \textbf{0.509} & \textbf{0.511} & \textbf{0.525} & \textbf{0.575} \\
+\midrule
+\multicolumn{2}{l}{Cascade on the baseline ($\Delta$ vs.\ row 1)}
+  & $-0.019$ & $-0.012$ & $-0.035$ & $-0.022$ \\
+\multicolumn{2}{l}{Multi-agent vs.\ baseline, both with the cascade}
+  & $+0.068$ & $+0.044$ & $+0.047$ & $+0.047$ \\
+\multicolumn{2}{l}{\quad 95\% CI}
+  & $[{+}0.039,$ & $[{+}0.020,$ & $[{+}0.017,$ & $[{+}0.023,$ \\
+\multicolumn{2}{l}{}
+  & ${+}0.097]$ & ${+}0.069]$ & ${+}0.076]$ & ${+}0.071]$ \\
+\multicolumn{2}{l}{\quad W/T/L}
+  & 47/441/12 & 93/342/65 & 86/370/44 & 55/411/34 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The control does not reproduce the gain. Given the same cascade and the same
+cost, the single-agent arm does not improve on its own \texttt{flat:embed}
+configuration: nDCG@3 $-0.012$ with a confidence interval spanning zero, and
+recall@5 $-0.035$ with one that does not. Reading candidates is not, in
+general, worth 20 model calls. It is worth them when there is something in the
+pool to promote, which is the condition the union fetch creates and the
+baseline's single-phrasing fetch does not.
+
+Set side by side under one ranking function, one corpus, one judge, and one
+cost, the multi-agent arm leads the single-agent baseline by $+0.044$ nDCG@3
+$[+0.020, +0.069]$, $+0.068$ nDCG@1, $+0.047$ MRR, and---for the first time in
+this paper---on recall, $+0.047$ $[+0.017, +0.076]$, winning 86 questions to
+44. This is the one place where the decomposition pays, and the shape of the
+result says why it took this long to find: the advantage was created at fetch
+time by the union, held in the candidate pool through every measurement in
+Sections~\ref{sec:two-metrics}--\ref{sec:leak}, and destroyed at ranking time
+by the tier prior. Both halves had to be fixed before either was visible.
+
+We hold this result to the same standard as the ones it replaces. The two arms
+ran in separate runs rather than side by side in one, so the pairing rests on
+the corpus being identical by construction rather than by design; a single run
+carrying all three arms would be stronger. The judge remains
+\texttt{llama3.1}, which shares a model family with the system under test
+(Section~\ref{sec:threats}). And the gain is an ordering gain of 0.04--0.07 on
+a metric whose absolute level is near 0.5, not a difference in kind: the
+single-agent baseline remains a strong competitor at a third of the latency
+and a twentieth of the model calls.
 
 \subsection{Observations Carried Over From the Earlier Evaluation}
 \label{sec:carried-over}
@@ -2653,12 +2718,17 @@ intermittently emitted invalid tool calls, a property of that agent under an
   (Table~\ref{tab:tier-e2e}). The choice of scoring function is worth less than
   this one decision: every tiered configuration scores 0.15--0.25 and every flat
   one 0.32--0.49 (Table~\ref{tab:tier-offline}).
-  \item One capability of the decomposition survives as a ranking gain rather
-  than a claim: the Evaluator grading the top 20 retrieved documents instead of
-  counting their sources is worth $+0.027$ nDCG@3 over the same flat ranking
-  without it, at 20 model calls per question. With it, the multi-agent arm leads
-  the baseline over 500 questions on nDCG@1, nDCG@3 and MRR, while recall is
-  unchanged --- an ordering gain, not a fetching one (Section~\ref{sec:tier}).
+  \item With the prior removed, one capability of the decomposition pays. The
+  Evaluator grading the top 20 retrieved documents instead of counting their
+  sources gains nothing for the single-agent baseline given the same 20 model
+  calls per question ($-0.012$ nDCG@3, and $-0.035$ recall@5), and gains on
+  every metric for the multi-agent arm, whose union fetch put documents in the
+  pool for it to promote. Under one ranking function, one corpus, one judge and
+  one cost, the multi-agent arm leads the baseline by $+0.044$ nDCG@3
+  $[+0.020, +0.069]$ and $+0.047$ recall@5 $[+0.017, +0.076]$ over 500
+  questions (Table~\ref{tab:tier-control}). The advantage was created at fetch
+  time and destroyed at ranking time; both had to be fixed before either was
+  visible.
 \end{enumerate}
 
 \section{Discussion}\label{sec:discussion}

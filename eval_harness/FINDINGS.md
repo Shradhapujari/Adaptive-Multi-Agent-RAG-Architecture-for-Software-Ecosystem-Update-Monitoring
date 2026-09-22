@@ -351,6 +351,46 @@ the post itself excluded.
 
 ---
 
+## Finding 10 — The grading cascade is worth 20 calls only to the arm with the bigger pool
+
+The control Finding 9 asked for. `single_agent` re-run with the same ranker the
+multi-agent arm had (`flat:llm20@embed:qwen2.5:7b-instruct`), n=500, strict
+replay of `corpus_snapshot_b500_flat_0921` (10,310 hits, 0 corpus misses, so
+both arms read the same documents). Run `run_1790117750_8fda4edb2d21`.
+
+Arms ran in separate runs, so all three are re-scored against the **union** of
+both runs' qrels before pairing — `scripts/cross_run_compare.py`. Without that,
+the control's narrower judged pool gives it a smaller IDCG and the comparison
+reads a pooling difference as an effect.
+
+| Arm | ranker | nDCG@1 | nDCG@3 | Recall@5 | MRR |
+|---|---|---:|---:|---:|---:|
+| single_agent | `flat:embed` | 0.460 | 0.479 | 0.513 | 0.550 |
+| single_agent | `flat:llm20@embed` | 0.441 | 0.467 | 0.478 | 0.528 |
+| marag_llm | `flat:llm20@embed` | **0.509** | **0.511** | **0.525** | **0.575** |
+
+- **The cascade does nothing for the baseline.** −0.012 nDCG@3 (CI spans zero),
+  −0.035 recall@5 (CI excludes zero, p_holm 0.027). 20 calls per question for
+  nothing. Reading candidates pays only when the pool holds something to
+  promote.
+- **Like for like** (both arms `flat:llm20@embed`, one corpus, one judge, one
+  cost): marag_llm leads on **every** metric — nDCG@1 +0.068 [+0.039, +0.097],
+  nDCG@3 +0.044 [+0.020, +0.069], recall@5 +0.047 [+0.017, +0.076], MRR +0.047
+  [+0.023, +0.071]; W/T/L 93/342/65 at rank 3. All p_holm ≤ 0.002.
+- **Recall moves for the first time.** Every earlier multi-agent result was an
+  ordering effect on an identical candidate set. Here the union's extra
+  documents reach the top-5.
+
+The advantage was created at fetch time by the union, held in the pool through
+every measurement in Findings 1–8, and destroyed at ranking time by the tier
+prior. Both had to be fixed before either was visible.
+
+Caveats: separate runs rather than one three-arm run (the corpus is identical
+by construction, not by design); same `llama3.1` judge; the baseline is still
+a strong competitor at a third of the latency.
+
+---
+
 ## Confounds, and what has been done about them
 
 | Confound | Status |
