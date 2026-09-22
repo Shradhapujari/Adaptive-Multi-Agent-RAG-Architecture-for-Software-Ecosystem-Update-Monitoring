@@ -1452,6 +1452,94 @@ Ollama with temperature set to zero. The evaluation platform consisted
 of Apple Silicon hardware with 24\,GB memory and Metal GPU
 acceleration.
 
+\subsection{How a Reported Number Is Produced}\label{sec:protocol}
+
+Every retrieval number in Section~\ref{sec:results} is the mean over questions
+of a per-question, per-arm quantity computed by one harness
+(\texttt{eval\_harness/run\_eval.py}) in one pass. Because the arms differ in
+what they fetch, and because an LLM supplies the relevance labels, the order in
+which those steps happen decides what the number can be read to mean. We
+therefore trace a single question end to end rather than name the metrics and
+leave the protocol implicit.
+
+\paragraph{1. The question.} A benchmark record carries an id, the question
+text, its ecosystem and category, the endpoint and record type it was mined
+from, and---for a community-mined question---the URL of the post whose title it
+is. Every arm in the run receives the same question string.
+
+\paragraph{2. Retrieval.} Each arm retrieves through the same
+\texttt{RetrieverAgent} against the endpoints of
+Section~\ref{sec:datasources}: the baseline on the question, the multi-agent
+arm on the union of the question and its rewriting
+(Section~\ref{sec:union-fetch}). Before any ranking, the record's own source
+URL is struck from the candidate pool of \emph{every} arm
+(Section~\ref{sec:leak}). When a run is made in replay against a corpus
+snapshot, the fetch is served from that snapshot, so the arms differ by
+capability rather than by what the live feed happened to hold at the moment
+each one ran.
+
+\paragraph{3. Ranking and cut.} The candidate pool is ordered by the run's
+ranking function and cut to $k=4$. Two settings decide the ordering and are
+recorded per run: the scorer (BM25, embedding cosine, reciprocal-rank fusion,
+or an LLM grading cascade) and whether the verified-source tier prior is
+applied before it or not (Section~\ref{sec:rerank}). The top-$k$ list of
+document ids is what the metrics see; the documents themselves are what the
+answer is synthesized from.
+
+\paragraph{4. Judging.} The judged pool for a question is the union of what
+\emph{all} arms returned for it---optionally widened to everything they
+considered, which is what makes pool recall computable. Each
+(question,~document) pair is labelled once, by \texttt{llama3.1} at temperature
+zero, on a graded scale: 2 highly relevant, 1 related, 0 irrelevant. The label
+is keyed by a hash of the question text together with the document id and
+cached on disk, so it is computed once and reused for every arm in the run and
+for every later run that retrieves the same document for the same question. No
+arm is scored against a private set of judgments, and no arm is penalized for a
+document that only a competing arm surfaced.
+
+\paragraph{5. Metrics.} From the ranked list and those labels:
+nDCG@$k$ with gain $2^g-1$ and the standard $\log_2$ discount, its ideal
+computed from the same per-question pool; Recall@$k$ over the relevant
+documents in that pool; MRR on the first document with grade $\geq 1$. The
+denominators are therefore \emph{pool-relative}. A system cannot be charged for
+relevant documents no arm retrieved, which makes these numbers valid for the
+paired within-run comparisons this paper draws and invalid as absolute values
+to compare against published figures computed over a fixed judged corpus. We
+state the pooling protocol with every absolute number for this reason.
+
+\paragraph{6. Answer scoring.} The same judge scores each arm's answer for
+faithfulness to its own retrieved contexts and for answer relevance, each in
+$[0,1]$, and for correctness against the reference answer on the questions that
+carry one. Section~\ref{sec:metric-threat} states what an LLM judge scoring a
+template against prose measures, and why the \texttt{marag\_llm} arm exists.
+
+\paragraph{7. Cost.} The harness counts, per arm and per question, every model
+call and every prompt and completion token the arm itself spent, attributed by
+role---rewriting, ranking, synthesis---with the judge's own calls excluded, so
+an accuracy difference between arms can be read against what it cost to obtain.
+
+\paragraph{8. Statistics.} Arms are compared pairwise on the per-question
+values, never on the difference of two means: the paired difference vector
+feeds an exact two-sided Wilcoxon signed-rank test at the sample sizes where it
+is exact, a percentile bootstrap 95\% confidence interval over question-level
+differences (10{,}000 resamples, fixed seed), and a win/tie/loss count.
+Families of comparisons carry a Holm correction.
+
+\paragraph{9. What is left behind.} A run writes a directory
+\texttt{results/run\_\textless epoch\textgreater\_\textless dataset
+hash\textgreater/} holding: \texttt{config.json}, the arm configuration
+actually used---ranking function, tier mode, own-post exclusion, corpus
+snapshot statistics, agent-rules hash---read back from the objects the run
+built rather than from the environment it was launched with;
+\texttt{per\_query.jsonl}, one row per question per arm with the ranked
+document ids, every metric, latency, model calls and tokens;
+\texttt{qrels.json}, the labels used by \emph{this} run alone, so its numbers
+recompute from its own artifacts without the accumulated cache;
+\texttt{aggregate.csv} and \texttt{report.md}. Each table in
+Section~\ref{sec:results} names the run id it was computed from, and every
+number in it is recoverable from that directory without re-running the live
+endpoints.
+
 \subsection{Arm Comparability and the Ablation Ladder}\label{sec:ladder}
 
 Set side by side, the two arms do not hold the same capabilities. The
