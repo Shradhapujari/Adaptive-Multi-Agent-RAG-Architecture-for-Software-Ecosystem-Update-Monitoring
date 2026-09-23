@@ -24,7 +24,8 @@ Rankers are `<mode>:<scorer>`:
           llm:<provider:model>  -- pointwise 0-2 grade on the top-N of rrf,
                      ties broken by rrf. The cascade keeps the model-call count
                      at N per pool instead of |pool|. `llm20@embed:...` grades
-                     the top-20 of the embed order instead (N default 12).
+                     the top-20 of the embed order instead; the base may be
+                     rrf (default), bm25, embed or none, and N defaults to 12.
 
 A document promoted into the top-k that no earlier run judged scores 0 here
 and is counted in `unjudged@k`. `--judge` labels those with the harness judge
@@ -59,6 +60,10 @@ TIER2_SOURCES = {"vendor_reddit", "google_news", "reddit", "news"}
 KS = (1, 3, 5)
 RRF_K = 60
 LLM_TOP_N = 12
+# Bases a `llm<N>@<base>:<model>` cascade may grade on top of. `rerank.py`'s
+# own spec accepts bm25|embed|none, so the two have to agree or the same
+# string means two different things in the bench and in the pipeline.
+BASES = ("rrf", "bm25", "embed", "none")
 
 
 def tier(d: dict) -> int:
@@ -93,8 +98,28 @@ class Scorer:
                 head, self.llm_base = head.split("@", 1)
             if head[3:]:
                 self.llm_n = int(head[3:])
+            if self.llm_base not in BASES:
+                raise ValueError(
+                    f"unknown cascade base {self.llm_base!r} in {spec!r} "
+                    f"(expected {'|'.join(BASES)})")
             self.llm = make_client(model)
             self._grade_cache: Dict[str, int] = {}
+
+    def _base(self, mode: str, query: str, docs: List[dict]):
+        """(scores, descending order) from one base ranker."""
+        n = len(docs)
+        if mode == "none":
+            return [0.0] * n, list(range(n))
+        if mode == "bm25":
+            s = self.bm25.scores(query, docs)
+        elif mode == "embed":
+            s = self.embed.scores(query, docs)
+        else:
+            b = self.bm25.scores(query, docs)
+            e = self.embed.scores(query, docs)
+            s = rrf([sorted(range(n), key=lambda i: -b[i]),
+                     sorted(range(n), key=lambda i: -e[i])], n)
+        return s, sorted(range(n), key=lambda i: -s[i])
 
     def order(self, query: str, docs: List[dict]) -> List[int]:
         n = len(docs)
@@ -103,21 +128,17 @@ class Scorer:
         if self.spec == "none":
             return list(range(n))
         if self.spec == "bm25":
-            s = self.bm25.scores(query, docs)
-            return sorted(range(n), key=lambda i: -s[i])
+            return self._base("bm25", query, docs)[1]
         if self.spec.startswith("embed"):
-            s = self.embed.scores(query, docs)
-            return sorted(range(n), key=lambda i: -s[i])
-        b = self.bm25.scores(query, docs)
-        e = self.embed.scores(query, docs)
-        fused = rrf([sorted(range(n), key=lambda i: -b[i]),
-                     sorted(range(n), key=lambda i: -e[i])], n)
-        base = sorted(range(n), key=lambda i: -fused[i])
+            return self._base("embed", query, docs)[1]
         if self.spec == "rrf":
-            return base
-        if self.llm_base == "embed":
-            fused = e
-            base = sorted(range(n), key=lambda i: -e[i])
+            return self._base("rrf", query, docs)[1]
+        # The cascade grades the top-N of the base the spec names. Only
+        # `embed` used to be honoured here, so `llm12@bm25:<model>` and
+        # `llm12@none:<model>` both graded the RRF fusion and were reported
+        # under the base the operator asked for -- silently, which is the one
+        # thing an ablation sweep must not do.
+        fused, base = self._base(self.llm_base, query, docs)
         head = base[:self.llm_n]
         grades = {i: self._grade(query, docs[i]) for i in head}
         head.sort(key=lambda i: (-grades[i], -fused[i]))

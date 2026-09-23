@@ -33,7 +33,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from temporal import resolve_temporal, matches_window
-from fetch_union import union_fetch, product_terms
+from fetch_union import union_fetch, product_terms, reset_screened
 from agent_rules import rules_block
 import answer_agent
 from answer_agent import present_answer
@@ -485,6 +485,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         "evaluation":      {},
         "timing":          {},
         "errors":          [],
+        "screened":        [],
     }
 
     # Step 0 — Temporal Grounder
@@ -494,6 +495,10 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # the absolute date instead of a token that cannot match.
     errors = _reset_fetch_errors()
     results["errors"] = errors
+    # Once per run, not once per fetch: the three agents below share one log,
+    # so a row screened out of the community fetch is still reported after the
+    # release and CVE fetches have run.
+    results["screened"] = reset_screened()
 
     t0 = time.time()
     # One call, and it is the same call the evaluation's `single_agent_grounded`
@@ -1379,6 +1384,21 @@ elif run_btn and query:
                 st.error(f"**{e['agent']} feed unreachable** — {e['error']}. "
                          "No documents from this feed are included below, and "
                          "nothing is cited from it.")
+
+        # ── SCREENED DOCUMENTS ────────────────────────────────
+        # Dropping is silent to the model and loud here: the model never sees
+        # the row, and the operator sees which row it was and what tripped it.
+        # Without this the screen was only half a control -- it dropped the
+        # document and told nobody, so an attempt on the corpus left no trace.
+        if results.get("screened"):
+            for d in results["screened"]:
+                doc = d["doc"]
+                title = (doc.get("title") or doc.get("text") or str(doc))[:120] \
+                    if isinstance(doc, dict) else str(doc)[:120]
+                st.warning(f"**Screened out ({d['pattern']})** — “{title}”")
+            st.caption("These rows carried text addressed to the model rather than "
+                       "to a reader. They were dropped before ranking, so nothing "
+                       "below is retrieved from them and nothing cites them.")
 
         gq = results.get("grounding")        # same: read by the raw-data payload
 
