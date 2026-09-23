@@ -1626,6 +1626,10 @@ class RetrieverAgent:
 class EvaluatorAgent:
     name = "📊  Evaluator Agent"
 
+    # Fraction of the question's terms the best retrieved document must
+    # share, before any source floor, for the Manager not to retry.
+    RETRY_THRESHOLD = float(os.environ.get("MARAG_RETRY_THRESHOLD", "0.15"))
+
     def run(self, docs: list, original_query: str) -> dict:
         print(f"\n  {self.name}")
         bar()
@@ -1648,13 +1652,14 @@ class EvaluatorAgent:
                 scores.append(hits)
             best = max(scores) if scores else 0
             quality = round(min(best / max(len(query_terms), 1), 1.0), 2)
+            relevance = quality
             # If we have verified Apple sources, minimum quality is MEDIUM
             has_apple = any(d.get("source") in ["apple_rss","cisa_kev","circl_cve"]
                            for d in docs)
             if has_apple and quality < 0.3:
                 quality = 0.3
         else:
-            quality = 0.0
+            quality = relevance = 0.0
         # If vendor-targeted releases found — that IS a quality signal
         has_vendor_releases = any(d.get("source") == "vendor_releases" for d in docs)
         has_vendor_reddit   = any(d.get("source") == "vendor_reddit"   for d in docs)
@@ -1676,7 +1681,15 @@ class EvaluatorAgent:
         elif tier1_hits and quality < 0.3:
             quality = 0.3
 
-        signal = "✅ positive" if quality >= 0.15 else "⚠️  negative — manager will retry"
+        # The retry fires on how well the documents match the *question*, not on
+        # which sources happened to answer. The source floors above lift
+        # `quality` to >= 0.30 whenever anything recognisable was fetched, so a
+        # signal read off the floored score could never fire (FINDINGS.md,
+        # Finding 12: min 0.300 over 500 questions against a 0.15 threshold).
+        # `relevance` is the term-overlap score before any floor; `quality`
+        # keeps the floors so the reported self_quality is unchanged.
+        signal = ("✅ positive" if relevance >= self.RETRY_THRESHOLD
+                  else "⚠️  negative — manager will retry")
 
         print(f"  Quality  : {quality:.2f} / 1.0")
         print(f"  RLAIF    : {signal}")
@@ -1896,7 +1909,8 @@ Answer:"""
             lines.append("")
             src_str = ", ".join(verified_src)
             lines.append(f"  Data sourced from: {src_str} | releasetrain.io")
-        return {"quality": quality, "signal": signal, "answer": "\n".join(lines)}
+        return {"quality": quality, "relevance": relevance, "signal": signal,
+                "answer": "\n".join(lines)}
 
 # ─────────────────────────────────────────────────────────────
 # MANAGER AGENT — ORCHESTRATOR
