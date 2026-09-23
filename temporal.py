@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+import os
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Tuple
 
@@ -217,6 +218,33 @@ class TemporalResolution:
         return "; ".join(f'"{a}" → {b}' for a, b in self.terms)
 
 
+def now(default: Optional[datetime] = None) -> datetime:
+    """The clock this process should treat as the present.
+
+    Retrieval reads the clock: a question carrying "latest" or "last week"
+    resolves to a date filter, and that filter decides which documents are
+    fetched and kept. A corpus snapshot freezes the HTTP responses but not the
+    clock, so the same snapshot replayed on two different days produced
+    different candidate pools -- measured at 20.1 documents per question on the
+    day of recording against 16.8 a day later, which is large enough to move
+    every retrieval metric and to confound any comparison whose arms ran on
+    different days.
+
+    `MARAG_NOW` pins it. A replay sets it from the snapshot's own recording
+    date (`corpus_snapshot`), so a frozen corpus is frozen in time as well as
+    in content, and an explicit setting always wins.
+    """
+    raw = os.environ.get("MARAG_NOW", "").strip()
+    if not raw:
+        return default or datetime.now()
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        raise ValueError(
+            f"MARAG_NOW={raw!r} is not an ISO date or datetime "
+            f"(e.g. 2026-09-21 or 2026-09-21T14:30:00)")
+
+
 def resolve_temporal(query: str, now: Optional[date] = None) -> TemporalResolution:
     """Rewrite relative time expressions in `query` to absolute dates.
 
@@ -227,7 +255,7 @@ def resolve_temporal(query: str, now: Optional[date] = None) -> TemporalResoluti
     if isinstance(now, datetime):
         today = now.date()
     elif now is None:
-        today = date.today()
+        today = globals()["now"]().date()
     else:
         today = now
 

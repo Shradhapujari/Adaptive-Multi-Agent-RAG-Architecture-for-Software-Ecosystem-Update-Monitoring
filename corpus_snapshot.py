@@ -73,6 +73,7 @@ import gzip
 import hashlib
 import json
 import os
+from datetime import datetime
 import urllib.parse
 import urllib.request
 from typing import Dict, Optional
@@ -217,6 +218,48 @@ class Snapshot:
         self._real_requests_get = None
         self._real_urlopen = None
         os.makedirs(self.dir, exist_ok=True)
+        self.recorded_at = self._pin_clock()
+
+    # ---- the clock ------------------------------------------------------
+
+    META = "_meta.json"
+
+    def _pin_clock(self) -> Optional[str]:
+        """Freeze time along with the content.
+
+        Retrieval reads the clock: "latest" and "last week" become date filters
+        that decide which documents are fetched and kept (`temporal.now`). A
+        snapshot that freezes only the HTTP responses therefore still drifts --
+        replayed a day after it was recorded, the same questions came back with
+        16.8 candidates apiece against the 20.1 of the recording day, which is
+        enough to move every retrieval metric and to confound any comparison
+        whose arms ran on different days.
+
+        So a recording stamps the directory with its date, and a replay sets
+        `MARAG_NOW` from that stamp. An explicitly set `MARAG_NOW` always wins,
+        and a snapshot recorded before this existed has no stamp: the run goes
+        on with the live clock and `stats()` reports `recorded_at: null`, which
+        is the honest answer rather than a guess.
+        """
+        meta_path = os.path.join(self.dir, self.META)
+        if self.mode == "record":
+            if not os.path.exists(meta_path):
+                stamp = datetime.now().replace(microsecond=0).isoformat()
+                try:
+                    with open(meta_path, "w", encoding="utf-8") as f:
+                        json.dump({"recorded_at": stamp}, f)
+                except OSError:
+                    return None
+            # fall through: a re-record into an existing directory keeps the
+            # original stamp, so the two passes share one clock.
+        try:
+            with open(meta_path, encoding="utf-8") as f:
+                stamp = json.load(f).get("recorded_at")
+        except (OSError, ValueError):
+            return None
+        if stamp and not os.environ.get("MARAG_NOW", "").strip():
+            os.environ["MARAG_NOW"] = str(stamp)
+        return stamp
 
     # ---- storage --------------------------------------------------------
 
@@ -401,6 +444,8 @@ class Snapshot:
             # strict run that reached stats() is frozen by construction.
             "frozen": self.mode in ("replay", "strict") and not corpus_misses,
             "strict": self.mode == "strict",
+            "recorded_at": self.recorded_at,
+            "now": os.environ.get("MARAG_NOW") or None,
         }
 
 

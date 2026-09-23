@@ -893,8 +893,13 @@ def extract_date_from_query(query: str):
     """
     import re
     from datetime import datetime, timedelta
+    import temporal as _temporal
     q = query.lower()
-    today = datetime.now()
+    # Not datetime.now(): a question carrying "latest" or "last week" turns
+    # into a date filter here, and that filter decides what is fetched. Reading
+    # the wall clock made a replayed snapshot return different pools on
+    # different days -- see temporal.now().
+    today = _temporal.now()
 
     # ── Relative date tokens ────────────────────────────────────────────
     RELATIVE_TOKENS = {
@@ -1287,7 +1292,15 @@ def call_llama(prompt: str, model: str = "llama3.1") -> str:
 class QueryRewriterAgent:
     name = "🔄  Query Rewriter Agent  (Llama 3.1 via Ollama)"
 
-    def run(self, query: str) -> dict:
+    # One rule-based widening per round, so the fallback path does not hand the
+    # retriever the same padded string twice either.
+    FALLBACK_TERMS = (
+        "software update bug fixes release notes changelog",
+        "security advisory patch CVE vulnerability fixed version",
+        "stable release announcement upgrade migration notes",
+    )
+
+    def run(self, query: str, avoid: tuple = ()) -> dict:
         print(f"\n  {self.name}")
         bar()
         print(f"  Purpose  : Real LLM detects semantic gap + rewrites query")
@@ -1309,15 +1322,34 @@ Rules:
 - Keep it under 20 words
 - Focus on: bug fixes, releases, changelogs, security patches, performance
 - Return ONLY the rewritten query, nothing else
-
+{{tried}}
 Rewritten query:"""
+
+        # A retry that reissues the phrasing that just came back thin is a
+        # round of latency spent to get the same pool. The rewriter is the only
+        # agent that can produce different vocabulary, so it is told what has
+        # already been tried rather than being asked the same question twice.
+        prompt = prompt.format(tried=(
+            "\nThese phrasings were already searched and returned too little:\n"
+            + "\n".join(f"- {t}" for t in avoid)
+            + "\nUse different vocabulary: the vendor's own product names, the "
+              "component names, or the words a changelog would use. Do not "
+              "reuse the phrasings above.\n") if avoid else "")
 
         rewritten = call_llama(prompt)
 
         # fallback if Ollama fails
         if rewritten.startswith("[Ollama error"):
             print(f"  ⚠️  Ollama unavailable — using rule-based fallback")
-            rewritten = f"{query} software update bug fixes release notes changelog"
+            rewritten = f"{query} {self.FALLBACK_TERMS[len(avoid) % len(self.FALLBACK_TERMS)]}"
+
+        # The model can ignore the instruction above and repeat itself. If it
+        # does, the round is worthless as issued, so widen by rule instead --
+        # a different pool is the only thing that makes another round worth
+        # paying for.
+        if rewritten in avoid:
+            print(f"  ⚠️  Rewriter repeated a tried phrasing — widening by rule")
+            rewritten = f"{query} {self.FALLBACK_TERMS[len(avoid) % len(self.FALLBACK_TERMS)]}"
 
         print(f"  Output   : \"{rewritten[:70]}\"")
         return {"original": query, "rewritten": rewritten}
@@ -1844,6 +1876,17 @@ Answer:"""
 class ManagerAgent:
     name = "🧠  Manager Agent (Orchestrator)"
 
+    # How many retrieve-then-evaluate rounds the loop may run, counting the
+    # first. 2 is what the hardcoded single retry did, so the default changes
+    # nothing; an operator raises it per deployment rather than per question.
+    #
+    # This replaces a guard that read `"retry" not in query`, which capped the
+    # loop by asking whether the *user's wording* contained the word retry: a
+    # question about retry logic could never widen its fetch, and nothing
+    # capped a loop that the Evaluator kept scoring negative once the rounds
+    # became more than one.
+    MAX_ROUNDS = max(1, int(os.environ.get("MARAG_MAX_ROUNDS", "2")))
+
     def __init__(self):
         self.rewriter  = QueryRewriterAgent()
         self.retriever = RetrieverAgent()
@@ -1862,15 +1905,24 @@ class ManagerAgent:
         docs    = self.retriever.run(rewrite["rewritten"], original_query=query)
         result  = self.evaluator.run(docs, query)
 
-        if "negative" in result["signal"] and "retry" not in query:
-            print(f"\n  Manager: RLAIF signal negative — retrying with broader query...")
-            # Widen the FETCH with filler terms, but keep ranking against the
-            # user's own words -- without original_query the reranker falls
-            # back to the padded string, which is exactly the precision loss
-            # rerank.py exists to fix.
-            docs   = self.retriever.run(query + " software update release",
-                                        top_k=4, original_query=query)
+        tried = [rewrite["rewritten"]]
+        while "negative" in result["signal"] and len(tried) < self.MAX_ROUNDS:
+            print(f"\n  Manager: RLAIF signal negative — round "
+                  f"{len(tried) + 1} of {self.MAX_ROUNDS}, rewriting...")
+            # The rewriter is handed what has already been searched, so the
+            # round buys a different pool instead of reissuing the same one.
+            rewrite = self.rewriter.run(query, avoid=tuple(tried))
+            tried.append(rewrite["rewritten"])
+            # Rank against the user's own words: without original_query the
+            # reranker falls back to the widened string, which is exactly the
+            # precision loss rerank.py exists to fix.
+            docs   = self.retriever.run(rewrite["rewritten"], top_k=4,
+                                        original_query=query)
             result = self.evaluator.run(docs, query)
+
+        if "negative" in result["signal"]:
+            print(f"\n  Manager: retry ceiling reached ({self.MAX_ROUNDS} "
+                  f"round(s)) — answering from what was retrieved.")
 
         return result["answer"]
 

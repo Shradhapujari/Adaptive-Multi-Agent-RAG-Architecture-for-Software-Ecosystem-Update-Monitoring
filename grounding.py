@@ -194,7 +194,7 @@ def ground(question: str, now: Optional[date] = None,
     if temporal.changed:
         rewritten = _vendor.disambiguate(temporal.query, vendors)
     elif _AS_OF_RE.search(question):
-        rewritten = _as_of(rewritten, now or date.today())
+        rewritten = _as_of(rewritten, now or temporal.now().date())
 
     return GroundedQuestion(
         original=question,
