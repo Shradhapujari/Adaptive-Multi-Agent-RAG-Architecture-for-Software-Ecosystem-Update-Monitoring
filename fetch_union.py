@@ -10,9 +10,18 @@ from __future__ import annotations
 import re
 from typing import Callable, List, Optional
 
+from guardrail import screen
 from temporal import TemporalResolution, matches_window
 
-__all__ = ["union_fetch", "doc_key", "product_terms"]
+__all__ = ["union_fetch", "doc_key", "product_terms", "last_screened"]
+
+# What the last union fetch refused to hand on, as (doc, pattern) pairs.
+# Module-level because every caller here is a single-question demo request
+# and the alternative is threading a second return value through three
+# call sites that do not otherwise want one.
+# ponytail: not thread-safe; return it alongside the docs if the app ever
+# serves two questions at once.
+last_screened: List[tuple] = []
 
 # The release endpoint (`/api/v/`) matches `q` against product names, not
 # free text: "Linux" returns 606 versions, "critical Linux updates" returns 0.
@@ -108,6 +117,7 @@ def union_fetch(fetch_fn: Callable, phrasings: List[str], limit: int,
     if fetch_limit is None:
         fetch_limit = max(limit, 25) if (temporal is not None and temporal.window) else limit
     seen, out = set(), []
+    last_screened.clear()
     for phrase in phrasings:
         if not phrase:
             continue
@@ -116,6 +126,15 @@ def union_fetch(fetch_fn: Callable, phrasings: List[str], limit: int,
             if k in seen:
                 continue
             seen.add(k)
+            # Screened here rather than at the presenter: a fetched row that
+            # carries an instruction reaches the ranker, the evidence list and
+            # the prompt through this one loop, so this is the only place a
+            # drop covers all three. Dropping before the `limit` cut also means
+            # an attack costs a real document its slot, not the user an answer.
+            attack = screen(item)
+            if attack:
+                last_screened.append((item, attack))
+                continue
             out.append(item)
     if temporal is not None and temporal.window:
         # False (outside) and None (undated / unparseable) both sort after the

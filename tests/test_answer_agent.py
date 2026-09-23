@@ -20,6 +20,8 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import answer_agent  # noqa: E402
+import guardrail  # noqa: E402
+from eval_harness.benchmarks import is_abstention  # noqa: E402
 from answer_agent import (  # noqa: E402
     build_cited_prompt, collect_evidence, deterministic_paragraph, present_answer,
 )
@@ -309,3 +311,77 @@ def test_a_reddit_row_is_never_labelled_as_an_advisory_feed():
                                     "date": "2026-08-25", "url": ""}]})
     assert ev[0].label.startswith("Security Discussion")
     assert "CVE Feed" not in ev[0].label
+
+
+# ── the two guards wrapped around the presenter ──────────────────────────
+
+def test_a_credential_in_the_evidence_is_not_read_back_to_the_user(monkeypatch):
+    """`check()` cannot catch this one: a key that was in a retrieved row is
+    supported by the sources, which is the only question check() asks."""
+    monkeypatch.setattr(answer_agent, "_present",
+                        lambda *a, **k: answer_agent.PresentedAnswer(
+                            "The fix rotates AKIAIOSFODNN7EXAMPLE [R1].", "llm", "m"))
+    out = present_answer("q", RESULTS)
+    assert out.text == guardrail.LEAK_REFUSAL
+    assert "leak scan: aws_key" in out.note
+
+
+def test_the_rule_based_fallback_is_scanned_too(monkeypatch):
+    """The fallback is composed from the same rows by code, so falling back to
+    it is not an escape from a leak — it is the same leak, written by us."""
+    monkeypatch.setattr(answer_agent, "_present",
+                        lambda *a, **k: answer_agent.PresentedAnswer(
+                            "Reported for SSN 123-45-6789 [R1].", "rule-based"))
+    assert present_answer("q", RESULTS).text == guardrail.LEAK_REFUSAL
+
+
+def test_a_clean_answer_passes_through_unchanged(monkeypatch):
+    monkeypatch.setattr(answer_agent, "_present",
+                        lambda *a, **k: answer_agent.PresentedAnswer(
+                            "Fedora 44 shipped on 2026-09-01 [R1].", "llm", "m", "note"))
+    out = present_answer("q", RESULTS)
+    assert out.text == "Fedora 44 shipped on 2026-09-01 [R1]." and out.note == "note"
+
+
+class _Grounded:
+    def __init__(self, vendors):
+        self.vendors = vendors
+
+
+def test_an_unresolvable_product_declines_instead_of_answering(monkeypatch):
+    monkeypatch.setattr(answer_agent.vendor, "catalog_is_full", lambda *a: True)
+    out = present_answer("Is Blorptastic 9 out?",
+                         dict(RESULTS, grounding=_Grounded([])))
+    assert "no matching vendor" in out.text.lower()
+    assert "Blorptastic" in out.text
+    assert is_abstention(out.text, strong_only=True)
+
+
+def test_naming_no_product_at_all_is_answered_normally(monkeypatch):
+    """Naming nothing and naming something unrecognisable are different
+    failures. Only the second declines — 'what shipped this week?' is a
+    question this system exists to answer."""
+    monkeypatch.setattr(answer_agent.vendor, "catalog_is_full", lambda *a: True)
+    out = present_answer("what are the 3 latest updates?",
+                         dict(RESULTS, grounding=_Grounded([])))
+    assert "no matching vendor" not in out.text.lower()
+
+
+def test_a_resolved_vendor_is_answered_normally(monkeypatch):
+    monkeypatch.setattr(answer_agent.vendor, "catalog_is_full", lambda *a: True)
+    out = present_answer("Is Blorptastic 9 out?",
+                         dict(RESULTS, grounding=_Grounded(["blorptastic"])))
+    assert "no matching vendor" not in out.text.lower()
+
+
+def test_the_offline_fallback_catalog_never_declines(monkeypatch):
+    """74 bundled names against the catalog's 14k: on a host with no catalog,
+    abstaining on 'unresolved' would decline nearly every question."""
+    monkeypatch.setattr(answer_agent.vendor, "catalog_is_full", lambda *a: False)
+    out = present_answer("Is Blorptastic 9 out?",
+                         dict(RESULTS, grounding=_Grounded([])))
+    assert "no matching vendor" not in out.text.lower()
+
+
+def test_a_question_with_no_grounding_step_is_never_gated():
+    assert answer_agent.unresolved_products("Is Blorptastic 9 out?", RESULTS) == []

@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Dict, List, Optional
 
@@ -312,8 +312,69 @@ def _resolve_spec(explicit: Optional[str]) -> Optional[str]:
             or _selected_spec())
 
 
+# Worded around "no matching vendor", which is already a strong abstention
+# marker: what is substituted has to read as a declined answer, not a claim.
+VENDOR_ABSTENTION = (
+    "No matching vendor for {terms} in the product catalog. Rather than answer "
+    "from sources that are about something else, I am declining: check the "
+    "spelling, or name the vendor alongside the product."
+)
+
+
+def unresolved_products(query: str, results: Dict) -> List[str]:
+    """Product-shaped words in `query` that the vendor catalog does not know.
+
+    Three conditions, and all three are needed to avoid declining questions
+    that are perfectly answerable:
+
+    * the grounding step ran and resolved no vendor at all — without it there
+      is nothing to say the question was about a product;
+    * the catalog in use is the real one, not the offline fallback;
+    * the leftover word is not one of the products `fetch_union` knows by
+      name, because a known product the catalog missed is a catalog problem,
+      not an unresolvable vendor.
+
+    A question that names no product — "what are the 3 latest updates?" —
+    yields nothing here and is answered normally. Naming nothing and naming
+    something unrecognisable are different failures; only the second declines.
+    """
+    g = results.get("grounding")
+    if g is None or getattr(g, "vendors", None):
+        return []
+    if not vendor.catalog_is_full():
+        return []
+    from fetch_union import _KNOWN_PRODUCTS, product_terms
+    return [t for t in product_terms(query) if t.lower() not in _KNOWN_PRODUCTS]
+
+
 def present_answer(query: str, results: Dict, model_spec: Optional[str] = None,
                    window_note: str = "", per_kind: int = 4) -> PresentedAnswer:
+    """`_present`, with a vendor gate before it and a leak scan after it.
+
+    The scan is here and not inside `_present` because it has to cover the
+    rule-based fallback too. `check()` cannot do this job: a credential that
+    was in a retrieved row is *supported by the sources*, which is exactly what
+    check() is asking, so it passes — and the fallback paragraph is composed
+    from those same rows by code, so falling back leaks just as readily.
+    """
+    unknown = unresolved_products(query, results)
+    if unknown:
+        terms = _join([f"\u201c{t}\u201d" for t in unknown])
+        return PresentedAnswer(VENDOR_ABSTENTION.format(terms=terms),
+                               "rule-based", note="vendor unresolved",
+                               evidence=collect_evidence(results, per_kind=per_kind))
+
+    out = _present(query, results, model_spec, window_note, per_kind)
+    text, hits = guardrail.scrub(out.text)
+    if not hits:
+        return out
+    note = "leak scan: " + ", ".join(hits)
+    return replace(out, text=text,
+                   note=f"{out.note}; {note}" if out.note else note)
+
+
+def _present(query: str, results: Dict, model_spec: Optional[str] = None,
+             window_note: str = "", per_kind: int = 4) -> PresentedAnswer:
     """Turn a pipeline result into a readable, cited paragraph.
 
     Tries the LLM presenter first; falls back to the rule-based paragraph on
