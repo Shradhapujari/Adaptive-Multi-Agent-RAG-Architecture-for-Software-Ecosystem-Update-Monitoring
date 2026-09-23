@@ -301,10 +301,11 @@ class MultiAgentRAGGenerator(Generator):
                 # ManagerAgent.run returns only the answer string and the
                 # harness needs the retrieved documents too.
                 #
-                # NOTE the real threshold: EvaluatorAgent emits the negative
-                # signal at quality < 0.15, not the 0.30 the write-up claims.
-                # 0.30 is a different constant in that method (a quality floor
-                # for tier-1 and Apple sources).
+                # The signal is EvaluatorAgent's: negative when the pre-floor
+                # term overlap (`relevance`) is under RETRY_THRESHOLD (0.15).
+                # The floored `quality` never drops below 0.30 once any
+                # recognised source is present, which is why the retry could
+                # not fire before 2026-09-23 (FINDINGS.md, Finding 12).
                 retried = True
                 docs = self.retriever.run(query + " software update release",
                                           top_k=self.top_k, original_query=query,
