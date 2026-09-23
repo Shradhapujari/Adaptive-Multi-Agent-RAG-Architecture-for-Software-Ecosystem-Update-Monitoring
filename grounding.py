@@ -48,6 +48,7 @@ import intent as _intent
 import keywords as _keywords
 import vendor as _vendor
 from temporal import TemporalResolution, resolve_temporal
+from temporal import now as _clock
 
 __all__ = ["GroundedQuestion", "ground", "AS_OF_WORDS"]
 
@@ -194,7 +195,9 @@ def ground(question: str, now: Optional[date] = None,
     if temporal.changed:
         rewritten = _vendor.disambiguate(temporal.query, vendors)
     elif _AS_OF_RE.search(question):
-        rewritten = _as_of(rewritten, now or temporal.now().date())
+        # `temporal` is this function's TemporalResolution, not the module, so
+        # the clock has to be reached through the import alias.
+        rewritten = _as_of(rewritten, now or _clock().date())
 
     return GroundedQuestion(
         original=question,
