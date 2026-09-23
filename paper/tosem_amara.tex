@@ -2561,93 +2561,100 @@ baseline's 1{,}232 under the enlarged judgments, 303 of them fetched by the
 multi-agent arm alone.
 
 Run end to end on all 500 benchmark questions with flat ranking throughout and
-the grading cascade on the multi-agent arm, that arm leads the baseline on
-every rank-sensitive metric: nDCG@1 $+0.049$ $[+0.023, +0.077]$, nDCG@3
-$+0.032$ $[+0.012, +0.053]$, MRR $+0.025$ $[+0.007, +0.044]$, each surviving a
-Holm correction, with 94 wins to 63 losses at rank 3. Recall@5 does not move
-($+0.014$, CI spanning zero), which is consistent with the mechanism: the
-documents were already in the pool, and what changed is where they sit in it.
-Faithfulness is indistinguishable from the baseline once answer format is
-matched ($+0.001$).
+the grading cascade on the multi-agent arm, that arm appeared to lead the
+baseline on every rank-sensitive metric: nDCG@1 $+0.049$, nDCG@3 $+0.032$, MRR
+$+0.025$, each with a confidence interval excluding zero and surviving a Holm
+correction. We report those numbers because the next subsection is about why
+they are wrong, and because the error they contain is one an evaluation of this
+kind invites.
 
-That comparison on its own does not establish what produced the lead. The
-grading cascade runs on the multi-agent arm and not on the baseline, which is
-the treatment---it is the Evaluator reading what was retrieved instead of
-counting its sources---but it is also 20 model calls the baseline does not
-make, and a ranking gain from reading candidates is not obviously a gain from
-decomposing the pipeline. Every earlier candidate for a multi-agent advantage
-in this paper dissolved at exactly this point, under exactly this question.
+The two arms of that comparison did not run in the same pass. The multi-agent
+arm came from a run that queried the endpoints live and recorded them; the
+baseline came from a strict replay of that recording. By
+Section~\ref{sec:protocol} those are not the same corpus: a snapshot holds one
+response per request key and a live feed answers the same key differently over
+the hours a 500-question run takes. We measured the size of that gap directly
+--- replaying the live-recorded run reproduced its multi-agent candidate pools
+on 1 of 12 questions, while two replays of a single configuration agree on 12
+of 12 --- so the comparison graded an arm that had seen a wider, fresher
+community feed against one that had not.
 
-\subsubsection{The Attributing Control}\label{sec:tier-control}
+\subsubsection{The Attributing Control, and the Frozen Run}\label{sec:tier-control}
 
-We therefore ran the baseline a second time with the grading cascade attached
-to it, over the same 500 questions, in strict replay against the corpus
-snapshot the previous run recorded---10{,}310 document reads served from disk
-and no miss on any corpus host, so the two arms read the same documents by
-construction. The arms are then identical in ranking function, corpus, judge,
-and per-question model cost, and differ only in whether retrieval was
-decomposed. Because the arms ran in separate runs, each with its own judged
-pool, all three are re-scored against the union of both runs' judgments before
-pairing; the union is what Table~\ref{tab:tier-control} reports, which shifts
-the values of the preceding paragraph by at most 0.001.
+Two comparisons were needed. The first gives the baseline the same grading
+cascade, to separate a gain from decomposition from a gain from 20 extra model
+calls. The second puts all three arms in one pass against one frozen corpus, to
+remove the cross-run confound just described. Both were run, and the second
+overturns the first.
+
+The control gives the baseline the cascade over the same 500 questions in
+strict replay. Scored against the union of both runs' judgments---each run
+judges its own pool, and an arm measured alone carries a narrower one, so
+comparing the runs' own figures would read a pooling difference as an
+effect---it does not improve: nDCG@3 $0.479 \to 0.467$ with a confidence
+interval spanning zero, and recall@5 $-0.035$ with one that does not. Reading
+candidates is not worth 20 model calls to an arm with nothing extra in its pool
+to promote. Against that control the multi-agent arm led by $+0.044$ nDCG@3.
+But the multi-agent arm in that comparison was still the live-recorded one, so
+the lead inherits the confound and cannot be read as an architectural effect.
 
 \begin{table}[t]
-\caption{The grading cascade given to each architecture in turn. $n=500$,
-scored against the pooled judgments of both runs, paired over questions with
-percentile bootstrap 95\% CI and Holm correction. The cascade does not help
-the baseline: given the same 20 model calls per question, the single-agent arm
-does not improve, and on recall it degrades. The same cascade on the
-multi-agent arm's larger pool gains on every metric.}
+\caption{All three arms in one pass: 500 questions, flat ranking, the grading
+cascade on every arm, strict replay of one snapshot with the process clock
+pinned to that snapshot's recording date (33{,}454 document reads served from
+disk, no miss on any document host). Paired over questions with percentile
+bootstrap 95\% CI and Holm correction. \texttt{marag} and \texttt{marag\_llm}
+share a retrieval path and differ only in rendering, so their retrieval rows
+are identical by construction. Run \texttt{run\_1790126271}; a repeat of this
+configuration reproduces it document for document.}
 \label{tab:tier-control}
-\begin{tabular}{llrrrr}
+\begin{tabular}{lrrrl}
 \toprule
-Arm & Ranking function & nDCG@1 & nDCG@3 & Recall@5 & MRR \\
+Metric & Multi-agent & Single-agent & $\Delta$ (95\% CI) & W/T/L \\
 \midrule
-Single-agent & \texttt{flat:embed}      & 0.460 & 0.479 & 0.513 & 0.550 \\
-Single-agent & \texttt{flat:llm20@embed} & 0.441 & 0.467 & 0.478 & 0.528 \\
-Multi-agent  & \texttt{flat:llm20@embed} & \textbf{0.509} & \textbf{0.511} & \textbf{0.525} & \textbf{0.575} \\
+nDCG@1   & 0.462 & 0.445 & $+0.017$ $[-0.001, +0.035]$ & 17/475/8 \\
+nDCG@3   & 0.496 & 0.490 & $+0.006$ $[-0.009, +0.021]$ & 43/410/47 \\
+nDCG@5   & 0.509 & 0.499 & $+0.010$ $[-0.004, +0.025]$ & 56/390/54 \\
+Recall@5 & 0.551 & 0.532 & $+0.018$ $[-0.001, +0.038]$ & 46/426/28 \\
+MRR      & 0.536 & 0.528 & $+0.008$ $[-0.004, +0.022]$ & 22/457/21 \\
 \midrule
-\multicolumn{2}{l}{Cascade on the baseline ($\Delta$ vs.\ row 1)}
-  & $-0.019$ & $-0.012$ & $-0.035$ & $-0.022$ \\
-\multicolumn{2}{l}{Multi-agent vs.\ baseline, both with the cascade}
-  & $+0.068$ & $+0.044$ & $+0.047$ & $+0.047$ \\
-\multicolumn{2}{l}{\quad 95\% CI}
-  & $[{+}0.039,$ & $[{+}0.020,$ & $[{+}0.017,$ & $[{+}0.023,$ \\
-\multicolumn{2}{l}{}
-  & ${+}0.097]$ & ${+}0.069]$ & ${+}0.076]$ & ${+}0.071]$ \\
-\multicolumn{2}{l}{\quad W/T/L}
-  & 47/441/12 & 93/342/65 & 86/370/44 & 55/411/34 \\
+Faithfulness      & 0.900 & 0.897 & $+0.003$ $[-0.006, +0.012]$ & 72/375/53 \\
+Answer relevance  & 0.950 & 0.948 & $+0.002$ $[-0.007, +0.011]$ & 55/408/37 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The control does not reproduce the gain. Given the same cascade and the same
-cost, the single-agent arm does not improve on its own \texttt{flat:embed}
-configuration: nDCG@3 $-0.012$ with a confidence interval spanning zero, and
-recall@5 $-0.035$ with one that does not. Reading candidates is not, in
-general, worth 20 model calls. It is worth them when there is something in the
-pool to promote, which is the condition the union fetch creates and the
-baseline's single-phrasing fetch does not.
+Table~\ref{tab:tier-control} is the measurement that settles it, and it is
+null. With the tier prior removed, the grading cascade on both arms, one
+corpus, one judge, one clock, and one pass, the multi-agent architecture does
+not beat the single-agent baseline on any retrieval metric. The largest
+difference is $+0.018$ recall@5, whose interval includes zero and which does
+not survive the correction; nDCG@3 is $+0.006$ with 43 questions won and 47
+lost. Faithfulness and answer relevance are likewise indistinguishable once
+answer format is matched, while the template arm remains $0.059$ below the
+baseline on faithfulness---the format artifact of
+Section~\ref{sec:scaled-eval}, unchanged.
 
-Set side by side under one ranking function, one corpus, one judge, and one
-cost, the multi-agent arm leads the single-agent baseline by $+0.044$ nDCG@3
-$[+0.020, +0.069]$, $+0.068$ nDCG@1, $+0.047$ MRR, and---for the first time in
-this paper---on recall, $+0.047$ $[+0.017, +0.076]$, winning 86 questions to
-44. This is the one place where the decomposition pays, and the shape of the
-result says why it took this long to find: the advantage was created at fetch
-time by the union, held in the candidate pool through every measurement in
-Sections~\ref{sec:two-metrics}--\ref{sec:leak}, and destroyed at ranking time
-by the tier prior. Both halves had to be fixed before either was visible.
+So the lever of Section~\ref{sec:tier} is real as a ranking improvement and
+does not belong to the agents. Both halves of the earlier story survive on
+their own terms: the tier prior cost every arm roughly 0.23 nDCG@3
+(Table~\ref{tab:tier-e2e}), and grading the top 20 candidates improves ranking
+over an embedding scorer offline. What does not survive is the claim that the
+multi-agent arm converts them into an advantage. Read against the parity result
+of Section~\ref{sec:leak}, nothing has changed except the absolute level: every
+arm now retrieves at roughly 0.49 nDCG@3 rather than 0.30, and the arms remain
+indistinguishable.
 
-We hold this result to the same standard as the ones it replaces. The two arms
-ran in separate runs rather than side by side in one, so the pairing rests on
-the corpus being identical by construction rather than by design; a single run
-carrying all three arms would be stronger. The judge remains
-\texttt{llama3.1}, which shares a model family with the system under test
-(Section~\ref{sec:threats}). And the gain is an ordering gain of 0.04--0.07 on
-a metric whose absolute level is near 0.5, not a difference in kind: the
-single-agent baseline remains a strong competitor at a third of the latency
-and a twentieth of the model calls.
+We state what this episode cost us to see, because the error is not exotic. The
+confounded comparison was not careless---each run was internally frozen, the
+judgments were pooled across arms, the statistics were paired and
+corrected---and it still produced a significant result with a plausible
+mechanism, a clean interaction with the control, and a story about where the
+advantage was created and destroyed. What it lacked was one pass. The rule we
+would offer is narrow and mechanical: in a live-corpus domain, two arms
+compared against each other must execute in the same run, and the only way to
+be sure of that is to make the run frozen and reproducible and then reproduce
+it.
 
 \subsection{What the Accuracy Costs}\label{sec:efficiency}
 
@@ -2667,9 +2674,13 @@ they are far cheaper. ``Cold'' is the first question of a process; ``mean'' is
 the average over 25, which is lower because the grading cascade caches a grade
 per (question, document) pair and this benchmark's questions retrieve
 overlapping documents---a property of the corpus, not of the architecture. A
-deployed system answering unrelated questions pays the cold price. nDCG@3 is
-from the 500-question measurements of Section~\ref{sec:tier-control}, scored
-against pooled judgments. Cost runs \texttt{run\_1790122626},
+deployed system answering unrelated questions pays the cold price. The two
+\texttt{llm20} rows carry nDCG@3 from the frozen run of
+Table~\ref{tab:tier-control}; the \texttt{embed} rows are left blank rather
+than filled from a run made under other conditions, since the comparison this
+table invites across its rows is exactly the one
+Section~\ref{sec:tier-control} shows a cross-run figure cannot support. Cost
+runs \texttt{run\_1790122626},
 \texttt{run\_1790122667}, \texttt{run\_1790122759} and
 \texttt{run\_1790122836}, all strict replays with the judge off.}
 \label{tab:cost}
@@ -2679,10 +2690,10 @@ against pooled judgments. Cost runs \texttt{run\_1790122626},
 \cmidrule(lr){3-4}\cmidrule(lr){5-6}
 Arm & Ranking function & cold & mean & cold & mean & nDCG@3 \\
 \midrule
-Single-agent & \texttt{flat:embed}       &  1 &  1.0 &   332 &   315 & 0.479 \\
-Single-agent & \texttt{flat:llm20@embed} & 22 & 12.6 & 5{,}033 & 2{,}984 & 0.467 \\
-Multi-agent  & \texttt{flat:embed}       &  3 &  3.0 & 1{,}199 & 1{,}105 & parity \\
-Multi-agent  & \texttt{flat:llm20@embed} & 23 & 16.4 & 6{,}012 & 4{,}192 & \textbf{0.511} \\
+Single-agent & \texttt{flat:embed}       &  1 &  1.0 &   332 &   315 & --- \\
+Single-agent & \texttt{flat:llm20@embed} & 22 & 12.6 & 5{,}033 & 2{,}984 & 0.490 \\
+Multi-agent  & \texttt{flat:embed}       &  3 &  3.0 & 1{,}199 & 1{,}105 & --- \\
+Multi-agent  & \texttt{flat:llm20@embed} & 23 & 16.4 & 6{,}012 & 4{,}192 & 0.496 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -2703,30 +2714,32 @@ pool, and the HTTP request count roughly doubles as
 Section~\ref{sec:retrieval-cost} describes.
 
 \paragraph{The cascade costs about 12 generations and 2{,}700 tokens per
-question, and the baseline cannot use them.} Given exactly that budget, the
-single-agent arm goes from 0.479 to 0.467 nDCG@3 and loses 0.035 recall@5
-(Table~\ref{tab:tier-control}). This is the clearest cost result in the paper
-and the most easily missed one: the same 20 model calls per question are worth
-nothing on one architecture and $+0.044$ nDCG@3 on the other, because what they
-do is promote documents, and only one of the two arms fetched documents worth
-promoting.
+question, and buys neither architecture a lead over the other.} Given that
+budget the single-agent arm does not improve on its own embedding-ranked
+configuration, and given it on both arms the two are indistinguishable
+(Table~\ref{tab:tier-control}). What the cascade does buy is ranking quality
+for \emph{every} arm, like the tier prior before it: this is a retriever
+improvement sold at 20 model calls per question, and whether it is worth that
+price is a deployment question rather than an architectural one.
 
 \paragraph{The best configuration costs roughly 16 generations and 4{,}200
 tokens per question against the cheapest one's 1 and 315.} That is 16 times the
-calls and 13 times the tokens for $+0.032$ nDCG@3 over the cheapest baseline,
-or $+0.044$ over the baseline at matched cost. End-to-end latency in the
+calls and 13 times the tokens, and at matched cost it retrieves
+indistinguishably from the single-agent baseline ($+0.006$ nDCG@3,
+Table~\ref{tab:tier-control}). End-to-end latency in the
 live-fetch run was 107\,s per question for the multi-agent arm against
 35\,s for the baseline, measured before the cascade was added to both; under
 replay, latency is not a meaningful measurement and we do not report it.
 
 We draw the practitioner's conclusion rather than the architectural one. If
 retrieval quality at minimum cost is the objective, the single-agent baseline
-with flat ranking and an embedding reranker is the configuration to deploy: it
-is within 0.032 nDCG@3 of the best result here at a sixteenth of the model
-calls. The decomposition earns its cost only where the 0.03--0.04 matters
-enough to pay an order of magnitude for it, and---on the evidence of the
-control---only when the extra calls are spent reading a candidate pool that a
-union fetch has already widened. Neither half is worth buying alone.
+with flat ranking and an embedding reranker is the configuration to deploy.
+The decomposition costs 16 times the model calls and 13 times the tokens and
+returns no measurable retrieval advantage over it; the cascade costs 12 times
+the calls and lifts ranking for whichever architecture it is attached to. The
+one intervention in this paper that is both large and free is the removal of
+the tier prior (Section~\ref{sec:tier}): $+0.227$ nDCG@3 for every arm, at no
+additional model call at all.
 
 \subsection{Observations Carried Over From the Earlier Evaluation}
 \label{sec:carried-over}
@@ -2835,17 +2848,17 @@ intermittently emitted invalid tool calls, a property of that agent under an
   (Table~\ref{tab:tier-e2e}). The choice of scoring function is worth less than
   this one decision: every tiered configuration scores 0.15--0.25 and every flat
   one 0.32--0.49 (Table~\ref{tab:tier-offline}).
-  \item With the prior removed, one capability of the decomposition pays. The
-  Evaluator grading the top 20 retrieved documents instead of counting their
-  sources gains nothing for the single-agent baseline given the same 20 model
-  calls per question ($-0.012$ nDCG@3, and $-0.035$ recall@5), and gains on
-  every metric for the multi-agent arm, whose union fetch put documents in the
-  pool for it to promote. Under one ranking function, one corpus, one judge and
-  one cost, the multi-agent arm leads the baseline by $+0.044$ nDCG@3
-  $[+0.020, +0.069]$ and $+0.047$ recall@5 $[+0.017, +0.076]$ over 500
-  questions (Table~\ref{tab:tier-control}). The advantage was created at fetch
-  time and destroyed at ranking time; both had to be fixed before either was
-  visible.
+  \item With the prior removed, the architectures are again indistinguishable.
+  All three arms in one frozen, reproducible pass over 500 questions, with the
+  grading cascade on every arm, put the multi-agent architecture $+0.006$
+  nDCG@3 ahead of the baseline (43 won, 47 lost) and $+0.018$ recall@5, neither
+  surviving correction (Table~\ref{tab:tier-control}). An earlier comparison
+  that put the same arms $+0.044$ apart drew them from two different runs, one
+  recorded live and one replayed, which is not one corpus; we report it and its
+  correction because the error produced a significant result with a plausible
+  mechanism and was caught only by repeating the measurement in a single pass.
+  The ranking gains of items~6 and~8 are real and belong to the retriever, not
+  to the decomposition.
 \end{enumerate}
 
 \section{Discussion}\label{sec:discussion}

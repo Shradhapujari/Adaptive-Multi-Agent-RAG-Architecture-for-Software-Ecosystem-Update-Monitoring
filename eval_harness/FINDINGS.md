@@ -391,6 +391,51 @@ a strong competitor at a third of the latency.
 
 ---
 
+## Finding 11 — Finding 10 was a cross-run artifact; frozen and in one pass, the arms are identical
+
+`run_1790126271_8fda4edb2d21` — 500 questions, `flat`, `llm20@embed:qwen2.5:7b-instruct`
+on **all three arms**, strict replay of `corpus_snapshot_b500_flat_0921`, clock
+pinned to the snapshot stamp (33,454 document reads from disk, 0 corpus misses).
+
+| metric | marag_llm | single_agent | Δ (95% CI) | p_holm | W/T/L |
+|---|---:|---:|---:|---:|---:|
+| nDCG@1 | 0.462 | 0.445 | +0.017 [−0.001, +0.035] | 0.134 | 17/475/8 |
+| nDCG@3 | 0.496 | 0.490 | +0.006 [−0.009, +0.021] | 0.864 | 43/410/47 |
+| Recall@5 | 0.551 | 0.532 | +0.018 [−0.001, +0.038] | 0.120 | 46/426/28 |
+| MRR | 0.536 | 0.528 | +0.008 [−0.004, +0.022] | 0.415 | 22/457/21 |
+| Faithfulness | 0.900 | 0.897 | +0.003 | 0.532 | 72/375/53 |
+
+**Null on everything.** Finding 10's +0.044 is withdrawn.
+
+Why it was wrong: the marag arm came from `run_1789976732`, which ran in
+**record** mode against live endpoints; the control came from a strict replay.
+A snapshot stores one body per request key and the live Reddit feed answers the
+same key differently over the hours a 500-question run takes, so the two arms
+did not see one corpus. Measured: replaying `run_1789976732` reproduces its
+marag pools on **1 of 12** questions; two replays of one config agree **12/12**
+and are byte-identical.
+
+Ruled out on the way: grade-cache key collisions (7 aliasing keys in 3,630) and
+clock drift (pinned and unpinned replays are identical). The clock fix landed
+anyway (`temporal.now()`, `MARAG_NOW`, snapshot `_meta.json`) — real drift,
+wrong suspect.
+
+**Rules this leaves:**
+1. Arms compared against each other must run in **one pass**. A run is only as
+   frozen as its least frozen arm.
+2. Only `replay`/`strict` runs are reproducible. Every `record` run in this
+   project — including the headline clean 500 (`run_1789703506`) — is
+   internally valid and externally irreproducible.
+3. Score cross-run comparisons with `scripts/cross_run_compare.py` if you must
+   make one, but prefer not to make one.
+
+What survives: the tier prior costs ~0.23 for every arm (Finding 9), the
+cascade improves ranking for whichever arm carries it, and every arm now sits
+near 0.49 nDCG@3 instead of 0.30 — with the arms still indistinguishable, which
+is the same parity Findings 4–8 report at a lower level.
+
+---
+
 ## Confounds, and what has been done about them
 
 | Confound | Status |
