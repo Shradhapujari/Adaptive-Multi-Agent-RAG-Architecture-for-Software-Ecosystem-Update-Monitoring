@@ -1476,10 +1476,34 @@ Section~\ref{sec:datasources}: the baseline on the question, the multi-agent
 arm on the union of the question and its rewriting
 (Section~\ref{sec:union-fetch}). Before any ranking, the record's own source
 URL is struck from the candidate pool of \emph{every} arm
-(Section~\ref{sec:leak}). When a run is made in replay against a corpus
-snapshot, the fetch is served from that snapshot, so the arms differ by
-capability rather than by what the live feed happened to hold at the moment
-each one ran.
+(Section~\ref{sec:leak}). A run reads its documents in one of two corpus
+modes, and which one decides what its numbers can later be re-derived from. In
+\emph{record} mode the endpoints are queried live and every response is written
+to a snapshot directory; in \emph{replay} mode the fetch is served from that
+directory, and in the \emph{strict} variant a document request the snapshot
+does not hold aborts the run rather than quietly going live. Either way the
+arms of a single run are compared against one corpus, which is what every
+comparison in this paper rests on. Only replay makes a run reproducible
+afterwards, and the asymmetry is worth stating precisely because it is easy to
+assume otherwise: a snapshot holds one response body per request key, a live
+feed answers the same key differently over the hours a 500-question run takes,
+and the directory keeps the last of those answers. A record-mode run therefore
+cannot be replayed back into itself. Replaying one of ours reproduced its
+multi-agent arm's candidate pools on 1 of 12 questions, while two replays of a
+single configuration agree on 12 of 12 and are byte-identical. Record-mode
+numbers are internally valid and externally irreproducible; replay-mode numbers
+are both. Where a table's arms come from different runs we say so, and we do
+not read a difference between a live-recorded arm and a replayed one as an
+effect of the architecture.
+
+Retrieval also reads the clock, which a snapshot of HTTP responses does not
+freeze: a question carrying \emph{latest} or \emph{last week} becomes a date
+filter, so the same snapshot replayed a day later can admit a different set of
+documents. A recording now stamps its directory with the date it was made and
+a replay pins the process clock to that stamp, which removes the drift between
+two runs made on different days; an explicitly set clock overrides it, and a
+snapshot recorded before the stamp existed reports no recording date rather
+than a guessed one.
 
 \paragraph{3. Ranking and cut.} The candidate pool is ordered by the run's
 ranking function and cut to $k=4$. Two settings decide the ordering and are
@@ -1539,9 +1563,14 @@ document ids, every metric, latency, model calls and tokens;
 \texttt{qrels.json}, the labels used by \emph{this} run alone, so its numbers
 recompute from its own artifacts without the accumulated cache;
 \texttt{aggregate.csv} and \texttt{report.md}. Each table in
-Section~\ref{sec:results} names the run id it was computed from, and every
-number in it is recoverable from that directory without re-running the live
-endpoints.
+Section~\ref{sec:results} names the run id it was computed from. Two senses of
+recovery apply to it, and they are not the same. Every metric recomputes from
+that directory alone, for any run: the ranked document ids and the judgments
+are both on disk, so a reader can re-derive the numbers, re-score them under a
+different metric, or pool them with another run's judgments without touching
+the endpoints. Re-executing the pipeline and arriving at the same ranked lists
+is the stronger sense, and it holds for runs made in replay, not for runs made
+in record mode against the live feeds.
 
 \subsection{Arm Comparability and the Ablation Ladder}\label{sec:ladder}
 
@@ -2336,7 +2365,11 @@ judge \texttt{llama3.1}, $\text{top-}k=4$. Mean over 500 questions; latency is
 the per-question median. The lower rows give the paired difference against
 \texttt{single\_agent}, the questions won/tied/lost, and the Holm-corrected
 $p$ across the family. Correctness ($n=72$, the ground-truth subset) is
-omitted from the paired rows for the reason given in the text.}
+omitted from the paired rows for the reason given in the text. Run
+\texttt{run\_1789703506}, which queried the endpoints live and recorded them:
+by Section~\ref{sec:protocol} its three arms share one corpus and its numbers
+recompute from its artifacts, but re-executing the pipeline against the
+recorded snapshot does not reproduce its ranked lists.}
 \label{tab:clean}
 \small\setlength{\tabcolsep}{4pt}
 \begin{tabular}{lrrrrrr}
@@ -2437,7 +2470,8 @@ does. The baseline's pools move the same way (\texttt{tiered:embed} 0.248 to
 \texttt{flat:embed} 0.452), and strict relevance---grade 2 only---tells the
 same story at a lower level, 0.087 to 0.176. These numbers are comparable to
 each other and not to Table~\ref{tab:clean}: the replay pools are 20--30\%
-larger than the original run's.}
+larger than the original run's. Bench over the dumped pools of
+\texttt{run\_1789892227}, a strict replay.}
 \label{tab:tier-offline}
 \begin{tabular}{lrrr}
 \toprule
@@ -2476,7 +2510,8 @@ prior.
 seed 42, both modes against one frozen snapshot; paired differences with
 percentile bootstrap 95\% CI and win/tie/loss over questions. Both arms gain
 the same amount, which is what makes this a defect fix rather than an
-architectural result.}
+architectural result. Runs \texttt{run\_1789951801} (tiered) and
+\texttt{run\_1789951917} (flat), both strict replays of one snapshot.}
 \label{tab:tier-e2e}
 \begin{tabular}{lrrlr}
 \toprule
@@ -2634,7 +2669,9 @@ per (question, document) pair and this benchmark's questions retrieve
 overlapping documents---a property of the corpus, not of the architecture. A
 deployed system answering unrelated questions pays the cold price. nDCG@3 is
 from the 500-question measurements of Section~\ref{sec:tier-control}, scored
-against pooled judgments.}
+against pooled judgments. Cost runs \texttt{run\_1790122626},
+\texttt{run\_1790122667}, \texttt{run\_1790122759} and
+\texttt{run\_1790122836}, all strict replays with the judge off.}
 \label{tab:cost}
 \begin{tabular}{llrrrrr}
 \toprule
