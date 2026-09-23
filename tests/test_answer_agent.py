@@ -357,6 +357,25 @@ def test_an_unresolvable_product_declines_instead_of_answering(monkeypatch):
     assert is_abstention(out.text, strong_only=True)
 
 
+@pytest.mark.parametrize("query", [
+    "Did anything break after the Tuesday patch?",
+    "What broke in September?",
+    "Any issues reported by Reddit users this week?",
+    "Is Blorptastic out?",
+])
+def test_an_ordinary_capitalised_word_does_not_decline_the_question(monkeypatch, query):
+    """The gate's input is `product_terms`, whose fallback rule takes any
+    capitalised non-initial word as a product name. That is right for a fetch
+    -- the cost of being wrong is one extra search phrasing -- and wrong for a
+    refusal. All three of these were declined outright: "No matching vendor for
+    'Tuesday'". A version number is what separates a product the catalog does
+    not know from a weekday.
+    """
+    monkeypatch.setattr(answer_agent.vendor, "catalog_is_full", lambda *a: True)
+    out = present_answer(query, dict(RESULTS, grounding=_Grounded([])))
+    assert "no matching vendor" not in out.text.lower()
+
+
 def test_naming_no_product_at_all_is_answered_normally(monkeypatch):
     """Naming nothing and naming something unrecognisable are different
     failures. Only the second declines — 'what shipped this week?' is a

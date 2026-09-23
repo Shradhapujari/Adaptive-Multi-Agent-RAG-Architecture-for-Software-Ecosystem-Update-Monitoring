@@ -217,15 +217,17 @@ class Snapshot:
         self._active = False
         self._real_requests_get = None
         self._real_urlopen = None
+        self._prev_now = None
+        self._pinned = False
         os.makedirs(self.dir, exist_ok=True)
-        self.recorded_at = self._pin_clock()
+        self.recorded_at = self._stamp()
 
     # ---- the clock ------------------------------------------------------
 
     META = "_meta.json"
 
-    def _pin_clock(self) -> Optional[str]:
-        """Freeze time along with the content.
+    def _stamp(self) -> Optional[str]:
+        """The directory's recording date, stamping it first if this is a record.
 
         Retrieval reads the clock: "latest" and "last week" become date filters
         that decide which documents are fetched and kept (`temporal.now`). A
@@ -235,11 +237,10 @@ class Snapshot:
         enough to move every retrieval metric and to confound any comparison
         whose arms ran on different days.
 
-        So a recording stamps the directory with its date, and a replay sets
-        `MARAG_NOW` from that stamp. An explicitly set `MARAG_NOW` always wins,
-        and a snapshot recorded before this existed has no stamp: the run goes
-        on with the live clock and `stats()` reports `recorded_at: null`, which
-        is the honest answer rather than a guess.
+        So a recording stamps the directory with its date and `start()` puts
+        that date in force. A snapshot recorded before this existed has no
+        stamp: the run goes on with the live clock and `stats()` reports
+        `recorded_at: null`, which is the honest answer rather than a guess.
         """
         meta_path = os.path.join(self.dir, self.META)
         if self.mode == "record":
@@ -254,12 +255,43 @@ class Snapshot:
             # original stamp, so the two passes share one clock.
         try:
             with open(meta_path, encoding="utf-8") as f:
-                stamp = json.load(f).get("recorded_at")
+                return json.load(f).get("recorded_at")
         except (OSError, ValueError):
             return None
-        if stamp and not os.environ.get("MARAG_NOW", "").strip():
-            os.environ["MARAG_NOW"] = str(stamp)
-        return stamp
+
+    def _pin_clock(self) -> None:
+        """Put this recording's date in force, for exactly as long as the patch.
+
+        The pin belongs to `start()`/`stop()` and not to the constructor,
+        because it is a process-wide mutation and the constructor gives it no
+        end. Pinning there meant the *first* snapshot a process opened owned
+        the clock for the rest of that process: a second snapshot found
+        `MARAG_NOW` already set, read it as an operator's explicit pin, and
+        replayed its own documents against the earlier recording's date --
+        measured at 19 days stale, while `recorded_at` went on reporting the
+        right one. Live work after a replay inherited it too.
+
+        An explicitly set `MARAG_NOW` still wins: with the pin released on
+        `stop()`, anything still in the environment when a snapshot starts was
+        put there by someone else.
+        """
+        if not self.recorded_at:
+            return
+        if (os.environ.get("MARAG_NOW") or "").strip():
+            return
+        self._prev_now = os.environ.get("MARAG_NOW")
+        os.environ["MARAG_NOW"] = str(self.recorded_at)
+        self._pinned = True
+
+    def _unpin_clock(self) -> None:
+        if not self._pinned:
+            return
+        if self._prev_now is None:
+            os.environ.pop("MARAG_NOW", None)
+        else:
+            os.environ["MARAG_NOW"] = self._prev_now
+        self._prev_now = None
+        self._pinned = False
 
     # ---- storage --------------------------------------------------------
 
@@ -407,6 +439,7 @@ class Snapshot:
         self._real_urlopen = urllib.request.urlopen
         requests.get = self._get
         urllib.request.urlopen = self._urlopen
+        self._pin_clock()
         self._active = True
         return self
 
@@ -417,6 +450,7 @@ class Snapshot:
 
         requests.get = self._real_requests_get
         urllib.request.urlopen = self._real_urlopen
+        self._unpin_clock()
         self._active = False
 
     def __enter__(self) -> "Snapshot":

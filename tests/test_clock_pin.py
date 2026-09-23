@@ -69,10 +69,42 @@ class SnapshotStamp(unittest.TestCase):
         self.assertIsNotNone(rec.recorded_at)
         os.environ.pop("MARAG_NOW", None)
 
-        rep = corpus_snapshot.Snapshot("replay", self.dir)
-        self.assertEqual(rep.recorded_at, rec.recorded_at)
-        self.assertEqual(os.environ.get("MARAG_NOW"), rec.recorded_at)
-        self.assertEqual(rep.stats()["now"], rec.recorded_at)
+        rep = corpus_snapshot.Snapshot("replay", self.dir).start()
+        try:
+            self.assertEqual(rep.recorded_at, rec.recorded_at)
+            self.assertEqual(os.environ.get("MARAG_NOW"), rec.recorded_at)
+            self.assertEqual(rep.stats()["now"], rec.recorded_at)
+        finally:
+            rep.stop()
+
+    def test_the_pin_is_released_with_the_patch(self):
+        """The pin is a process-wide mutation, so it lives exactly as long as
+        the thing that justifies it. Held past `stop()`, it followed the
+        process into whatever ran next."""
+        snap = corpus_snapshot.Snapshot("record", self.dir).start()
+        self.assertEqual(os.environ.get("MARAG_NOW"), snap.recorded_at)
+        snap.stop()
+        self.assertNotIn("MARAG_NOW", os.environ)
+
+    def test_a_second_snapshot_replays_on_its_own_clock(self):
+        """The first snapshot a process opened used to own the clock for the
+        rest of it: the second found MARAG_NOW set, read it as an operator's
+        explicit pin, and replayed its documents against the first recording's
+        date -- silently, while `recorded_at` reported the right one."""
+        other = tempfile.mkdtemp(prefix="snap_clock_b_")
+        json.dump({"recorded_at": "2026-09-01T10:00:00"},
+                  open(os.path.join(self.dir, corpus_snapshot.Snapshot.META), "w"))
+        json.dump({"recorded_at": "2026-09-20T10:00:00"},
+                  open(os.path.join(other, corpus_snapshot.Snapshot.META), "w"))
+
+        first = corpus_snapshot.Snapshot("replay", self.dir).start()
+        first.stop()
+        second = corpus_snapshot.Snapshot("replay", other).start()
+        try:
+            self.assertEqual(os.environ.get("MARAG_NOW"), "2026-09-20T10:00:00")
+            self.assertEqual(temporal.now().date().isoformat(), "2026-09-20")
+        finally:
+            second.stop()
 
     def test_re_recording_keeps_the_original_stamp(self):
         first = corpus_snapshot.Snapshot("record", self.dir).recorded_at
@@ -83,15 +115,23 @@ class SnapshotStamp(unittest.TestCase):
     def test_an_explicit_pin_wins(self):
         corpus_snapshot.Snapshot("record", self.dir)
         os.environ["MARAG_NOW"] = "2001-01-01"
-        corpus_snapshot.Snapshot("strict", self.dir)
+        snap = corpus_snapshot.Snapshot("strict", self.dir).start()
+        try:
+            self.assertEqual(os.environ["MARAG_NOW"], "2001-01-01")
+        finally:
+            snap.stop()
+        # ...and is still the operator's after the snapshot lets go.
         self.assertEqual(os.environ["MARAG_NOW"], "2001-01-01")
 
     def test_an_unstamped_snapshot_says_so(self):
         d = tempfile.mkdtemp(prefix="snap_nostamp_")
-        snap = corpus_snapshot.Snapshot("replay", d)
-        self.assertIsNone(snap.recorded_at)
-        self.assertIsNone(snap.stats()["recorded_at"])
-        self.assertNotIn("MARAG_NOW", os.environ)
+        snap = corpus_snapshot.Snapshot("replay", d).start()
+        try:
+            self.assertIsNone(snap.recorded_at)
+            self.assertIsNone(snap.stats()["recorded_at"])
+            self.assertNotIn("MARAG_NOW", os.environ)
+        finally:
+            snap.stop()
 
 
 if __name__ == "__main__":

@@ -321,10 +321,16 @@ VENDOR_ABSTENTION = (
 )
 
 
+# "Blorptastic 9", "Blorptastic v9.2" — a capitalised word carrying a version
+# is the evidence that the word names a product. Capitalisation alone is not:
+# see the docstring below.
+_VERSIONED = r"\b{}\s+v?\d"
+
+
 def unresolved_products(query: str, results: Dict) -> List[str]:
     """Product-shaped words in `query` that the vendor catalog does not know.
 
-    Three conditions, and all three are needed to avoid declining questions
+    Four conditions, and all four are needed to avoid declining questions
     that are perfectly answerable:
 
     * the grounding step ran and resolved no vendor at all — without it there
@@ -332,11 +338,28 @@ def unresolved_products(query: str, results: Dict) -> List[str]:
     * the catalog in use is the real one, not the offline fallback;
     * the leftover word is not one of the products `fetch_union` knows by
       name, because a known product the catalog missed is a catalog problem,
-      not an unresolvable vendor.
+      not an unresolvable vendor;
+    * the word carries a version number.
+
+    That last one is what keeps this from declining ordinary questions.
+    `product_terms` is a *fetch* heuristic: its fallback rule takes any
+    capitalised non-initial word as a product name, which is right when the
+    cost of being wrong is one extra search phrasing. Refusing to answer
+    inverts that cost, and the rule is wrong often enough to matter —
+    "Did anything break after the Tuesday patch?" yielded "Tuesday",
+    "What broke in September?" yielded "September", and both were declined
+    outright. Weekdays, months and ordinary proper nouns do not appear with a
+    version number after them; unrecognised products, which is the case this
+    gate exists for, almost always do.
+
+    So "Is Blorptastic 9 out?" still declines and "Is Blorptastic out?" no
+    longer does. That is the intended direction: answering a question about an
+    unknown product from whatever the sources returned is a smaller failure
+    than refusing a question the system can answer.
 
     A question that names no product — "what are the 3 latest updates?" —
-    yields nothing here and is answered normally. Naming nothing and naming
-    something unrecognisable are different failures; only the second declines.
+    yields nothing here either. Naming nothing and naming something
+    unrecognisable are different failures; only the second declines.
     """
     g = results.get("grounding")
     if g is None or getattr(g, "vendors", None):
@@ -344,7 +367,9 @@ def unresolved_products(query: str, results: Dict) -> List[str]:
     if not vendor.catalog_is_full():
         return []
     from fetch_union import _KNOWN_PRODUCTS, product_terms
-    return [t for t in product_terms(query) if t.lower() not in _KNOWN_PRODUCTS]
+    return [t for t in product_terms(query)
+            if t.lower() not in _KNOWN_PRODUCTS
+            and re.search(_VERSIONED.format(re.escape(t)), query, re.I)]
 
 
 def present_answer(query: str, results: Dict, model_spec: Optional[str] = None,
