@@ -1532,7 +1532,10 @@ denominators are therefore \emph{pool-relative}. A system cannot be charged for
 relevant documents no arm retrieved, which makes these numbers valid for the
 paired within-run comparisons this paper draws and invalid as absolute values
 to compare against published figures computed over a fixed judged corpus. We
-state the pooling protocol with every absolute number for this reason.
+state the pooling protocol with every absolute number for this reason, and
+Section~\ref{sec:pool-demo} measures what ignoring it costs: two arms whose
+retrieved lists are byte-identical, scored in pools of different width, differ
+by $+0.055$ recall@5.
 
 \paragraph{6. Answer scoring.} The same judge scores each arm's answer for
 faithfulness to its own retrieved contexts and for answer relevance, each in
@@ -1616,8 +1619,8 @@ so every adjacent pair is a single-factor comparison. A1g branches from A1
 rather than continuing the chain: it adds question grounding \emph{without}
 any coordination, which is what separates understanding the question from
 coordinating agents. All rungs are now measured against a frozen corpus
-(Table~\ref{tab:ladder-results}); A4 executed but never triggered, for the
-reason given in Section~\ref{sec:ladder-results}.}
+(Table~\ref{tab:ladder-results}); A4 executed but cannot trigger, for the
+structural reason given in Section~\ref{sec:retry}.}
 \label{tab:ladder}
 \begin{tabular}{llll}
 \toprule
@@ -1628,7 +1631,7 @@ A1 & \texttt{single\_agent} & retrieval on the user's question & Measured \\
 A1g & \texttt{single\_agent\_grounded} & question grounding, no coordination & Measured \\
 A2 & \texttt{rewrite\_only} & query rewriting & Measured \\
 A3 & \texttt{marag\_llm} & union fetch over both phrasings & Measured \\
-A4 & \texttt{marag\_llm\_retry} & Orchestrator retry & Never triggered \\
+A4 & \texttt{marag\_llm\_retry} & Orchestrator retry & Cannot trigger \\
 A5 & \texttt{marag} & template rendering & Measured \\
 \bottomrule
 \end{tabular}
@@ -2225,9 +2228,9 @@ indistinguishable from the full pipeline ($p=0.22$).
 documents \emph{and} identical answers to A3 on all 100 questions. The retry
 fires when the Evaluator's quality score falls below 0.15; the minimum observed
 across the benchmark was 0.300. Rung A4 is therefore reported as executed and
-never triggered rather than as measured with no effect --- the distinction
-matters, because a benchmark that exercises the retry would have to contain
-questions this retriever handles badly, and this one does not.
+never triggered rather than as measured with no effect. Section~\ref{sec:retry}
+returns to it at 500 questions and shows the gap is structural rather than a
+property of these questions.
 
 \textbf{Rewriting alone loses the source post, and the union is what
 restores it.} A2 scores nDCG@5 0.231 against A1's 0.742, and A3 adds the union
@@ -2655,6 +2658,65 @@ would offer is narrow and mechanical: in a live-corpus domain, two arms
 compared against each other must execute in the same run, and the only way to
 be sure of that is to make the run frozen and reproducible and then reproduce
 it.
+
+\subsection{The Retry That Cannot Fire}\label{sec:retry}
+
+Retrieval parity between the architectures leaves one capability of the
+decomposition unmeasured, and it is the one a single agent structurally lacks:
+the Orchestrator's adaptive retry, which re-issues a widened fetch when the
+Evaluator judges the first attempt poor. Section~\ref{sec:ladder-results}
+reported it as executed but never triggered on 100 questions. We ran it frozen
+on all 500, in strict replay against the snapshot of
+Section~\ref{sec:tier-control}, and the result is not that the retry helps or
+fails to help. It is that the retry cannot occur.
+
+Across 500 questions the Evaluator's quality score has a minimum of exactly
+0.300, and the retry fires below 0.15. The arm returned candidate lists
+identical to \texttt{marag\_llm} on 500 of 500 questions and answers identical
+on 500 of 500; zero retries fired.
+
+The exact minimum is the tell. The Evaluator does not compute a quality score
+so much as raise one through a ladder of floors: a document from a verified
+advisory source sets it to at least 0.30, a tier-one hit to at least 0.30,
+community posts to at least 0.50, release notes to at least 0.50, and both
+together to at least 0.65. Any retrieval that returns one recognized document
+is therefore floored at or above twice the retry threshold, and the union fetch
+returns one for every question in this benchmark. The gate is not conservative;
+it is closed. A retry can occur only when retrieval comes back empty, which is
+the one case a wider re-fetch is least likely to repair.
+
+This changes what the ladder's A4 row means. It is not a capability that
+happened not to help on these questions --- it is a capability that the
+system's own control signal cannot request. Reporting it as a measured null
+would have been the more flattering error: it would suggest adaptive retrieval
+was tested and found neutral, when what was tested was a threshold that the
+scoring function makes unreachable. Making the rung measurable requires
+changing the system rather than the benchmark: either the threshold rises above
+the floors, or the floors come out of the Evaluator --- and the second touches
+the bespoke score this paper already retired for unrelated reasons
+(Section~\ref{sec:metric-threat}), so the two changes cannot be made
+independently of each other. We report the rung as unmeasurable in the
+configuration released here, and leave both changes to future work rather than
+tune a threshold until an arm produces a difference.
+
+\subsubsection{An Accidental Demonstration}\label{sec:pool-demo}
+
+The retry arm ran alone, so it judged only its own candidates, while
+\texttt{marag\_llm} was judged inside a three-arm pool. The two arms retrieved
+\emph{byte-identical} lists on every question. Scored as each run reports
+itself, they differ: nDCG@3 0.518 against 0.496, recall@5 0.606 against 0.551.
+Re-scored against the union of both runs' judgments they differ by $0.000$ on
+every metric, on 500 of 500 questions.
+
+We keep this as the clearest available statement of a caveat that is easy to
+nod at and hard to feel. A pooled-judgment metric is not a property of a
+ranking alone; it is a property of a ranking and the pool it was judged in. Two
+systems that retrieve the same documents in the same order can be separated by
+$+0.055$ recall@5 by nothing but the company their judgments kept --- larger
+than every architectural difference this paper reports. Absolute retrieval
+numbers from different runs cannot be compared, and a difference of this size
+between two published systems evaluated separately would be indistinguishable
+from a real effect.
 
 \subsection{What the Accuracy Costs}\label{sec:efficiency}
 

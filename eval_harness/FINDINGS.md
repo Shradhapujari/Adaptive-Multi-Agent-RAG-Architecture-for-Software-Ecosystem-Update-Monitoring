@@ -436,6 +436,42 @@ is the same parity Findings 4–8 report at a lower level.
 
 ---
 
+## Finding 12 — The retry cannot fire, and an accidental demonstration of the pooling caveat
+
+`run_1790129244_8fda4edb2d21` — A4 (`marag_llm_retry`) alone, 500 questions,
+flat + cascade, strict replay, 0 corpus misses.
+
+**The retry is structurally unreachable.** Fires at Evaluator quality < 0.15;
+the minimum over 500 questions is exactly **0.300**. `EvaluatorAgent`
+(multiagent_rag_v3.py:1620-1646) raises the score through floors: verified
+advisory source or tier-1 hit -> >= 0.30, community posts -> >= 0.50, release
+notes -> >= 0.50, both -> >= 0.65. Any recognized document floors the score at
+twice the threshold. Retry can only fire on an empty fetch.
+
+Result: **500/500 identical top-4 lists and 500/500 identical answers** to
+`marag_llm`, 0 retries. A4 is not a measured null — it is unmeasurable in this
+configuration. Fixing it means raising the threshold or removing the floors,
+and the floors are the retired bespoke score, so the two are entangled.
+
+Bug found on the way: line 1643 sets `quality = max(quality, 0.40)` for
+community posts and line 1644 immediately overwrites it with
+`max(quality, 0.5)`. The 0.40 floor is dead code.
+
+**The demonstration.** A4 ran alone so it judged only its own candidates;
+`marag_llm` was judged in a 3-arm pool. Same documents, same order, every
+question:
+
+| scored as | nDCG@3 | Recall@5 |
+|---|---:|---:|
+| each run's own report | 0.518 vs 0.496 | 0.606 vs 0.551 |
+| pooled over both runs' qrels | **0.000 difference, 500/500** | **0.000, 500/500** |
+
+A +0.055 recall gap out of nothing but pool width — larger than every
+architectural difference in this project. Use `scripts/cross_run_compare.py`,
+or better, one run.
+
+---
+
 ## Confounds, and what has been done about them
 
 | Confound | Status |
