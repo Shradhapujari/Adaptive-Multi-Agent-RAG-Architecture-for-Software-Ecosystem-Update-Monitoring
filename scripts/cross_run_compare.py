@@ -66,7 +66,12 @@ def main() -> int:
             continue
         caches[run_dir] = load_run(run_dir)
         for qid, labs in caches[run_dir][0].items():
-            pooled.setdefault(str(qid), {}).update(labs)
+            # max, not last-wins: the same judge can label one document
+            # differently in two runs, and the pool must not depend on the
+            # order the runs were named in.
+            q = pooled.setdefault(str(qid), {})
+            for d, g in labs.items():
+                q[d] = max(q.get(d, 0), g)
 
     # re-score each arm against the pooled set
     scored: dict = {}

@@ -209,7 +209,7 @@ def _ladder_marag(synth=None, union=True, retry=False, signal="✅ positive",
     gen = object.__new__(G.MultiAgentRAGGenerator)
     gen.marag = _fake_marag_module()
     gen.rewriter = types.SimpleNamespace(
-        run=lambda q: {"rewritten": q + " release notes"})
+        run=lambda q, avoid=(): {"rewritten": q + " release notes" * (len(avoid) + 1)})
     gen.retriever = retriever or _recording_retriever()
     gen.evaluator = types.SimpleNamespace(
         run=lambda docs, q: {"answer": "TEMPLATE", "quality": 0.1,

@@ -34,7 +34,7 @@ class FakeRetriever:
     def __init__(self):
         self.queries = []
 
-    def run(self, q, top_k=4, original_query=None):
+    def run(self, q, top_k=4, original_query=None, union=True):
         self.queries.append((q, original_query))
         return [{"title": q}]
 

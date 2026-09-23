@@ -1902,6 +1902,50 @@ Answer:"""
 # MANAGER AGENT — ORCHESTRATOR
 # ─────────────────────────────────────────────────────────────
 
+def orchestrate(rewriter, retriever, evaluator, query: str, top_k: int = 4,
+                union: bool = True, max_rounds: int = None) -> dict:
+    """ManagerAgent's retrieve-evaluate-retry loop, with everything it saw.
+
+    One implementation for the demo and the eval harness: the harness used to
+    carry its own copy of this loop, and the two drifted -- the copy kept a
+    fixed widening string and a one-round cap after the Manager had moved to
+    re-rewriting with an avoid list, so the `marag_retry` arm was measuring a
+    retry the app no longer shipped. Returns `rewrite`, `docs`, `result`,
+    `rounds`, and `pool`: the union of every round's candidate pool, first
+    round first, so pool recall is the ceiling of everything fetched.
+    """
+    if max_rounds is None:
+        max_rounds = ManagerAgent.MAX_ROUNDS
+    rewrite = rewriter.run(query)
+    docs = retriever.run(rewrite["rewritten"], top_k=top_k,
+                         original_query=query, union=union)
+    pool = list(getattr(retriever, "last_pool", []) or [])
+    seen = doc_keys(pool)
+    result = evaluator.run(docs, query)
+    tried = [rewrite["rewritten"]]
+    while "negative" in result.get("signal", "") and len(tried) < max_rounds:
+        print(f"\n  Manager: RLAIF signal negative — round "
+              f"{len(tried) + 1} of {max_rounds}, rewriting...")
+        # The rewriter is handed what has already been searched, so the
+        # round buys a different pool instead of reissuing the same one.
+        rewrite = rewriter.run(query, avoid=tuple(tried))
+        tried.append(rewrite["rewritten"])
+        # Rank against the user's own words: without original_query the
+        # reranker falls back to the widened string, which is exactly the
+        # precision loss rerank.py exists to fix.
+        docs = retriever.run(rewrite["rewritten"], top_k=top_k,
+                             original_query=query, union=union)
+        for d in (getattr(retriever, "last_pool", []) or []):
+            if doc_key(d) not in seen:
+                seen.add(doc_key(d)); pool.append(d)
+        result = evaluator.run(docs, query)
+    if "negative" in result.get("signal", ""):
+        print(f"\n  Manager: retry ceiling reached ({max_rounds} "
+              f"round(s)) — answering from what was retrieved.")
+    return {"rewrite": rewrite, "docs": docs, "result": result,
+            "rounds": len(tried), "pool": pool}
+
+
 class ManagerAgent:
     name = "🧠  Manager Agent (Orchestrator)"
 
@@ -1930,30 +1974,8 @@ class ManagerAgent:
         print(f"    Step 3 → delegate to Evaluator Agent (RLAIF)")
         print(f"    Step 4 → if quality low, trigger retry")
 
-        rewrite = self.rewriter.run(query)
-        docs    = self.retriever.run(rewrite["rewritten"], original_query=query)
-        result  = self.evaluator.run(docs, query)
-
-        tried = [rewrite["rewritten"]]
-        while "negative" in result["signal"] and len(tried) < self.MAX_ROUNDS:
-            print(f"\n  Manager: RLAIF signal negative — round "
-                  f"{len(tried) + 1} of {self.MAX_ROUNDS}, rewriting...")
-            # The rewriter is handed what has already been searched, so the
-            # round buys a different pool instead of reissuing the same one.
-            rewrite = self.rewriter.run(query, avoid=tuple(tried))
-            tried.append(rewrite["rewritten"])
-            # Rank against the user's own words: without original_query the
-            # reranker falls back to the widened string, which is exactly the
-            # precision loss rerank.py exists to fix.
-            docs   = self.retriever.run(rewrite["rewritten"], top_k=4,
-                                        original_query=query)
-            result = self.evaluator.run(docs, query)
-
-        if "negative" in result["signal"]:
-            print(f"\n  Manager: retry ceiling reached ({self.MAX_ROUNDS} "
-                  f"round(s)) — answering from what was retrieved.")
-
-        return result["answer"]
+        return orchestrate(self.rewriter, self.retriever, self.evaluator,
+                           query, top_k=4, max_rounds=self.MAX_ROUNDS)["result"]["answer"]
 
 # ─────────────────────────────────────────────────────────────
 # RUNNER

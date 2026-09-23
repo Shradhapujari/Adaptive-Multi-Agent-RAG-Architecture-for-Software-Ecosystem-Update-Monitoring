@@ -280,45 +280,17 @@ class MultiAgentRAGGenerator(Generator):
         return True if self.synth is None else self.synth.available()
 
     def generate(self, query: str) -> Dict:
-        retried = False
         with _silenced(self.marag):
-            rewrite = self.rewriter.run(query)
-            docs = self.retriever.run(rewrite["rewritten"], top_k=self.top_k,
-                                      original_query=query, union=self.union)
-            pool = list(getattr(self.retriever, "last_pool", []) or [])
-            result = self.evaluator.run(docs, query)
-            # `"retry" not in query` is ManagerAgent's own recursion guard,
-            # reproduced verbatim: it also means a question that happens to
-            # contain the word "retry" never triggers one. Faithful to the
-            # system under test, and a reason not to read this arm's retry rate
-            # as a property of the questions alone.
-            if self.retry and "negative" in result.get("signal", "") \
-                    and "retry" not in query:
-                # ManagerAgent's adaptive loop (multiagent_rag_v3.py, class
-                # ManagerAgent): on a negative RLAIF signal, widen the FETCH
-                # with filler terms while still ranking against the user's own
-                # words. Reproduced here rather than called because
-                # ManagerAgent.run returns only the answer string and the
-                # harness needs the retrieved documents too.
-                #
-                # NOTE the real threshold: EvaluatorAgent emits the negative
-                # signal at quality < 0.15, not the 0.30 the write-up claims.
-                # 0.30 is a different constant in that method (a quality floor
-                # for tier-1 and Apple sources).
-                retried = True
-                docs = self.retriever.run(query + " software update release",
-                                          top_k=self.top_k, original_query=query,
-                                          union=self.union)
-                # The retry OVERWRITES RetrieverAgent.last_pool, so reporting it
-                # alone would understate the fetch: the system saw both pools,
-                # and pool recall is meant to be the ceiling of everything
-                # fetched. Union them, first attempt first, deduped by doc_id.
-                seen = {doc_id(d) for d in pool}
-                for d in (getattr(self.retriever, "last_pool", []) or []):
-                    if doc_id(d) not in seen:
-                        seen.add(doc_id(d))
-                        pool.append(d)
-                result = self.evaluator.run(docs, query)
+            # ManagerAgent's own loop, not a copy of it: the retry arm is
+            # ManagerAgent.MAX_ROUNDS rounds of re-rewrite-and-refetch on a
+            # negative Evaluator signal; the rung below is one round.
+            from multiagent_rag_v3 import orchestrate, ManagerAgent
+            run = orchestrate(
+                self.rewriter, self.retriever, self.evaluator, query,
+                top_k=self.top_k, union=self.union,
+                max_rounds=ManagerAgent.MAX_ROUNDS if self.retry else 1)
+        rewrite, docs, pool, result = run["rewrite"], run["docs"], run["pool"], run["result"]
+        retried = run["rounds"] > 1
         template_answer = result.get("answer", "")
         answer = template_answer
         if self.synth is not None:
