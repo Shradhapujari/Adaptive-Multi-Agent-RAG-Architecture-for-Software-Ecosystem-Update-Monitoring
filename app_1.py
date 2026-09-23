@@ -35,6 +35,7 @@ from typing import Dict, List, Optional
 from temporal import resolve_temporal, matches_window
 from fetch_union import union_fetch, product_terms
 from agent_rules import rules_block
+import answer_agent
 from answer_agent import present_answer
 from store import open_store, caching_fetch
 from grounding import ground
@@ -652,7 +653,11 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
                                         thread.get("author_description") or "") is not None
     else:
         yesno_shaped = yesno.looks_yesno(query, is_title=True)
-    if thread is None and yesno_on and yesno_shaped:
+    # Not gated on the yes/no switches any more: the thread's highest-upvoted
+    # comment is the community's answer to *any* software question, and it is
+    # what the presenter now leads the answer with. The tally below stays
+    # gated -- counting stances only makes sense on a yes/no question.
+    if thread is None:
         thread = yesno.find_thread(query)
     if thread is not None:
         results["thread"] = thread
@@ -673,10 +678,16 @@ _CITE = re.compile(r"\s*\[[^\]]*\]")
 
 
 def _one_line(text: str) -> str:
-    """The first sentence of a presented answer, citations stripped."""
+    """The first sentence of a presented answer, citations stripped.
+
+    The sentence split is `answer_agent._one_sentence`, not "cut at the first
+    period": the presenter now quotes the thread's top-voted comment, and the
+    commenter's own full stop is inside the quotation marks. Cutting there
+    published half a quote -- `says \u201cI had a similar issue on a Windows 2019
+    server.` -- with the closing quote and the citation gone.
+    """
     plain = _CITE.sub("", text or "").strip()
-    m = re.match(r"(.+?[.!?])(\s|$)", plain, re.S)
-    return (m.group(1) if m else plain).strip() or "No answer could be composed."
+    return answer_agent._one_sentence(plain) or "No answer could be composed."
 
 
 def _answer_caption(presented, n_cited: int, secs) -> str:

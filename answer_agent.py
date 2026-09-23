@@ -46,24 +46,59 @@ __all__ = [
     "collect_evidence",
     "build_cited_prompt",
     "deterministic_paragraph",
+    "_one_sentence",
     "present_answer",
     "CITATION_RULE",
+    "TOP_COMMENT_FLOOR",
 ]
 
+# How many upvotes a thread's top comment needs before the answer is written
+# off it. Reddit gives every comment 1 point the moment it is posted -- the
+# commenter's own -- so a 1-point "top comment" is the *only* comment, or the
+# one nobody voted on either way, and it is not a community answer. 2 means at
+# least one other reader agreed with it.
+#
+# Measured against the case that prompted this: r/Fedora "fedora update", whose
+# top comment is the single word "What?" at 1 point, led the presenter to state
+# that the update deleted people's kernels -- while the stance tally under it
+# read No (4 users). Below the floor the comment is still shown in the details
+# panel, with its score; it just does not get to be the answer.
+TOP_COMMENT_FLOOR = 2
+
 CITATION_RULE = (
-    "Write ONE flowing paragraph of plain English (3-6 sentences) that a "
-    "developer could read aloud. After every factual claim, cite the source it "
-    "came from in square brackets exactly as it is labelled below, e.g. "
+    "Answer in ONE sentence of plain English \u2014 no more. If a [Top comment \u2026] "
+    "source is listed, it is the Reddit community's own highest-upvoted answer "
+    "to this question: base the sentence on what it says and cite it. "
+    "Otherwise use the highest-upvoted community post, or the release notes "
+    "when no community answer is listed. Cite the source it came from in "
+    "square brackets exactly as it is labelled below, e.g. "
     "[Release Notes - Linux v6.18.21, 2026-08-28]. Cite only from the list. "
     "Do not invent versions, dates or CVE numbers. If the sources do not "
-    "answer the question, say so plainly in one sentence.\n"
+    "answer the question, say so plainly in that one sentence.\n"
     "The sources were retrieved for this question and each carries its own "
     "date and, where applicable, a SECURITY marker: a dated source inside the "
     "time frame IS an answer to a question about that time frame, so report it "
     "rather than saying nothing was found.\n"
-    "Output the paragraph only — no preamble, no heading, no surrounding "
+    "Output the one sentence only \u2014 no preamble, no heading, no surrounding "
     "quotation marks, no closing advice about checking elsewhere."
 )
+
+
+# A sentence ends where punctuation is followed by a capitalised new start;
+# "v6.18.21" and "2026-08-28]" do not qualify, so a cited version or date in
+# mid-sentence is not mistaken for the end of one.
+#
+# "[" is deliberately NOT a sentence opener. llama3.1 puts the citation after
+# the closing period -- "...after the latest Windows 11 update. [Top comment -
+# r/sysadmin, 1 upvote]" -- and cutting there threw the only citation away, so
+# the guardrail rejected the answer as uncited and the rule-based paragraph
+# replaced a perfectly good model sentence.
+_SENT_END = re.compile(r"(?<=[.!?])\s+(?=[\"\u201c\'(]?[A-Z])")
+
+
+def _one_sentence(text: str) -> str:
+    """The first sentence, citations intact. The rule says one; models drift."""
+    return _SENT_END.split((text or "").strip(), 1)[0].strip()
 
 
 @dataclass
@@ -71,7 +106,7 @@ class Evidence:
     """One retrieved item, in the shape the presenter cites it by."""
 
     label: str            # what appears inside the brackets
-    kind: str             # release | community | cve
+    kind: str             # answer | release | advisory | community | cve
     title: str
     detail: str = ""
     url: str = ""
@@ -134,6 +169,27 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
     """
     ev: List[Evidence] = []
 
+    # The thread's highest-upvoted comment is the community's own answer to the
+    # question, chosen by the people who read it. It is cited first so the
+    # presenter leads with it rather than with a release row -- but only once
+    # somebody other than its author has voted for it (`TOP_COMMENT_FLOOR`).
+    tc = results.get("top_comment") or {}
+    thread = results.get("thread") or {}
+    votes = int(tc.get("score") or 0)
+    if (tc.get("body") or "").strip() and votes >= TOP_COMMENT_FLOOR:
+        sub = thread.get("subreddit", "")
+        ev.append(Evidence(
+            # "1 upvotes" is what a model silently corrects to "1 upvote",
+            # and the guardrail matches the label verbatim -- so the answer
+            # came back uncited over a plural.
+            label=("Top comment" + (f" - r/{sub}" if sub else "")
+                   + f", {votes} upvote" + ("" if votes == 1 else "s")),
+            kind="answer",
+            title=_clean(thread.get("title", ""), 120) or "Reddit thread",
+            detail=_clean(tc.get("body", ""), 400),
+            url=thread.get("url", ""), date=_iso(thread.get("created_utc", "")),
+        ))
+
     for r in (results.get("releases") or [])[:per_kind]:
         # An advisory row is named by its CVE id, not by its versionNumber:
         # that field holds the *affected* version, and citing
@@ -165,7 +221,11 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
             url=c.get("url", ""), date=date, security=True,
         ))
 
-    for p in (results.get("community") or [])[:per_kind]:
+    # Upvotes are the community's ranking of its own posts; the feed's order
+    # is not. Highest first, so `per_kind` keeps the posts people agreed with.
+    community = sorted(results.get("community") or [],
+                       key=lambda p: int(p.get("score") or 0), reverse=True)
+    for p in community[:per_kind]:
         date = _iso(p.get("date"))
         sub = p.get("subreddit", "")
         label = "Community" + (f" - r/{sub}" if sub else "") + (f", {date}" if date else "")
@@ -227,6 +287,11 @@ def deterministic_paragraph(query: str, evidence: List[Evidence],
         return ("Nothing in the release feeds, the CVE feed or the community "
                 "feed matched this question, so there is no grounded answer to "
                 "give — try naming a specific product or version.")
+
+    top = next((e for e in evidence if e.kind == "answer"), None)
+    if top:
+        return (f"The top-voted Reddit answer to this question says "
+                f"\u201c{_clean(top.detail, 300)}\u201d [{top.label}].")
 
     rel = [e for e in evidence if e.kind == "release"]
     sec = [e for e in rel if e.security]
@@ -416,8 +481,8 @@ def _present(query: str, results: Dict, model_spec: Optional[str] = None,
             if client.available():
                 text = client.generate(
                     build_cited_prompt(query, evidence, window_note),
-                    temperature=0.0, max_tokens=400)
-                text = _strip_preamble(text)
+                    temperature=0.0, max_tokens=150)
+                text = _one_sentence(_strip_preamble(text))
                 if text:
                     # The model was given these sources and nothing else, so
                     # anything it states outside them is invented. Failing the

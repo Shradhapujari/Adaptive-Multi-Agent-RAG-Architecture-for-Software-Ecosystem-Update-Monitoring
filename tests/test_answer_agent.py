@@ -404,3 +404,82 @@ def test_the_offline_fallback_catalog_never_declines(monkeypatch):
 
 def test_a_question_with_no_grounding_step_is_never_gated():
     assert answer_agent.unresolved_products("Is Blorptastic 9 out?", RESULTS) == []
+
+
+# ── Reddit's own answer, in one sentence ─────────────────────────────────
+# The pipeline fetches the retrieved thread's highest-upvoted comment
+# (`yesno.top_comment`) and it used to go nowhere: the presenter never saw it,
+# so the answer was composed off release rows while the community's own answer
+# sat unused in `results`.
+
+_WITH_TOP = dict(RESULTS, thread={"title": "Did the Fedora 44 update eat grub?",
+                                  "subreddit": "Fedora",
+                                  "url": "https://example.invalid/t"},
+                 top_comment={"body": "Yes, reinstall grub2-efi and regenerate "
+                                      "the config, it comes back.",
+                              "score": 214, "author": "someuser"})
+
+
+def test_top_voted_comment_is_cited_first():
+    ev = collect_evidence(_WITH_TOP)
+    assert ev[0].kind == "answer"
+    assert ev[0].label == "Top comment - r/Fedora, 214 upvotes"
+    two = collect_evidence(dict(_WITH_TOP,
+                                top_comment={**_WITH_TOP["top_comment"], "score": 2}))
+    assert two[0].label.endswith("2 upvotes")
+    assert "reinstall grub2-efi" in ev[0].detail
+
+
+def test_community_posts_are_ordered_by_upvotes():
+    results = {"community": [
+        {"title": "quiet one", "subreddit": "linux", "score": 3},
+        {"title": "the one everyone agreed with", "subreddit": "linux", "score": 99},
+    ]}
+    assert "everyone agreed" in collect_evidence(results, per_kind=1)[0].title
+
+
+def test_rule_based_answer_is_one_sentence_off_the_top_comment():
+    text = deterministic_paragraph("Did the Fedora 44 update eat grub?",
+                                   collect_evidence(_WITH_TOP))
+    assert "reinstall grub2-efi" in text
+    assert "[Top comment - r/Fedora, 214 upvotes]" in text
+    # One sentence of prose: the period inside the quoted comment is the
+    # commenter's, not a second sentence, so the trim must leave it alone.
+    assert text.endswith("].")
+    assert answer_agent._one_sentence(text) == text
+
+
+def test_model_answer_is_trimmed_to_one_sentence(monkeypatch):
+    _no_env(monkeypatch)
+    long = ("Yes, reinstalling grub2-efi fixes it [Top comment - r/Fedora, 214 "
+            "upvotes]. It has been reported by others too. Check elsewhere as well.")
+    monkeypatch.setattr(answer_agent, "_one_sentence",
+                        answer_agent._one_sentence)  # not stubbed: exercise it
+    assert answer_agent._one_sentence(long).endswith("214 upvotes].")
+    # A version number mid-sentence must not read as a sentence end.
+    assert answer_agent._one_sentence("Linux v6.18.21 shipped [R1].") == \
+        "Linux v6.18.21 shipped [R1]."
+    # A citation after the closing period belongs to the sentence before it --
+    # cutting there is what made the model's answer read as uncited.
+    trailing = "No printing issues are reported. [Top comment - r/sysadmin, 1 upvote]"
+    assert answer_agent._one_sentence(trailing) == trailing
+
+
+def test_top_comment_below_the_floor_does_not_become_the_answer():
+    """A 1-point comment is its author's own upvote and nobody else's.
+
+    The r/Fedora case: top comment "What?" at 1 point, and the answer written
+    off it asserted the update had deleted people's kernels.
+    """
+    thin = dict(_WITH_TOP, top_comment={"body": "What?", "score": 1,
+                                        "author": "someuser"})
+    ev = collect_evidence(thin)
+    assert not [e for e in ev if e.kind == "answer"]
+    # The rest of the evidence still stands, so the question is still answered.
+    assert ev and "What?" not in deterministic_paragraph("q", ev)
+
+
+def test_top_comment_at_the_floor_is_the_answer():
+    at = dict(_WITH_TOP, top_comment={**_WITH_TOP["top_comment"],
+                                      "score": answer_agent.TOP_COMMENT_FLOOR})
+    assert collect_evidence(at)[0].kind == "answer"
