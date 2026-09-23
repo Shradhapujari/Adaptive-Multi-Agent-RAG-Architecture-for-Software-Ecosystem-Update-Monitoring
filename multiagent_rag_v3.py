@@ -1170,11 +1170,13 @@ def resolve_rank_tiers(mode: str = None) -> str:
     """Whether ranking respects the verified-before-community tier prior.
 
     `tiered` is what every run before 2026-09-20 did. `flat` ranks the pool as
-    one list. Raises on an unrecognised value for the same reason
-    resolve_rank_query does.
+    one list and is the default since 2026-09-22: on the same frozen snapshot
+    it is +0.23 nDCG@3 for every arm (FINDINGS.md, Finding 9) at no extra
+    model call. `MARAG_RANK_TIERS=tiered` is kept as the ablation arm. Raises
+    on an unrecognised value for the same reason resolve_rank_query does.
     """
     if mode is None:
-        mode = os.environ.get("MARAG_RANK_TIERS", "tiered")
+        mode = os.environ.get("MARAG_RANK_TIERS", "flat")
     mode = str(mode).strip().lower()
     if mode not in RANK_TIERS_CHOICES:
         raise ValueError(
@@ -1358,6 +1360,24 @@ Rewritten query:"""
 # AGENT 2 — RETRIEVER (unchanged — searches real dataset)
 # ─────────────────────────────────────────────────────────────
 
+def _gather(calls, workers=None):
+    """Run zero-arg fetch thunks concurrently; return their results in call order.
+
+    Every live source is an independent HTTP round trip (15 s timeout each),
+    and the retriever issues ~10 of them per phrasing back to back, so wall
+    time was the sum of the slowest endpoints. Order is preserved, so the
+    pool -- and therefore dedupe order and every downstream number -- is the
+    same as the sequential loop produced. MARAG_FETCH_WORKERS=1 restores it.
+    """
+    if workers is None:
+        workers = max(1, int(os.environ.get("MARAG_FETCH_WORKERS", "8")))
+    if workers == 1 or len(calls) < 2:
+        return [c() for c in calls]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(workers, len(calls))) as ex:
+        return [f.result() for f in [ex.submit(c) for c in calls]]
+
+
 def _norm_url(u) -> str:
     """Same post whether it arrives as reddit.com or www.reddit.com, with or
     without a trailing slash or scheme."""
@@ -1440,9 +1460,10 @@ class RetrieverAgent:
                 "chrome":    ["chrome","chromium"],
                 "homeassistant": ["homeassistant"],
             }
+            rel_calls, red_calls = [], []
             for v in vendors[:2]:  # max 2 vendors
                 print(f"  Fetching : releasetrain.io/api/c/name/{v} ...")
-                vendor_releases += fetch_vendor_releases(v, limit=8, target_date=target_date)
+                rel_calls.append(lambda v=v: fetch_vendor_releases(v, limit=8, target_date=target_date))
                 # Search all related subreddits for this vendor
                 subs_to_search = VENDOR_SUBREDDITS.get(v, [v])
                 for sub in subs_to_search[:3]:
@@ -1451,9 +1472,11 @@ class RetrieverAgent:
                     # below: the subreddit filter is keyed on the vendor, but
                     # the ranking within it is keyed on the query wording, so
                     # both phrasings have to be asked for.
-                    vendor_reddit += fetch_vendor_reddit(sub, query=rewritten_query, limit=8)
+                    red_calls.append(lambda sub=sub: fetch_vendor_reddit(sub, query=rewritten_query, limit=8))
                     if union and original_query and original_query.strip().lower() != rewritten_query.strip().lower():
-                        vendor_reddit += fetch_vendor_reddit(sub, query=original_query, limit=8)
+                        red_calls.append(lambda sub=sub: fetch_vendor_reddit(sub, query=original_query, limit=8))
+            for r in _gather(rel_calls): vendor_releases += r
+            for r in _gather(red_calls): vendor_reddit += r
 
         # ── STEP 3: General sources, fetched for BOTH phrasings ──
         # Measured on the 10-question ground-truth set: 22 of the 23 relevant
@@ -1469,22 +1492,29 @@ class RetrieverAgent:
         gen_releases, gen_apple, gen_cisa, gen_circl = [], [], [], []
         gen_cve, gen_llm, gen_reddit, gen_news = [], [], [], []
 
+        # Gate on the question before spending a round trip per search term.
+        # Check the original wording too: a rewrite can drop the model name.
+        _wants_llm = query_mentions_llm(f"{original_query or ''} {rewritten_query}")
+        _sinks = {"releases": gen_releases, "apple": gen_apple, "cisa": gen_cisa,
+                  "circl": gen_circl, "cve": gen_cve, "llm": gen_llm,
+                  "reddit": gen_reddit, "news": gen_news}
+        _calls = []   # (sink, thunk), in the order the sequential loop appended
         for qi, q in enumerate(search_queries):
             tag = "rewritten" if qi == 0 else "original"
             print(f"  Fetching : general sources for {tag} query ...")
             if not vendor_releases:
-                gen_releases += fetch_live_releases(q, limit=4)
-            gen_apple += fetch_apple_rss(q, limit=3)
-            gen_cisa  += fetch_cisa_kev(q, limit=2)
-            gen_circl += fetch_circl_apple(q, limit=2)
-            gen_cve   += fetch_live_cve(q, limit=2)
-            # Gate on the question before spending a round trip per search term.
-            # Check the original wording too: a rewrite can drop the model name.
-            if query_mentions_llm(f"{original_query or ''} {rewritten_query}"):
-                gen_llm += fetch_llm_releases(q, limit=3, gate=False)
+                _calls.append(("releases", lambda q=q: fetch_live_releases(q, limit=4)))
+            _calls.append(("apple", lambda q=q: fetch_apple_rss(q, limit=3)))
+            _calls.append(("cisa",  lambda q=q: fetch_cisa_kev(q, limit=2)))
+            _calls.append(("circl", lambda q=q: fetch_circl_apple(q, limit=2)))
+            _calls.append(("cve",   lambda q=q: fetch_live_cve(q, limit=2)))
+            if _wants_llm:
+                _calls.append(("llm", lambda q=q: fetch_llm_releases(q, limit=3, gate=False)))
             if not vendor_reddit:
-                gen_reddit += fetch_live_reddit(q, limit=3)
-            gen_news += fetch_google_news(q, limit=2)
+                _calls.append(("reddit", lambda q=q: fetch_live_reddit(q, limit=3)))
+            _calls.append(("news",  lambda q=q: fetch_google_news(q, limit=2)))
+        for (sink, _), r in zip(_calls, _gather([c for _, c in _calls])):
+            _sinks[sink] += r
 
         # ── Tier 1: vendor-specific first, then general verified ──
         tier1 = dedupe_docs(vendor_releases + gen_releases + gen_apple
@@ -1642,8 +1672,7 @@ class EvaluatorAgent:
         elif has_vendor_releases:
             quality = max(quality, 0.50)  # MEDIUM-HIGH — release notes found
         elif has_vendor_reddit:
-            quality = max(quality, 0.40)  # MEDIUM — community posts found
-            quality = max(quality, 0.5)
+            quality = max(quality, 0.5)   # MEDIUM — community posts found
         elif tier1_hits and quality < 0.3:
             quality = 0.3
 

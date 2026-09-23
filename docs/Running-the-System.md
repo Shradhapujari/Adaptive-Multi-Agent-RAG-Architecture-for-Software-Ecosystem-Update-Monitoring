@@ -60,6 +60,8 @@ injected, so the suite needs neither a network nor a particular date.
 | Variable | Values | What it changes |
 |---|---|---|
 | `MARAG_RERANK` | `none` · `bm25` · `embed` | Which signal ranks retrieved candidates. `none` reproduces the published substring boost and is kept as the ablation arm. `embed` degrades to `bm25` and reports that it did. |
+| `MARAG_RANK_TIERS` | `flat` (default) · `tiered` | Whether ranking respects the verified-before-community prior. `tiered` is every run before 2026-09-20 and costs every arm ~0.23 nDCG@3 (Finding 9); kept as the ablation arm. |
+| `MARAG_FETCH_WORKERS` | integer, default `8` | Live sources are fetched concurrently; order is preserved, so the pool is identical to the sequential loop. `1` restores the sequential loop for debugging. |
 | `MARAG_CORPUS` | `record:<dir>` · `replay:<dir>` | Freeze the live corpus. Record once, replay for every arm; give each ablation its own directory, since a warm replay against a shared snapshot can backfill it. |
 | `PRESENTER_MODEL` | e.g. `ollama:llama3.1`, `openai:gpt-4o`, `anthropic:claude-*` | Which model writes the demo's final cited paragraph. Unset means the rule-based path. Also readable from `.streamlit/secrets.toml`. |
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | — | Required by those provider backends, including for a stronger independent judge (`--judge openai:gpt-4o`). |
