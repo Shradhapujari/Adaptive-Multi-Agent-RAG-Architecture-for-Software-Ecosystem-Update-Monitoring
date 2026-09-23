@@ -963,7 +963,10 @@ evaluation harness, whose carried-over measurements
 Section~\ref{sec:carried-over} reports, used $\theta = 0.30$. A second
 constant of 0.30 appears in the same scoring method and is unrelated to the
 retry decision: it is a quality floor applied when a Tier~1 or Apple source
-is present. The Evaluator does not generate answers \cite{zhuge2024}.
+is present. Since the fix described in Section~\ref{sec:retry}, the retry
+signal is read from the overlap score before any such floor is applied, while
+the floored score remains what is reported. The Evaluator does not generate
+answers \cite{zhuge2024}.
 
 \subsection{Adaptive Feedback and Self-Improvement}
 
@@ -1631,7 +1634,7 @@ A1 & \texttt{single\_agent} & retrieval on the user's question & Measured \\
 A1g & \texttt{single\_agent\_grounded} & question grounding, no coordination & Measured \\
 A2 & \texttt{rewrite\_only} & query rewriting & Measured \\
 A3 & \texttt{marag\_llm} & union fetch over both phrasings & Measured \\
-A4 & \texttt{marag\_llm\_retry} & Orchestrator retry & Cannot trigger \\
+A4 & \texttt{marag\_llm\_retry} & Orchestrator retry & Could not trigger as run \\
 A5 & \texttt{marag} & template rendering & Measured \\
 \bottomrule
 \end{tabular}
@@ -2695,9 +2698,22 @@ changing the system rather than the benchmark: either the threshold rises above
 the floors, or the floors come out of the Evaluator --- and the second touches
 the bespoke score this paper already retired for unrelated reasons
 (Section~\ref{sec:metric-threat}), so the two changes cannot be made
-independently of each other. We report the rung as unmeasurable in the
-configuration released here, and leave both changes to future work rather than
-tune a threshold until an arm produces a difference.
+independently of each other.
+
+The released implementation now takes a third route that touches neither. The
+retry signal is read from the term-overlap score \emph{before} the floors are
+applied; the floored score is still what the Evaluator reports, so the
+self-quality column of every run above is unchanged, and the threshold stays at
+0.15. Under that reading, recomputed offline over the retry arm's own top-4
+lists with no further model calls, the retry would fire on 13\% of the 500
+questions (8\% at a threshold of 0.10, 31\% at 0.30), spread across every
+category. The loop it triggers is the Orchestrator's: the Query Rewriter is
+re-invoked with the phrasings already searched and asked for different
+vocabulary, for at most two rounds, rather than the fixed widening string the
+harness once carried. Whether those retries change retrieval or answers is not
+yet measured; the frozen one-pass comparison is queued and will be reported
+when it completes. Until then the rung is reachable but unmeasured, which is a
+different claim from the null it could have been mistaken for.
 
 \subsubsection{An Accidental Demonstration}\label{sec:pool-demo}
 
@@ -2835,7 +2851,8 @@ Orchestrator at all (Section~\ref{sec:setup}). None of the retrieval numbers in
 this paper include a retry. Before the union fetch, a retry re-issued a second
 rewritten query in place of the user's question --- the defect of
 Section~\ref{sec:localizing} repeated; under the union it inherits both
-phrasings.
+phrasings, and in the released implementation each further round asks the
+Query Rewriter for vocabulary it has not yet tried (Section~\ref{sec:retry}).
 
 \textbf{Self-improvement.} The bespoke retrieval score rose from 0.756 in the
 first tertile of the 50-question run to 0.826 in the last ($+9.3\%$;

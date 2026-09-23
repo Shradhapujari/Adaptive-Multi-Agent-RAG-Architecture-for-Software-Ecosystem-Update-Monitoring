@@ -470,6 +470,23 @@ A +0.055 recall gap out of nothing but pool width — larger than every
 architectural difference in this project. Use `scripts/cross_run_compare.py`,
 or better, one run.
 
+**Fixed, 2026-09-23** (`98fee98`, `f66c639`). The signal now reads the
+term-overlap score *before* any floor (returned as `relevance`); the floored
+`quality` is still what is reported as `self_quality`, so past runs stay
+comparable. The threshold is unchanged at 0.15 (`MARAG_RETRY_THRESHOLD`). The
+retry itself is ManagerAgent's loop — re-rewrite with an avoid list, up to
+`MARAG_MAX_ROUNDS` (2) rounds — and the harness's `marag_retry` arm now calls
+that loop instead of a stale copy that widened with a fixed string. The dead
+0.40 floor is gone (`4d1e64b`).
+
+Recomputed offline over A4's own top-4 (no model calls), the retry would fire
+on **13%** of the 500 questions at 0.15 (8% at 0.10, 31% at 0.30), spread
+across every category. Whether those retries change anything is **not yet
+measured**: a one-pass `marag_llm` vs `marag_llm_retry` run on a fresh copy of
+the b500 snapshot is queued behind the b1000 baseline
+(`results/b500_retry_signal.log`). Until it reports, A4 is "reachable,
+unmeasured", not "null".
+
 ---
 
 ## Confounds, and what has been done about them
