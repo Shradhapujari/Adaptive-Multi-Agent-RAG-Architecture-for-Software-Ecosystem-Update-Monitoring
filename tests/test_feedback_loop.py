@@ -133,7 +133,10 @@ def test_rule_based_fallback_widens_differently_per_round(monkeypatch, avoid,
     """With no model reachable, the retry must still change the phrasing --
     otherwise the fallback path re-fetches the pool that just scored negative.
     """
-    monkeypatch.setattr(marag, "call_llama", lambda p: "[Ollama error: offline]")
+    # None is how call_llama now reports an unreachable model. The old stub
+    # returned "[Ollama error: offline]", which this test only detected
+    # because the rewriter sniffed that prefix out of the model's own output.
+    monkeypatch.setattr(marag, "call_llama", lambda p: None)
     rw = marag.QueryRewriterAgent()
     first = rw.run("chrome update")["rewritten"]
     later = rw.run("chrome update", avoid=avoid)["rewritten"]
