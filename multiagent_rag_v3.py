@@ -1298,8 +1298,33 @@ def pause(): time.sleep(0.4)
 # OLLAMA HELPER — calls Llama 3.1 locally
 # ─────────────────────────────────────────────────────────────
 
-def call_llama(prompt: str, model: str = "llama3.1") -> str:
-    """Call LLM via Ollama REST API running locally."""
+# The model the answer synthesiser asks for, named once so the prose that
+# reports which model wrote an answer cannot drift from the one called.
+SYNTH_MODEL = "mistral"
+
+
+def call_llama(prompt: str, model: str = "llama3.1"):
+    """Call an LLM via the local Ollama REST API. None if it cannot be reached.
+
+    None rather than the exception text. This used to `return f"[Ollama
+    error: {e}]"`, and one of its two callers rendered that straight into the
+    answer slot: on a host with no Ollama -- Streamlit Community Cloud, where
+    the demo is deployed -- the baseline panel printed
+
+        ✅ ANSWER (synthesized by Llama 3.1):
+        [Ollama error: <urlopen error [Errno 99] Cannot assign requested address>]
+
+    under a header reading "VERIFIED from live releasetrain.io APIs ·
+    Confidence: HIGH". A socket error presented as a verified, high-confidence
+    answer is the same failure the fetchers were fixed for: a system that
+    names a stack trace where a fact belongs has not degraded gracefully, it
+    has fabricated one.
+
+    A sentinel a caller must actually test cannot be rendered by accident; an
+    error string can, and was. The other caller's `.startswith("[Ollama
+    error")` check goes with it -- sniffing a prefix out of what is otherwise
+    model output is a test that a model can pass by quoting it.
+    """
     payload = json.dumps({
         "model": model,
         "prompt": rules_block() + prompt,
@@ -1318,8 +1343,8 @@ def call_llama(prompt: str, model: str = "llama3.1") -> str:
             result = json.loads(resp.read())
             _tokens.record(result, "rewrite")
             return result.get("response", "").strip()
-    except Exception as e:
-        return f"[Ollama error: {e}]"
+    except Exception:            # noqa: BLE001 - reported by returning None
+        return None
 
 # ─────────────────────────────────────────────────────────────
 # AGENT 1 — QUERY REWRITER (now uses real Llama 3.1)
@@ -1375,7 +1400,7 @@ Rewritten query:"""
         rewritten = call_llama(prompt)
 
         # fallback if Ollama fails
-        if rewritten.startswith("[Ollama error"):
+        if rewritten is None:
             print(f"  ⚠️  Ollama unavailable — using rule-based fallback")
             rewritten = f"{query} {self.FALLBACK_TERMS[len(avoid) % len(self.FALLBACK_TERMS)]}"
 
@@ -1870,7 +1895,7 @@ Sources retrieved:
 Answer:"""
 
             print(f"  Synthesizing answer with Llama 3.1...")
-            llm_answer = call_llama(llm_prompt, model="mistral")
+            llm_answer = call_llama(llm_prompt, model=SYNTH_MODEL)
             # Separate by trust tier
             tier1_docs = [d for d in docs if d.get("source","") in TIER1]
             tier2_docs = [d for d in docs if d.get("source","") in TIER2]
@@ -1890,10 +1915,19 @@ Answer:"""
                     best_comment_url = _doc.get("url", "")
                     best_comment_sub = _doc.get("subreddit", "")
 
-            lines.append(f"  ✅ ANSWER (synthesized by Llama 3.1):")
-            lines.append("")
-            lines.append(f"  {llm_answer}")
-            lines.append("")
+            # Named after the model actually called, not after the one this
+            # header used to advertise: the call above passes "mistral", and
+            # the line claimed Llama 3.1 on every run that succeeded.
+            if llm_answer is None:
+                lines.append("  ⚠️  NO ANSWER — no local model reachable on this "
+                             "host, so nothing was synthesized. The retrieved "
+                             "sources are listed below and are unaffected.")
+                lines.append("")
+            else:
+                lines.append(f"  ✅ ANSWER (synthesized by {SYNTH_MODEL}):")
+                lines.append("")
+                lines.append(f"  {llm_answer}")
+                lines.append("")
 
             if tier1_docs:
                 lines.append(f"  ✅ VERIFIED SOURCES ({len(tier1_docs)}):")
