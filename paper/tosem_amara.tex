@@ -946,7 +946,9 @@ incorporated before query generation.
 The Retriever performs vendor-aware document retrieval. It first
 attempts to identify the software vendor referenced in the query using
 exact matching, alias lookup, and fuzzy matching against a registry of
-14,223 software product names and 628 software-related subreddits. If a
+software product names and subreddits fetched at startup (14,223 and 628
+respectively when this was written; 1,348 and 364 as of 2026-09-23 --- see
+Section~\ref{sec:datasources}). If a
 vendor is detected, retrieval is restricted to vendor-specific
 release notes, advisories, and community discussions. Otherwise, a
 general retrieval logic is used. The Retriever returns ranked
@@ -1010,6 +1012,19 @@ obtained through multiple API endpoints.
 
 To support vendor-aware retrieval, a registry of software vendors and
 associated subreddits is loaded at startup and cached locally.
+
+The entry counts above are those measured when the conference version was
+written. They are not re-measurable: the endpoints return query results
+without a collection total, so a reader cannot check them against the live
+service. The one count that can be checked has moved substantially ---
+\texttt{/api/c/names}, the product vocabulary the vendor matcher is built
+from, returned 14,223 names then and returns 1,348 today (2026-09-23, full
+response, not paginated). We report the original figures rather than silently
+restate them, and note that any absolute corpus size in this section should be
+read as a measurement of the service at that time rather than a stable
+property of it. Retrieval results in this paper are unaffected: every run
+either records its own corpus snapshot or is replayed from one
+(Section~\ref{sec:tier-control}).
 
 \subsection{Two Roles for a Rewritten Query}\label{sec:rewrite-roles}
 
