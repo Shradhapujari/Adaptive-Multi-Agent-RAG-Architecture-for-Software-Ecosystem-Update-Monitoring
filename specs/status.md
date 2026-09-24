@@ -834,3 +834,39 @@ other sessions, so it may not survive.
 2. Trace one Chrome query end to end with `Show pipeline steps` on: what the
    retriever returns, what reaches the presenter, and which rule rejects it.
 3. Only then revisit latency.
+
+### §13 retest, same morning — the decline was #84, and it is fixed
+
+Another session could not reproduce the decline and was right. Retested against
+`origin/main` in a clean detached worktree, pipeline called directly:
+
+| question | result | elapsed |
+|---|---|---|
+| What bugs were fixed in Chrome recently? | **answers**, synthesized by mistral, cites 4 community + 2 release | 39.9 s |
+| Which is more stable, Teams or Zoom? | **answers**, both products retrieved (teams v1.69.0, zoom v7.1.9) | 18.6 s |
+
+Cause: PR #84 gave `load_vendor_lists` a fallback to the local catalog. Before
+it, a single 502 left the vendor list empty for the life of the process, every
+question "found no vendor", and the vendor-targeted path was skipped silently —
+which is exactly the shape of the five declines above. **The §13 table was taken
+on `feat/manager-round-budget`, which predates #84, #85 and #86; it does not
+describe current main.** The two store facts in §13 stand on their own (no
+community document carries a product tag; one document is dated today), but they
+were not what caused the declines.
+
+Two things the retest surfaced that are worth carrying forward:
+
+1. **False vendor match, visible in output.** The Teams/Zoom answer cites
+   `teams v1.69.0 — Scoold is a Q&A and a knowledge sharing platform for teams`
+   (CVE-2026-54677) as a VERIFIED Targeted Vendor Release Note. That is Scoold,
+   matched on the word "teams", presented as Microsoft Teams. Substring vendor
+   matching over CVE descriptions is the likely path.
+2. **The LLM path is not always what answers.** The other session's run of the
+   same Chrome question had the model's paragraph rejected by the guardrail
+   ("10 sources given, none cited") and the rule-based composer produced the
+   cited answer instead. Mine synthesized with mistral. So the composer that
+   answers is run-dependent, and a slide claiming synthesis may not match what
+   the caption says on the day.
+
+Latency is unchanged and still the reason to be careful live: 18.6 s and 39.9 s
+here, with the b1000 eval (PID 42307) resumed and contending for Ollama.

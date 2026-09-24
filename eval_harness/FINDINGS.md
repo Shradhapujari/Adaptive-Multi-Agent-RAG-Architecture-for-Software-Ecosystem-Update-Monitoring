@@ -489,6 +489,50 @@ unmeasured", not "null".
 
 ---
 
+## Finding 13 — The retry fires, changes what is retrieved, and moves nothing
+
+Two-pass frozen comparison, 500 questions. Pass 1 `run_1790243866` records the
+retry arm alone (`record:` into a fresh dir, judge off) so its second-round
+rewrites' fetches exist on disk; pass 2 `run_1790278467` replays **both** arms
+against that snapshot in one run, one judged pool, judge on.
+
+| metric | retry | no retry | Δ (95% CI) | W/T/L |
+|---|---:|---:|---:|---:|
+| nDCG@1 | 0.484 | 0.488 | −0.004 [−0.016, +0.008] | 4/490/6 |
+| nDCG@3 | 0.532 | 0.535 | −0.002 [−0.013, +0.008] | 8/481/11 |
+| Recall@5 | 0.630 | 0.631 | −0.001 [−0.013, +0.012] | 6/486/8 |
+| MRR | 0.566 | 0.567 | −0.001 [−0.012, +0.010] | 8/484/8 |
+| Faithfulness | 0.896 | 0.894 | +0.002 | 12/479/9 |
+
+**It is not inert.** Fired on **94/500 (18.8%)** — against the 13% offline
+projection over the older top-4 lists. Changed the top-4 on **71** of those 94
+and the answer on **42** of 500. And it moves no metric: every difference within
+0.004, every interval straddling zero, win/loss even (8 vs 11 at rank 3).
+Adaptive retrieval here re-rolls rather than improves.
+
+Why the two-pass: the retry's second-round phrasings are fetches no earlier
+snapshot can hold, so a one-pass `replay:` leaves the retry arm reading today's
+feed while the baseline stays frozen — Finding 11's confound at small scale. I
+launched that broken version first and killed it at 52 rows. Recording into a
+*copy* of an older snapshot is not enough either: replay only adds keys for
+misses, so the retry's extra documents stay newer than everything around them.
+A fresh recording pass puts the whole corpus on one date.
+
+**Two gaps this exposed in the harness:**
+1. `retried`/`rounds` are not persisted per question, so the fire rate is
+   *inferred* from rewriter invocations (retry arm 4 calls on 94 questions vs
+   the baseline's uniform 2 — `call_llama` labels both the rewriter and the
+   template's inner synthesis "rewrite", hence 2 not 1). Persist the count.
+2. **`strict:` does not abort on a corpus miss.** `CorpusMiss` is a
+   `RuntimeError` and every source fetch in `RetrieverAgent` is wrapped in
+   `except Exception: return []`, so the miss is swallowed and that source
+   silently contributes nothing. Pass 2 took 74 such misses
+   (releasetrain.io 65, news.google.com 9) and still exited 0 with
+   `frozen: false`. Read `frozen` in config.json; do not trust the mode name.
+   The paper's §4.4 description of strict mode was wrong on this and is fixed.
+
+---
+
 ## Confounds, and what has been done about them
 
 | Confound | Status |
