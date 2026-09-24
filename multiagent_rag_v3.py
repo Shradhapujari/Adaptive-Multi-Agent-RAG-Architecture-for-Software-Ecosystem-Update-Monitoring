@@ -1171,6 +1171,31 @@ def fetch_vendor_reddit(vendor: str, query: str = "", limit: int = 10) -> list:
         return []
 
 
+# Subreddits searched for a detected vendor. Module scope so the Streamlit
+# app can search the same ones the terminal trace does -- the two views of
+# a question disagreed because only one of them looked here.
+VENDOR_SUBREDDITS = {
+            "linux":     ["linux","linuxquestions","Fedora","Ubuntu","debian"],
+            "ollama":    ["ollama","LocalLLaMA","openclaw"],
+            "llama":     ["LocalLLaMA","ollama","MachineLearning"],
+            "gpt":       ["OpenAI","ChatGPT","LocalLLaMA"],
+            "claude":    ["ClaudeAI","Anthropic","LocalLLaMA"],
+            "gemini":    ["Bard","GoogleGeminiAI","LocalLLaMA"],
+            "mistral":   ["LocalLLaMA","MistralAI"],
+            "deepseek":  ["LocalLLaMA","DeepSeek"],
+            "qwen":      ["LocalLLaMA"],
+            "grok":      ["grok","LocalLLaMA"],
+            "comfyui":   ["comfyui"],
+            "openclaw":  ["openclaw"],
+            "Ubiquiti":  ["Ubiquiti"],
+            "ios":       ["applehelp","ios","apple"],
+            "macos":     ["MacOS","applehelp"],
+            "windows":   ["windows","techsupport"],
+            "chrome":    ["chrome","chromium"],
+            "homeassistant": ["homeassistant"],
+}
+
+
 RANK_QUERY_CHOICES = ("original", "rewritten")
 RANK_TIERS_CHOICES = ("tiered", "flat")
 
@@ -1451,26 +1476,6 @@ class RetrieverAgent:
 
         if vendors:
             # Expand vendor to related subreddits for better coverage
-            VENDOR_SUBREDDITS = {
-                "linux":     ["linux","linuxquestions","Fedora","Ubuntu","debian"],
-                "ollama":    ["ollama","LocalLLaMA","openclaw"],
-                "llama":     ["LocalLLaMA","ollama","MachineLearning"],
-                "gpt":       ["OpenAI","ChatGPT","LocalLLaMA"],
-                "claude":    ["ClaudeAI","Anthropic","LocalLLaMA"],
-                "gemini":    ["Bard","GoogleGeminiAI","LocalLLaMA"],
-                "mistral":   ["LocalLLaMA","MistralAI"],
-                "deepseek":  ["LocalLLaMA","DeepSeek"],
-                "qwen":      ["LocalLLaMA"],
-                "grok":      ["grok","LocalLLaMA"],
-                "comfyui":   ["comfyui"],
-                "openclaw":  ["openclaw"],
-                "Ubiquiti":  ["Ubiquiti"],
-                "ios":       ["applehelp","ios","apple"],
-                "macos":     ["MacOS","applehelp"],
-                "windows":   ["windows","techsupport"],
-                "chrome":    ["chrome","chromium"],
-                "homeassistant": ["homeassistant"],
-            }
             rel_calls, red_calls = [], []
             for v in vendors[:2]:  # max 2 vendors
                 print(f"  Fetching : releasetrain.io/api/c/name/{v} ...")

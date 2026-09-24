@@ -456,6 +456,38 @@ def _step(label: str, show: bool):
     return st.spinner(label) if show else nullcontext()
 
 
+def vendor_subreddit_posts(query: str, already: list, per_sub: int = 8):
+    """The vendor's own subreddits, as the terminal trace searches them.
+
+    The community agent reads `/api/reddit/query/positive`, which ranks the
+    whole feed by text. The terminal's RetrieverAgent also asks
+    `/api/reddit/by-subreddit` for the detected vendor's subreddits, and that is
+    where a thread like "KB5101650 breaks printing" lives: on the demo question
+    the app returned no printing document at all while the terminal named the
+    KB. Same detector and same fetch as the terminal, so both views see it.
+
+    Returns `(kept, dropped)`; the caller adds the drops to the run's screen log.
+    """
+    import multiagent_rag_v3 as marag
+    from guardrail import screened as _screen
+
+    have = {(d.get("url") or "").rstrip("/").lower() for d in (already or ())}
+    out = []
+    for v in marag.extract_vendor(query)[:2]:
+        for sub in marag.VENDOR_SUBREDDITS.get(v, [v])[:3]:
+            try:
+                posts = marag.fetch_vendor_reddit(sub, query=query, limit=per_sub)
+            except Exception:  # noqa: BLE001 -- one dead subreddit is not an outage
+                continue
+            for p in posts:
+                u = (p.get("url") or "").rstrip("/").lower()
+                if u and u not in have:
+                    have.add(u)
+                    out.append(p)
+    kept, dropped = _screen(out)
+    return kept, [{"doc": d, "pattern": pat} for d, pat in dropped]
+
+
 def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
                  yesno_on: bool = True, unclear_as_no: bool = False,
                  survey_on: bool = True, source: str = "agent",
@@ -579,6 +611,11 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         t0 = time.time()
         results["community"] = union_fetch(community_fetch, phrasings,
                                            pool_limit, temporal)
+        # Vendor subreddits, unless the run is pinned to the local store.
+        if source != "store":
+            extra, dropped = vendor_subreddit_posts(query, results["community"])
+            results["community"] += extra
+            results["screened"].extend(dropped)
         results["timing"]["community"] = round(time.time()-t0, 1)
 
     # Step 3 — Release Notes Agent
@@ -1755,7 +1792,7 @@ elif run_btn and not query:
 _last = st.session_state.get("last_answer")
 if _last:
     st.caption(f"Was this answer right? — “{_last['query']}”")
-    c1, c2, _ = st.columns([1, 1, 6])
+    c1, c2, _ = st.columns([2, 2, 5])
     for col, verdict, label in ((c1, "correct", "👍 Correct"), (c2, "wrong", "👎 Wrong")):
         if col.button(label, key=f"fb_{verdict}", use_container_width=True):
             results_view.record_feedback({"ts": datetime.now().isoformat(timespec="seconds"),
