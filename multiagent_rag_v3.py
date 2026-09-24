@@ -2126,30 +2126,42 @@ class ManagerAgent:
 def show_why():
     print()
     bar("═")
-    print("  WHY MULTI-AGENT? The core argument")
+    print("  WHAT THE MEASUREMENTS SAY — and what they said before")
     bar("═")
     print("""
-  SINGLE AGENT (the problem):
-    → One model does everything
-    → Gets confused mixing rewriting + retrieval + evaluation
-    → No specialization = shallow, generic answers
-    → If one thing fails, everything fails
+  THE CLAIM WE STARTED WITH:
+    → Specialized agents (rewrite / retrieve / evaluate / orchestrate)
+      beat a single-agent baseline by 17.2% on retrieval quality
+    → That number came from a keyword-overlap score of our own design
 
-  MULTI-AGENT (the solution):
-    → Each agent has ONE job and does it well
-    → Manager coordinates — like a research team lead
-    → Rewriter uses real Llama 3.1 LLM (running on your Mac)
-    → RLAIF evaluator catches bad results and retries
-    → Transparent, explainable, extensible
+  DEFECT 1 — the rewrite replaced the user's wording:
+    → The rewritten query went to every retrieval endpoint alone, so
+      documents matching the user's own phrasing were never fetched
+    → Re-scored with nDCG@3 over pooled judgments, multi-agent LOST:
+      0.145 vs 0.765 baseline (paired deficit 0.620, Wilcoxon p=0.016, n=10)
+    → Fixed by issuing both phrasings and unioning the pools → parity
 
-  YOUR RESEARCH (6-phase roadmap):
-    Phase 2  →  Query Rewriter Agent  (Llama 3.1 — live now!)
-    Phase 3  →  Manager orchestration (CrewAI — next step)
-    Phase 4  →  Retriever Agent       (FAISS + BGE-Large)
-    Phase 5  →  Evaluator Agent       (RLAIF / Zero-HF)
+  DEFECT 2 — the benchmark leaked its own answer key:
+    → Questions are titles of real community posts; the live corpus
+      returns the post the title came from, and the judge calls it relevant
+    → That post sat in 72–98% of every top-k list we had reported on
+    → Invisible to paired comparison: every arm drew on it equally
+
+  WHAT IS LEFT, LEAK-FREE (n=500, 24 ecosystems):
+    → multi-agent 0.304 vs single-agent 0.301 nDCG@3 — a match, not a win
+    → no paired difference exceeds 0.015, at roughly twice the latency
+    → the 0.23 faithfulness gap was an answer-FORMAT artifact: same
+      retrieval through the baseline's prompt scores 0.919 vs 0.929
+
+  SO WHY RUN THIS PIPELINE AT ALL?
+    → Decomposition per se is not what produced the original result
+    → What the architecture buys is inspectability: every stage below
+      prints its own input, output, and score — which is how both
+      defects were found in the first place
     """)
 
 DEMO_QUERIES = [
+    "Which is more stable, Teams or Zoom?",
     "What is the latest version of Linux?",
     "Siri fail to execute tasks when offline after iOS 26.4 update",
     "Updated to kernel 6.19.11 and now desktop doesnt load",
@@ -2186,7 +2198,7 @@ def _pause(prompt: str) -> str:
 
 def show_commands():
     print("  Commands:")
-    print("    'why'  — show why multi-agent matters (start here!)")
+    print("    'why'  — what the measurements say (start here!)")
     print("    'demo' — run all 3 demo queries")
     print("    'auto' — AUTO MODE: fetch live Reddit questions and answer them")
     print("    'help' — show this list again")
