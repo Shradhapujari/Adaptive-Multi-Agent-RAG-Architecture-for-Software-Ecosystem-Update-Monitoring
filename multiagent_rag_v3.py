@@ -2147,11 +2147,14 @@ def show_why():
     → That post sat in 72–98% of every top-k list we had reported on
     → Invisible to paired comparison: every arm drew on it equally
 
-  WHAT IS LEFT, LEAK-FREE (n=500, 24 ecosystems):
-    → multi-agent 0.304 vs single-agent 0.301 nDCG@3 — a match, not a win
-    → no paired difference exceeds 0.015, at roughly twice the latency
-    → the 0.23 faithfulness gap was an answer-FORMAT artifact: same
-      retrieval through the baseline's prompt scores 0.919 vs 0.929
+  WHAT IS LEFT, LEAK-FREE (n=500, 24 ecosystems, flat ranking):
+    → multi-agent 0.496 vs single-agent 0.490 nDCG@3 — a match, not a win
+      (Δ +0.006, 95% CI [-0.009, +0.021], 43 won / 410 tied / 47 lost)
+    → no paired difference exceeds 0.018, none survives Holm, at roughly
+      twice the latency (0.28s vs 0.12s)
+    → the faithfulness gap was an answer-FORMAT artifact: same retrieval
+      as prose scores 0.900 vs the baseline's 0.897 (Δ +0.003, n.s.);
+      rendered as a template it drops to 0.837 (Δ -0.059, p<0.001)
 
   SO WHY RUN THIS PIPELINE AT ALL?
     → Decomposition per se is not what produced the original result
