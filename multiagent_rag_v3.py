@@ -638,27 +638,83 @@ import requests as requests
 _VENDOR_NAMES    = []   # from /api/c/names        — 14,223 products
 _SUBREDDIT_NAMES = []   # from /api/reddit/meta/subreddits — 628 subreddits
 _VENDORS_LOADED  = False
+_CATALOG_SOURCE  = "unloaded"   # "live", "cache", "bundled" or "unloaded"
+_CATALOG_ERRORS  = []           # why the live fetch was not used, if it was not
+
+
+def catalog_status() -> dict:
+    """Where the vendor vocabulary came from, and what failed to load.
+
+    extract_vendor returns [] both when a query names no product and when it
+    could not find out, and those mean opposite things: the first is a
+    finding, the second is an outage wearing its clothes. Nothing could tell
+    them apart, because a failed fetch left the list empty and said so only on
+    stdout, which nothing reads on a deployed host.
+    """
+    return {
+        "source": _CATALOG_SOURCE,
+        "vendors": len(_VENDOR_NAMES),
+        "subreddits": len(_SUBREDDIT_NAMES),
+        "errors": list(_CATALOG_ERRORS),
+        "degraded": _CATALOG_SOURCE not in ("live",),
+    }
+
 
 def load_vendor_lists():
-    """Cache vendor + subreddit lists once at startup."""
+    """Cache vendor + subreddit lists once, live if possible and locally if not.
+
+    A failed fetch used to leave _VENDOR_NAMES empty and set _VENDORS_LOADED
+    anyway, so one timeout at startup meant no vendor matched anything for the
+    life of the process -- every question answered unscoped, silently, until
+    someone restarted it. On a host that had never reached the endpoint at all
+    that was every question.
+
+    The disk cache and bundled list vendor.load_catalog() already maintains
+    are the answer to that; this module simply did not use them. 5613 names
+    cached against 74 bundled here today, either of which scopes a search
+    better than nothing does.
+    """
     global _VENDOR_NAMES, _SUBREDDIT_NAMES, _VENDORS_LOADED
+    global _CATALOG_SOURCE, _CATALOG_ERRORS
     if _VENDORS_LOADED:
         return
+    _CATALOG_ERRORS = []
     try:
         r1 = requests.get("https://releasetrain.io/api/c/names", timeout=15)
+        r1.raise_for_status()
         _VENDOR_NAMES = [v.lower() for v in r1.json() if isinstance(v, str)]
+        _CATALOG_SOURCE = "live"
         print(f"  Loaded {len(_VENDOR_NAMES)} vendor names")
     except Exception as e:
-        print(f"  Warning: could not load vendor names: {e}")
+        _CATALOG_ERRORS.append(f"vendor names: {type(e).__name__}: {e}")
+        try:
+            # fetch=False: the live endpoint just refused, and asking it again
+            # through another door would only spend the timeout twice.
+            import vendor as _vendor_catalog
+            _VENDOR_NAMES = [v.lower() for v in _vendor_catalog.load_catalog(fetch=False)]
+            _CATALOG_SOURCE = "cache" if len(_VENDOR_NAMES) > 100 else "bundled"
+            print(f"  Vendor names unavailable ({e}); using {len(_VENDOR_NAMES)} "
+                  f"from the local catalog")
+        except Exception as inner:
+            _CATALOG_ERRORS.append(f"local catalog: {type(inner).__name__}: {inner}")
+            _CATALOG_SOURCE = "unloaded"
+            print(f"  Warning: could not load vendor names: {e}")
 
     try:
         r2 = requests.get("https://releasetrain.io/api/reddit/meta/subreddits", timeout=15)
+        r2.raise_for_status()
         _SUBREDDIT_NAMES = [s.lower() for s in r2.json().get("data", []) if isinstance(s, str)]
         print(f"  Loaded {len(_SUBREDDIT_NAMES)} subreddit names")
     except Exception as e:
+        # No local equivalent for this one, and none is invented here: the
+        # subreddit list is the third matching step, after aliases and vendor
+        # names, so losing it narrows the match rather than removing it.
+        _CATALOG_ERRORS.append(f"subreddits: {type(e).__name__}: {e}")
         print(f"  Warning: could not load subreddits: {e}")
 
-    _VENDORS_LOADED = True
+    # Only remember a load that produced a vocabulary. Caching the empty case
+    # is what turned one timeout into a process that never matched again.
+    _VENDORS_LOADED = bool(_VENDOR_NAMES)
 
 # Common aliases — maps query terms to canonical vendor names
 VENDOR_ALIASES = {
