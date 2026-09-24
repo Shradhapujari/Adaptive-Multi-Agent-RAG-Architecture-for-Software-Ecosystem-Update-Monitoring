@@ -35,6 +35,16 @@ from dataclasses import dataclass, field
 import os
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Tuple
+from zoneinfo import ZoneInfo
+
+# Streamlit Community Cloud runs its containers in UTC. `datetime.now()` is
+# naive and takes whatever timezone the host process is in, so "today" on a
+# UTC host flips to tomorrow's date hours before it does for a US-based
+# visitor -- measured 2026-09-23: server said "Sep 24" while the app's actual
+# audience was still in the evening of the 23rd. Anchoring to the project's
+# own timezone (University of the Pacific, California) instead of the host's
+# ambient one makes "today" match what a visitor here actually means by it.
+_LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
 __all__ = [
     "TemporalResolution",
@@ -236,7 +246,7 @@ def now(default: Optional[datetime] = None) -> datetime:
     """
     raw = os.environ.get("MARAG_NOW", "").strip()
     if not raw:
-        return default or datetime.now()
+        return default or datetime.now(_LOCAL_TZ)
     try:
         return datetime.fromisoformat(raw)
     except ValueError:
