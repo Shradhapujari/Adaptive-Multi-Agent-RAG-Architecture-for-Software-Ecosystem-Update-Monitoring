@@ -9,6 +9,14 @@ requests==2.34.2
 numpy==2.4.6
 pytest==9.1.1
 
+# zoneinfo (stdlib) needs the IANA tz database. macOS and most desktop Linux
+# ship it at the OS level, so temporal.py's ZoneInfo("America/Los_Angeles")
+# works here without this package -- but Streamlit Community Cloud's base
+# image does not, and raised ZoneInfoNotFoundError on import, which crashed
+# the whole app before a single line of it ran. tzdata is the officially
+# recommended fallback: a pure-data package with no system dependency.
+tzdata==2026.4
+
 # Demo UI only (app_1.py, DemoMain*.py, marag_app.py -- NOT app.py, which is
 # an unrelated Flask IoT sensor API). app_1.py is the Streamlit deploy target;
 # exercised end to end locally under Python 3.11 + streamlit 1.62.0 against the
