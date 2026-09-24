@@ -1,0 +1,26 @@
+# Runs the test suite on every PR. There was no CI before this: the only thing
+# standing behind a merge was whoever remembered to run pytest locally.
+#
+# 3.11 is the version venv311 pins and every number in results/ was produced
+# under. No Ollama on the runner -- the pipeline degrades to its rule-based
+# fallbacks by design (see requirements.txt), so the suite is expected to pass
+# without a model. If a test ever needs one, skip it here rather than
+# installing a model into CI.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m pytest tests -q
