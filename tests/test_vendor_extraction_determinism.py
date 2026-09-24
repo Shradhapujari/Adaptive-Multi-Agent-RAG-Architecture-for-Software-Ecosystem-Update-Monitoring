@@ -27,17 +27,45 @@ MRAG = ROOT / "multiagent_rag_v3.py"
 
 SEEDS = ["0", "1", "2", "3", "4", "17", "42", "1000"]
 
+# The catalogs extract_vendor matches against, pinned.
+#
+# They are normally fetched from /api/c/names and /api/reddit/meta/subreddits
+# by load_vendor_lists(), which swallows a failed fetch and leaves the list
+# empty. Each seed below is its own process and so its own pair of fetches, so
+# one request failing while the others succeed makes the seeds disagree about
+# the vendor -- and this test reports that as "extract_vendor is not
+# seed-invariant", which is not what happened. Seen 2026-09-24, while the
+# b1000 eval was competing with this machine for the same endpoint: the suite
+# failed here, and the same test passed three times in a row on its own
+# minutes later.
+#
+# The property under test is that a tie between two registered names resolves
+# the same way whatever the hash seed. That needs a list containing the tie,
+# not the live list: "release" and "rust" are both registered names, which is
+# what made the reported query ambiguous in the first place. Pinning them
+# keeps the tie and removes the network.
+_VENDORS = ["arch", "release", "rust", "rust-lang", "ubuntu", "upgrade",
+            "channel", "fedora", "debian"]
+_SUBREDDITS = ["archlinux", "rust", "ubuntu", "linux"]
+
 _PROBE = '''
 import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location("mrag", {mrag!r})
 mrag = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mrag)
+# Pin the catalogs before the call, and mark them loaded so the fetch that
+# would replace them never runs. Set after exec_module because the module
+# defines these at import.
+mrag._VENDOR_NAMES = {vendors!r}
+mrag._SUBREDDIT_NAMES = {subreddits!r}
+mrag._VENDORS_LOADED = True
 print(json.dumps(mrag.extract_vendor({query!r})))
 '''
 
 
 def _run_with_seed(seed: str, query: str) -> list:
-    src = _PROBE.format(mrag=str(MRAG), query=query)
+    src = _PROBE.format(mrag=str(MRAG), query=query,
+                        vendors=_VENDORS, subreddits=_SUBREDDITS)
     out = subprocess.run(
         [sys.executable, "-c", src],
         cwd=ROOT, env={"PYTHONHASHSEED": seed, "PATH": "/usr/bin:/bin"},
@@ -79,6 +107,12 @@ class TestVendorExtractionUnitLevel:
         spec = importlib.util.spec_from_file_location("mrag_unit", MRAG)
         cls.mrag = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.mrag)
+        # Same pinning as the subprocess probe, and for the same reason: these
+        # assertions are about the matching rules, not about whether
+        # releasetrain.io answered while the suite was running.
+        cls.mrag._VENDOR_NAMES = list(_VENDORS)
+        cls.mrag._SUBREDDIT_NAMES = list(_SUBREDDITS)
+        cls.mrag._VENDORS_LOADED = True
 
     def test_sorted_not_raw_set_iteration(self):
         """Regression pin on the mechanism, not just the symptom: the exact-word
