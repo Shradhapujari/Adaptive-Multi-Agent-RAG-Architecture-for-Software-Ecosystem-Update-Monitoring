@@ -646,6 +646,20 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     if g.vendors:
         scoped = vendor.filter_by_vendor(results["releases"], g.vendors)
         results["releases"] = scoped or results["releases"]
+        # The product tag is the feed's, and on an advisory it names whatever
+        # was searched for rather than what the record is about: /api/v/?q=teams
+        # returns 30 rows all tagged "teams", 24 of them CVEs for Scoold,
+        # UVdesk, vikunja and PraisonAI, which merely contain the word. One
+        # reached a demo answer cited as a verified vendor release note.
+        # filter_by_vendor cannot catch it -- the tag genuinely says "teams" --
+        # so the record is read instead. Counted, not hidden, and the pool is
+        # never emptied by it.
+        on_subject = [r for r in results["releases"]
+                      if vendor.classify_record(r) != "advisory"
+                      or any(vendor.advisory_names_vendor(r, v.name)
+                             for v in g.vendors)]
+        results["mislabelled_excluded"] = len(results["releases"]) - len(on_subject)
+        results["releases"] = on_subject or results["releases"]
         # No `or results["community"]` fallback: when the subject filter finds
         # nothing about this question in the feed, that is the finding. The
         # fallback used to restore the pool it had just rejected, which is how
