@@ -1988,6 +1988,27 @@ Answer:"""
 # MANAGER AGENT — ORCHESTRATOR
 # ─────────────────────────────────────────────────────────────
 
+def plan_rounds(query: str, ceiling: int = None) -> int:
+    """How many retrieve-evaluate rounds this question is worth.
+
+    The budget only ever goes UP: a plain lookup gets the usual MAX_ROUNDS,
+    a comparison or multi-clause question gets one extra round to spend. It
+    never goes below the default, because a negative RLAIF signal on an easy
+    question is exactly when the retry pays -- budgeting that away would make
+    the loop worse on the questions it was built for.
+
+    Deterministic: no extra LLM call to decide how much LLM work to do.
+    """
+    if ceiling is None:
+        ceiling = ManagerAgent.MAX_ROUNDS
+    q = query.lower()
+    complex_q = (len(extract_vendor(query)) > 1
+                 or re.search(r"\b(vs|versus|compare|difference|both|either)\b", q)
+                 or q.count("?") > 1
+                 or len(q.split()) > 25)
+    return ceiling + 1 if complex_q else ceiling
+
+
 def orchestrate(rewriter, retriever, evaluator, query: str, top_k: int = 4,
                 union: bool = True, max_rounds: int = None) -> dict:
     """ManagerAgent's retrieve-evaluate-retry loop, with everything it saw.
@@ -2059,9 +2080,11 @@ class ManagerAgent:
         print(f"    Step 2 → delegate to Retriever Agent")
         print(f"    Step 3 → delegate to Evaluator Agent (RLAIF)")
         print(f"    Step 4 → if quality low, trigger retry")
+        budget = plan_rounds(query, self.MAX_ROUNDS)
+        print(f"    Budget: {budget} round(s) (default {self.MAX_ROUNDS})")
 
         return orchestrate(self.rewriter, self.retriever, self.evaluator,
-                           query, top_k=4, max_rounds=self.MAX_ROUNDS)["result"]["answer"]
+                           query, top_k=4, max_rounds=budget)["result"]["answer"]
 
 # ─────────────────────────────────────────────────────────────
 # RUNNER
