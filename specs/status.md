@@ -753,3 +753,84 @@ Not done here, on purpose: merging the run's judge-label growth into the
 tracked `results/qrels_cache.json`, which another session holds modified and
 uncommitted. The post-run cache is saved beside the snapshot as
 `qrels_cache_after_run.json` for whoever merges it.
+
+## 13. Streamlit demo declines every question — 2026-09-24, found while rehearsing the RISE seminar
+
+**Status: open blocker for live demos. Not a regression in correctness — the
+system is abstaining, as designed — but the app is not presentable live.**
+
+Found while checking whether "Which is more stable, Teams or Zoom?" made a good
+opening for the seminar demo. It does not, and neither does anything else tried.
+
+### What was run
+
+`marag_app.py`, answering mode "Compare both side by side", data source
+"Retrieval agent decides", Ollama up, store at 443 documents.
+
+| question | results/agent | single_agent | multi-agent |
+|---|---|---|---|
+| Which is more stable, Teams or Zoom? | 5 | declined, 9.0 s | declined, 30.6 s |
+| Siri fail to execute tasks when offline after iOS 26.4 update | 5 | declined, 20.7 s | declined, 54.6 s |
+| Any critical Linux updates today? | 5 | declined, 25.6 s | declined, **93.1 s** |
+| Any critical Linux updates today? | 10 | declined, 33.7 s | not observed |
+| What bugs were fixed in Chrome recently? | 10 | declined, 30.4 s | >70 s, not observed |
+
+Five questions, zero answers, both arms. Two of them are the app's own example
+queries. Raising `results per agent` 5 → 10 cost ~8 s per run and changed no
+answer; it was set back to 5.
+
+### Two facts from the store that explain part of it
+
+`data/marag.db`, 443 documents (`release` 373, `community` 53, `cve` 17):
+
+1. **No community document carries a product tag.** All 53 have `product = ''`.
+   Vendor-aware retrieval therefore cannot reach any of them. This is why
+   stability and bug questions are structurally unanswerable: `teams` has 29
+   release notes and 0 community posts, `zoom` 8 and 0, `ios` 11 and 0. Asking
+   "which is more stable" over release notes alone cannot succeed.
+
+2. **Exactly one document in the whole store is dated today** (a `zoom` row,
+   `published = 20260924`). `linux` (144 docs) and `chrome` (116) both stop at
+   `20260923`. So "Any critical Linux updates **today**?" returning nothing is
+   the strict date guard (§ Week-3 temporal work) behaving correctly against
+   data that does not exist.
+
+### What those two facts do *not* explain
+
+"What bugs were fixed in Chrome recently?" carries no date constraint, `chrome`
+has 116 documents in the store, `results per agent` was 10 — and the single
+agent still answered "The sources do not provide specific details about the
+bugs fixed in the recent Chrome update." Something between retrieval and
+generation is rejecting documents that are present in the database. That is the
+part worth debugging, and it was not chased today.
+
+### Latency, separately
+
+Multi-agent wall clock across the runs above: 30.6 s, 54.6 s, 93.1 s, >70 s.
+Single agent 9.0–33.7 s. Independently of whether an answer comes back, this
+rules out a live web demo: the room waits half a minute to a minute and a half
+per question, twice.
+
+### What was done about it for the seminar
+
+Nothing in the code. The demo was moved to the CLI (`multiagent_rag_v3.py demo`)
+with `slides/figures/trace.png` — a recorded successful run, 26 results, quality
+0.80, accepted — as the narration fallback. The deck shows the web app's
+interface without pressing Run.
+
+### Uncommitted change from this session
+
+`multiagent_rag_v3.py` `DEMO_QUERIES` gained `"Which is more stable, Teams or
+Zoom?"` as its first entry, so the CLI demo leads with the deck's running
+example. Verified against `tests/test_vendor_cap_and_live_label.py` (9 passed).
+Uncommitted at time of writing; the working tree has been reset twice today by
+other sessions, so it may not survive.
+
+### Next steps, in order
+
+1. Tag `product` on the 53 community documents at fetch time, or relax
+   vendor-aware retrieval to fall back to the untagged community pool. Until
+   this lands, no stability or bug question can be answered.
+2. Trace one Chrome query end to end with `Show pipeline steps` on: what the
+   retriever returns, what reaches the presenter, and which rule rejects it.
+3. Only then revisit latency.
