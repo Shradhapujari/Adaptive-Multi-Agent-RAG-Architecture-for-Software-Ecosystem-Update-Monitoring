@@ -640,6 +640,12 @@ _SUBREDDIT_NAMES = []   # from /api/reddit/meta/subreddits — 628 subreddits
 _VENDORS_LOADED  = False
 _CATALOG_SOURCE  = "unloaded"   # "live", "cache", "bundled" or "unloaded"
 _CATALOG_ERRORS  = []           # why the live fetch was not used, if it was not
+# Epoch before which a load that produced nothing at all will not be retried.
+# Only reached when the live endpoint AND the local catalog both fail, which
+# leaves _VENDORS_LOADED False by design -- without a floor, every question
+# then pays the live timeout again.
+_CATALOG_RETRY_AFTER = 0.0
+CATALOG_RETRY_SECONDS = 60.0
 
 
 def catalog_status() -> dict:
@@ -675,8 +681,14 @@ def load_vendor_lists():
     better than nothing does.
     """
     global _VENDOR_NAMES, _SUBREDDIT_NAMES, _VENDORS_LOADED
-    global _CATALOG_SOURCE, _CATALOG_ERRORS
-    if _VENDORS_LOADED:
+    global _CATALOG_SOURCE, _CATALOG_ERRORS, _CATALOG_RETRY_AFTER
+    # Not latching the empty case is what stops one timeout poisoning the
+    # process; the cost is that the empty case retries, and the live fetch it
+    # retries is a 15 s timeout when the endpoint is down. Both have to hold,
+    # so the retry is floored rather than removed: a host that can reach
+    # neither the endpoint nor a local catalog tries once a minute instead of
+    # once a question.
+    if _VENDORS_LOADED or time.time() < _CATALOG_RETRY_AFTER:
         return
     _CATALOG_ERRORS = []
     try:
@@ -715,6 +727,8 @@ def load_vendor_lists():
     # Only remember a load that produced a vocabulary. Caching the empty case
     # is what turned one timeout into a process that never matched again.
     _VENDORS_LOADED = bool(_VENDOR_NAMES)
+    if not _VENDORS_LOADED:
+        _CATALOG_RETRY_AFTER = time.time() + CATALOG_RETRY_SECONDS
 
 # Common aliases — maps query terms to canonical vendor names
 VENDOR_ALIASES = {

@@ -115,3 +115,56 @@ def test_a_total_failure_is_not_cached_as_a_successful_load():
         assert m.catalog_status()["source"] == "unloaded"
     finally:
         vendor.load_catalog = original
+
+# ---- the retry that the un-latching makes possible has to be floored --------
+
+def test_a_total_outage_retries_once_a_minute_not_once_a_question(monkeypatch):
+    """Not latching the empty case is what stops one timeout poisoning the
+    process. The cost is that the empty case retries, and on a host that can
+    reach neither the endpoint nor a local catalog that retry is a 15 s timeout
+    per question. The floor keeps both properties."""
+    import vendor as _vendor_catalog
+    monkeypatch.setattr(_vendor_catalog, "load_catalog",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("no cache")))
+
+    m = _fresh_module()
+    calls = {"n": 0}
+
+    def dead(*a, **k):
+        calls["n"] += 1
+        raise RuntimeError("502 Server Error")
+    m.requests.get = dead
+
+    m.load_vendor_lists()
+    first = calls["n"]
+    assert first > 0
+    assert m._VENDORS_LOADED is False               # nothing to remember
+    assert m.catalog_status()["degraded"] is True
+
+    for _ in range(5):
+        m.load_vendor_lists()
+    assert calls["n"] == first, "a total outage must not refetch on every call"
+
+    # The floor expires rather than latching, so the process recovers itself.
+    m._CATALOG_RETRY_AFTER = 0.0
+    m.load_vendor_lists()
+    assert calls["n"] > first
+
+
+def test_a_successful_load_sets_no_floor():
+    class _Ok:
+        @staticmethod
+        def raise_for_status():
+            pass
+
+        @staticmethod
+        def json():
+            return ["Firefox", "Windows"]
+
+    m = _fresh_module()
+    m.requests.get = lambda *a, **k: _Ok()
+
+    m.load_vendor_lists()
+
+    assert m._VENDORS_LOADED is True
+    assert m._CATALOG_RETRY_AFTER == 0.0
