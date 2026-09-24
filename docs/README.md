@@ -8,6 +8,7 @@ The working documentation for this project, linked from the
 | [Overview](Overview.md) | What the system is, and the negative result to read first |
 | [Architecture](Architecture.md) | The agents, the pipeline, the feedback loop, and the two agents added after the evaluation |
 | [Evaluation and Findings](Evaluation-and-Findings.md) | How the negative result was found, localized and repaired; every number and its provenance |
+| [Results and Data Sources](Results.md) | The result tables, the paper's own scores, and what the corpus is made of |
 | [Running the System](Running-the-System.md) | Setup, the demo, the CLI, and every environment variable that changes behaviour |
 | [Benchmarks and Data](Benchmarks-and-Data.md) | Question sets, live sources, rebuilding, and freezing the corpus |
 | [Deployment](Deployment.md) | The Streamlit deployment and what degrades without a model |

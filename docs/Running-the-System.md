@@ -85,3 +85,36 @@ now.
 
 Expect roughly 60 s per question across three arms; the 300-question set is a
 multi-hour run.
+
+---
+
+## Claude Code browser-preview launcher
+
+**Claude Code launcher.** If you work in Claude Code, the browser-preview
+launcher can start the app for you. It reads `.claude/launch.json`, which is
+gitignored, so a fresh clone needs the file recreated:
+
+```json
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "app1",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "exec venv311/bin/streamlit run app_1.py --server.port \"${PORT:-8512}\" --server.headless true"
+      ],
+      "port": 8512,
+      "autoPort": true
+    }
+  ]
+}
+```
+
+Two details in there are load-bearing. `autoPort` lets the launcher pick a free
+port when 8512 is taken by another session, and the `sh -c` wrapper is what
+makes that work: Streamlit reads `STREAMLIT_SERVER_PORT`, not the `PORT`
+variable the launcher sets, so the assigned port has to be passed through to
+`--server.port` explicitly. Dropping the wrapper and passing a bare
+`--server.port 8512` reintroduces the collision.

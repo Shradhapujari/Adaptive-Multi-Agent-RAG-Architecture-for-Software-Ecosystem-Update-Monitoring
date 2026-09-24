@@ -48,7 +48,7 @@ import monitor
 
 # ── PAGE CONFIG ──────────────────────────────────────────
 st.set_page_config(
-    page_title="Should You Update? — Multi-Agent RAG",
+    page_title="Software Ecosystem Monitoring — Multi-Agent RAG",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -1055,7 +1055,7 @@ with st.sidebar:
 
 # ── MAIN UI ───────────────────────────────────────────────
 
-st.caption("Should you update? Ask before you do.")
+st.caption("Software Ecosystem Monitoring")
 
 if view == "Monitor":
     # releasetrain.io's component search, on top of the same feed the Release
