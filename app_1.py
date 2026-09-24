@@ -1036,6 +1036,15 @@ with st.sidebar:
         q_rows = yesno.filter_questions(_questions(int(q_page)),
                                         "" if q_vendor == "All" else q_vendor)
         _total = _questions_total()
+        if not _total:
+            # Do not hold a failure for the full hour. 0 means the feed was
+            # unreachable or the helper was missing, and both recover without
+            # anything here changing -- a redeploy re-imports the module, a
+            # timeout passes. Cached, the caption kept printing "?" long after
+            # the reason was gone, which is how a recovered app still looks
+            # broken. Clearing makes the next rerun ask again; a genuine
+            # outage costs one request per rerun and still reads "?".
+            _questions_total.clear()
         st.caption(f"{len(q_rows)} yes/no question(s)"
                    + (f" for {q_vendor}" if q_vendor != "All" else "")
                    + f" on this page, of {_total or '?'} in the feed")
