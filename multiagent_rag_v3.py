@@ -1052,6 +1052,27 @@ def fetch_vendor_releases(vendor: str, limit: int = 10, target_date: str = None)
             if isinstance(items, list):
                 releases.extend(items)
 
+        # Same mislabelling as the app sees, from the other endpoint: this
+        # vendor's page carries advisories whose text is about other software
+        # that happens to contain the vendor's name. One of them -- Scoold,
+        # "a knowledge sharing platform for teams" -- was cited in a demo as a
+        # VERIFIED Targeted Vendor Release Note for Teams, ranked 2nd of 42.
+        # The label is upstream's; believing it for a record whose own
+        # description names something else is ours.
+        try:
+            import vendor as _vendor_rules
+            kept = [v for v in releases
+                    if not v.get("isCve")
+                    or _vendor_rules.advisory_names_vendor(
+                        {"notes": v.get("versionReleaseNotes"),
+                         "title": v.get("versionProductName")}, vendor)]
+            if len(kept) != len(releases):
+                print(f"  {len(releases) - len(kept)} advisory(ies) dropped: "
+                      f"tagged {vendor}, described as other software")
+            releases = kept or releases
+        except Exception:      # noqa: BLE001 - a screen that fails is not an outage
+            pass
+
         # If date requested: filter to releases on or before that date, take closest
         if target_date:
             dated = [(str(v.get("versionReleaseDate","")), v)

@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence
 
 __all__ = [
+    "advisory_names_vendor",
     "CATALOG_URL",
     "VendorMatch",
     "load_catalog",
@@ -312,6 +313,70 @@ def vendor_terms(vendors: Sequence[VendorMatch]) -> List[str]:
 
 
 # ── Record type ───────────────────────────────────────────────────────────
+
+# A version marker only counts when a version actually follows it. "before"
+# as a bare preposition is not one, and the digit requirement is also what
+# catches "From 1.6.0 until 1.7.2", the phrasing several PraisonAI advisories
+# use -- without it they matched no marker, fell back to the first sentence
+# ("PraisonAI is a multi-agent teams system"), and were kept as Teams records.
+# The optional token before the digits is for "Prior to praisonaiagents
+# 1.6.59", where the package is named between the marker and its version.
+_VERSION_MARKER = re.compile(
+    r"\b(?:prior to|before|versions?|through|from|until|up to and including)\s+"
+    r"(?:[\w.@/-]+\s+)?v?\d", re.I)
+
+
+def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
+    """Whether a CVE record is really about `vendor_name`, by its own text.
+
+    The feed labels an advisory with the product you searched for, not the
+    product it is about. Checked against the live endpoint on 2026-09-24,
+    /api/v/?q=teams returns 30 rows, every one tagged versionProductName
+    "teams", and 24 of them are CVE records for other software that merely
+    contains the word: Scoold ("a Q&A and a knowledge sharing platform for
+    teams"), UVdesk, vikunja, PraisonAI ("a multi-agent teams system"). One of
+    them reached a demo answer ranked 2nd of 42 and cited as a verified
+    targeted vendor release note. The label is upstream's and cannot be fixed
+    here; believing it can.
+
+    The affected product sits in front of the version marker, in that marker's
+    own sentence:
+
+        "Information leak in Extensions in Google Chrome prior to 1.2"
+                                          ^^^^^^^^^^^^^ chrome, genuine
+        "UVdesk core-framework before 1.1.7 contains ..."
+         ^^^^^^^^^^^^^^^^^^^^^ not teams, mislabelled
+
+    The sentence boundary is what separates the two hard cases. "Scoold is a
+    Q&A and a knowledge sharing platform for teams. Prior to 1.69.0 ..." puts
+    "teams" before the marker but in the previous sentence, describing who the
+    product is *for*; a genuine Chrome advisory names the product late but in
+    the marker's own clause. Reading only the marker's sentence rejects the
+    first and keeps the second, where both "first N characters" and "N
+    characters before the marker" get one of them wrong.
+
+    ponytail: a substring test inside one clause, not a parser. It reads the
+    convention NVD descriptions happen to follow, so an advisory phrased
+    differently -- no version marker, or the product named only in a later
+    sentence -- falls back to the first sentence and may be kept. Prefer
+    keeping a mislabelled row to dropping a real one: this decides what may be
+    *cited as a vendor's own record*, and a false drop silently removes real
+    evidence.
+    """
+    want = (vendor_name or "").strip().lower()
+    if not want:
+        return True
+    text = " ".join(str(row.get(f) or "") for f in
+                    ("notes", "versionReleaseNotes", "title")).strip()
+    if not text:
+        return True                      # nothing to read: not evidence of a mismatch
+
+    m = _VERSION_MARKER.search(text)
+    # The marker's own sentence, or the first one when there is no marker.
+    span = text[:m.start()] if m else text
+    span = re.split(r"[.!?]\s", span)[-1] if m else re.split(r"[.!?]\s", span)[0]
+    return want in span.lower()
+
 
 def classify_record(row: Dict) -> str:
     """`"advisory"` for a CVE record, `"release"` for a shipped version.
