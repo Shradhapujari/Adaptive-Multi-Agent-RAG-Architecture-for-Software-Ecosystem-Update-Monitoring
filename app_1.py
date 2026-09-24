@@ -923,88 +923,98 @@ with st.sidebar:
         "Answering mode",
         ["Multi-agent pipeline", "Single agent (paper baseline)",
          "Compare both side by side"],
+        # Compare by default. The pipeline on its own answers the question but
+        # says nothing about what the coordinating agents bought, which is the
+        # only claim this project makes; a visitor who does not already know to
+        # go looking for the baseline never sees it. Costs a second retrieval
+        # per ask -- the arms share no work -- and that is the price of the
+        # comparison being the default view rather than a setting.
+        index=2,
         help="The baseline is the evaluation's own `single_agent` arm: raw "
              "query to the retriever and one synthesis call, with every "
              "coordinating agent removed. Same question, so the difference on "
              "screen is the difference the paper measures.")
     single_mode = mode.startswith("Single")
     compare_mode = mode.startswith("Compare")
-    from model_select import MODELS
-    st.selectbox("Presenter model",
-                 ["Auto (cheapest reachable)"] + [m["spec"] for m in MODELS],
-                 key="presenter_pick",
-                 help="Which model writes the cited paragraph (and the baseline's "
-                      "prose). Auto probes for the cheapest reachable one; a model "
-                      "that is not reachable on this host falls back to rule-based "
-                      "prose and the caption says so. Overrides PRESENTER_MODEL "
-                      "in secrets.")
-    source_label = st.selectbox(
-        "Data source",
-        ["Retrieval agent decides", "Lake only (releasetrain.io live)",
-         "Local store only"],
-        help="Agent: fetch live, fall back to the local store per feed when an "
-             "endpoint is down, and let intent decide which kinds are citable. "
-             "Lake: live only, no fallback. Store: what earlier runs retrieved.")
-    source = {"R": "agent", "L": "lake", "Lo": "store"}["Lo" if source_label.startswith("Local")
-                                                       else source_label[0]]
-    result_limit = st.slider("Results per agent", 1, 10, 5)
-    show_details = st.toggle("Show details", value=False,
-                             help="Off: the question and a one-sentence answer. "
-                                  "On: every agent's step, the evidence tabs and "
-                                  "the cited paragraph.")
-    show_pipeline = st.toggle("Show pipeline steps", value=True,
-                              disabled=not show_details) and show_details
-    show_raw = st.toggle("Show raw API data", value=False,
-                         disabled=not show_details) and show_details
-    yesno_on = st.toggle("Yes/No consensus", value=True, disabled=single_mode,
-                         help="For questions that take a one-word answer, count how "
-                              "the retrieved thread's commenters actually answered it.")
-    unclear_as_no = st.toggle("Count non-committal comments as No", value=True,
-                              disabled=single_mode or not yesno_on,
-                              help="A commenter who neither confirms nor denies is "
-                                   "read as a no. Defensible for “did this happen to "
-                                   "you?” — someone it happened to says so — but it "
-                                   "is an inference from silence, not from the comment.")
-    survey_on = st.toggle(f"Survey-informed evaluator (n={survey.respondents()})",
-                          value=True, disabled=single_mode,
-                          help="Blend the 2024 software-update survey's user "
-                               "priorities into the quality score, and report which "
-                               "of them these results address.")
-
+    # Collapsed: nine controls standing open above the question box read as
+    # a configuration screen, and the only one a first-time visitor needs is
+    # the mode picker above. Everything here keeps its default, so the demo
+    # behaves identically whether or not this is ever opened.
+    with st.expander("Advanced settings", expanded=False):
+        from model_select import MODELS
+        st.selectbox("Presenter model",
+                     ["Auto (cheapest reachable)"] + [m["spec"] for m in MODELS],
+                     key="presenter_pick",
+                     help="Which model writes the cited paragraph (and the baseline's "
+                          "prose). Auto probes for the cheapest reachable one; a model "
+                          "that is not reachable on this host falls back to rule-based "
+                          "prose and the caption says so. Overrides PRESENTER_MODEL "
+                          "in secrets.")
+        source_label = st.selectbox(
+            "Data source",
+            ["Retrieval agent decides", "Lake only (releasetrain.io live)",
+             "Local store only"],
+            help="Agent: fetch live, fall back to the local store per feed when an "
+                 "endpoint is down, and let intent decide which kinds are citable. "
+                 "Lake: live only, no fallback. Store: what earlier runs retrieved.")
+        source = {"R": "agent", "L": "lake", "Lo": "store"}["Lo" if source_label.startswith("Local")
+                                                           else source_label[0]]
+        result_limit = st.slider("Results per agent", 1, 10, 5)
+        show_details = st.toggle("Show details", value=False,
+                                 help="Off: the question and a one-sentence answer. "
+                                      "On: every agent's step, the evidence tabs and "
+                                      "the cited paragraph.")
+        show_pipeline = st.toggle("Show pipeline steps", value=True,
+                                  disabled=not show_details) and show_details
+        show_raw = st.toggle("Show raw API data", value=False,
+                             disabled=not show_details) and show_details
+        yesno_on = st.toggle("Yes/No consensus", value=True, disabled=single_mode,
+                             help="For questions that take a one-word answer, count how "
+                                  "the retrieved thread's commenters actually answered it.")
+        unclear_as_no = st.toggle("Count non-committal comments as No", value=True,
+                                  disabled=single_mode or not yesno_on,
+                                  help="A commenter who neither confirms nor denies is "
+                                       "read as a no. Defensible for “did this happen to "
+                                       "you?” — someone it happened to says so — but it "
+                                       "is an inference from silence, not from the comment.")
+        survey_on = st.toggle(f"Survey-informed evaluator (n={survey.respondents()})",
+                              value=True, disabled=single_mode,
+                              help="Blend the 2024 software-update survey's user "
+                                   "priorities into the quality score, and report which "
+                                   "of them these results address.")
     if single_mode:
         st.caption("Baseline arm selected — the agents above it are switched "
                    "off, which is what makes it the baseline.")
 
     st.divider()
-    st.markdown("#### Pick a Reddit question")
-    st.caption("From releasetrain.io/api/reddit/query/questions — the answer is "
-               "the thread's top-voted comment.")
+    with st.expander("Pick a Reddit question", expanded=False):
+        st.caption("From releasetrain.io/api/reddit/query/questions — the answer is "
+                   "the thread's top-voted comment.")
 
-    @st.cache_data(ttl=600, show_spinner=False)
-    def _questions(page: int):
-        return yesno.list_questions(limit=25, page=page)
+        @st.cache_data(ttl=600, show_spinner=False)
+        def _questions(page: int):
+            return yesno.list_questions(limit=25, page=page)
 
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def _catalog():
-        return vendor.load_catalog()
+        @st.cache_data(ttl=3600, show_spinner=False)
+        def _catalog():
+            return vendor.load_catalog()
 
-    q_vendor = st.selectbox("Vendor", ["All"] + _catalog(), key="poll_vendor")
-    q_page = st.number_input("Page", min_value=1, value=1, step=1)
-    q_rows = yesno.filter_questions(_questions(int(q_page)),
-                                    "" if q_vendor == "All" else q_vendor)
-    st.caption(f"{len(q_rows)} yes/no question(s)"
-               + (f" for {q_vendor}" if q_vendor != "All" else "") + " on this page")
-    q_opts = {f"r/{r.get('subreddit','')} · {r.get('title','')[:70]} "
-              f"({len(r.get('comments') or [])} comments)": r for r in q_rows}
-    picked = st.selectbox("Question", ["—"] + list(q_opts), key="reddit_pick")
-    # Applied once per pick, so the box stays editable afterwards.
-    if picked != "—" and st.session_state.get("reddit_title") != q_opts[picked].get("title"):
-        st.session_state["main_query"] = q_opts[picked].get("title", "")
-        st.session_state["reddit_title"] = q_opts[picked].get("title", "")
-        st.session_state["reddit_id"] = q_opts[picked].get("redditId")
-    elif not q_rows:
-        st.caption("Feed unreachable — type a question instead.")
-
+        q_vendor = st.selectbox("Vendor", ["All"] + _catalog(), key="poll_vendor")
+        q_page = st.number_input("Page", min_value=1, value=1, step=1)
+        q_rows = yesno.filter_questions(_questions(int(q_page)),
+                                        "" if q_vendor == "All" else q_vendor)
+        st.caption(f"{len(q_rows)} yes/no question(s)"
+                   + (f" for {q_vendor}" if q_vendor != "All" else "") + " on this page")
+        q_opts = {f"r/{r.get('subreddit','')} · {r.get('title','')[:70]} "
+                  f"({len(r.get('comments') or [])} comments)": r for r in q_rows}
+        picked = st.selectbox("Question", ["—"] + list(q_opts), key="reddit_pick")
+        # Applied once per pick, so the box stays editable afterwards.
+        if picked != "—" and st.session_state.get("reddit_title") != q_opts[picked].get("title"):
+            st.session_state["main_query"] = q_opts[picked].get("title", "")
+            st.session_state["reddit_title"] = q_opts[picked].get("title", "")
+            st.session_state["reddit_id"] = q_opts[picked].get("redditId")
+        elif not q_rows:
+            st.caption("Feed unreachable — type a question instead.")
     st.divider()
     st.markdown("#### Example queries")
     examples = [
@@ -1196,6 +1206,15 @@ if view == "Results":
     st.stop()
 
 # Query input
+# Seeded on the first paint only. An empty box asks the visitor to invent a
+# question before the demo will show them anything, while the one thing worth
+# knowing about this app -- that it answers from live release notes and cites
+# them -- is a single Run click away once the box is not empty. `not in`
+# rather than a falsy check: Clear sets the key to "", and re-filling a box
+# the visitor just emptied would fight them.
+if "main_query" not in st.session_state:
+    st.session_state["main_query"] = examples[0]
+
 query = st.text_input(
     "Ask about any software update, security vulnerability, or release:",
     placeholder='e.g. "Any critical Linux updates today?" or "What bugs were fixed in Chrome?"',
