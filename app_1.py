@@ -1003,7 +1003,18 @@ with st.sidebar:
 
         @st.cache_data(ttl=3600, show_spinner=False)
         def _questions_total() -> int:
-            return yesno.questions_total()
+            # getattr rather than a plain call. This page is executed from
+            # disk on every rerun while the modules it imports are whatever
+            # the running process already holds, so a deploy can leave a new
+            # app_1.py beside a yesno.py the process has not picked up --
+            # observed on Streamlit Cloud after two merges landed seconds
+            # apart. The attribute was missing, and the whole app died with
+            # an AttributeError over a number printed in a caption.
+            #
+            # A count the caption can live without is not worth a page for,
+            # and the sampling below already treats 0 as "size unknown".
+            fn = getattr(yesno, "questions_total", None)
+            return fn() if fn else 0
 
         def _ask_thread(row: dict) -> None:
             """Put a picked thread in the question box and remember which it is.
@@ -1041,7 +1052,10 @@ with st.sidebar:
                              "Page 1 regardless of the page above, sorted by "
                              "post date rather than trusting the feed's order."):
             _fresh = yesno.filter_questions(_questions(1), _vendor_arg)
-            _pick = yesno.newest(_fresh)
+            # Same reason as the count above: fall back to the feed's own
+            # order, which is newest-first, rather than failing the click.
+            _newest = getattr(yesno, "newest", None)
+            _pick = _newest(_fresh) if _newest else (_fresh[0] if _fresh else None)
             if _pick:
                 _ask_thread(_pick)
             else:
@@ -1051,6 +1065,8 @@ with st.sidebar:
                         help="A question from anywhere in the feed, not just "
                              "the page on screen."):
             import random
+            # _total is 0 when the feed could not be reached or the helper is
+            # missing; page 1 is then the only page known to exist.
             pages = max(1, -(-(_total or QUESTION_POOL) // QUESTION_POOL))
             _pick = None
             # A random page can hold no yes/no thread for the chosen vendor at
