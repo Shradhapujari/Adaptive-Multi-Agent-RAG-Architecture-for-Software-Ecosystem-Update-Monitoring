@@ -87,3 +87,57 @@ def test_a_version_from_the_question_is_not_an_unsupported_version():
     # A date the user supplied is a given too.
     dated = "Nothing shipped on 2026-01-01 [R1]."
     assert guardrail.check(dated, ev, "What was out on 2026-01-01?").ok
+
+
+# ---- short citation tags ---------------------------------------------------
+
+def test_the_model_cites_a_short_tag_and_the_label_comes_back():
+    """The presenter's answers were rejected as uncited because an 8B model
+    will not reproduce "Release Notes - windows v10.0.28000, 2026-09-08"
+    verbatim. It cites [S1]; expand_tags restores the label before the
+    guardrail, the UI or the store sees the sentence."""
+    import guardrail
+    from answer_agent import Evidence, build_cited_prompt, expand_tags
+    ev = [Evidence(label="Release Notes - windows v10.0.28000, 2026-09-08",
+                   kind="release", title="windows", detail="cumulative update"),
+          Evidence(label="Community - r/windows, 2026-09-12",
+                   kind="community", title="printing broken after update")]
+    prompt = build_cited_prompt("Windows 11 update broke printing?", ev)
+    assert "[S1]" in prompt and "[S2]" in prompt
+    assert "Release Notes - windows v10.0.28000, 2026-09-08" in prompt  # still named
+
+    out = expand_tags("Printing broke after the update [S2].", ev)
+    assert out == "Printing broke after the update [Community - r/windows, 2026-09-12]."
+    assert guardrail.check(out, ev, "Windows 11 update broke printing?").ok
+
+    # A tag with no source keeps its brackets, so it is caught, not dropped.
+    assert expand_tags("See [S9].", ev) == "See [S9]."
+    assert not guardrail.check("See [S9].", ev).ok
+
+
+def test_combined_and_ranged_tags_expand():
+    """llama3.1 writes [S2, S3, S4] and [S1-S3] as well as [S1]; a form that
+    does not expand reaches the guardrail as an unknown citation."""
+    from answer_agent import Evidence, expand_tags
+    ev = [Evidence(label=f"L{i}", kind="release", title=f"t{i}") for i in range(1, 5)]
+    assert expand_tags("a [S1] b", ev) == "a [L1] b"
+    assert expand_tags("a [S2, S3, S4] b", ev) == "a [L2] [L3] [L4] b"
+    assert expand_tags("a [S1-S3] b", ev) == "a [L1] [L2] [L3] b"
+    assert expand_tags("a [S1 and S2] b", ev) == "a [L1] [L2] b"
+    # Out of range stays put, so the guardrail can catch it.
+    assert expand_tags("a [S9] b", ev) == "a [S9] b"
+    assert expand_tags("a [S3-S9] b", ev) == "a [S3-S9] b"
+
+
+def test_a_plain_refusal_that_names_the_question_is_still_a_refusal():
+    """The presenter's honest "no source mentions X" was rejected as uncited,
+    because naming the product from the question read as an assertion."""
+    import guardrail
+    from answer_agent import Evidence
+    ev = [Evidence(label="Release Notes - windows v10.0.28000, 2026-09-08",
+                   kind="release", title="windows", detail="cumulative update")]
+    q = "Windows 11 update broke printing?"
+    assert guardrail.check("No source mentions a Windows 11 update breaking printing.", ev, q).ok
+    assert guardrail.check("The sources do not mention a Windows 11 printing issue.", ev, q).ok
+    # A refusal that smuggles in a claim is still checked.
+    assert not guardrail.check("No source mentions Windows 11, but Chrome 199.0.1 shipped.", ev, q).ok

@@ -132,18 +132,49 @@ def _named_versions(text: str) -> List[Tuple[str, str]]:
     return out
 
 
-def _asserts(text: str) -> bool:
+def _asserts(text: str, question: str = "") -> bool:
     """Does this text state something checkable -- a version, a date, a label?
 
     The question a refusal has to answer before it is treated as one. "No
     information is available for this question." states nothing; "Security type
     is unknown, but Chrome v199.9.9999 shipped on 2020-01-01 [R9]." states three
     things and happens to contain a refusal word.
+
+    Repeating the question does not count as stating anything. "No source
+    mentions a Windows 11 update breaking printing" is a refusal that names the
+    product it could not find, and reading "Windows 11" as an assertion made
+    the refusal fail the citation rule and get replaced by a composed
+    paragraph -- the honest answer thrown away for echoing the question.
     """
+    given_versions = {v for v in extract_versions(_ISO_RE.sub(" ", question or ""),
+                                                  multipart_only=True)}
+    given_named = set(_named_versions(question or ""))
+    given_dates = set(extract_dates(question or ""))
     return bool(_CITE_RE.search(text)
-                or extract_versions(_ISO_RE.sub(" ", text), multipart_only=True)
-                or _named_versions(text)
-                or extract_dates(text))
+                or (set(extract_versions(_ISO_RE.sub(" ", text), multipart_only=True))
+                    - given_versions)
+                or (set(_named_versions(text)) - given_named)
+                or (set(extract_dates(text)) - given_dates))
+
+
+# How a model actually declines when told to say so plainly. The harness's
+# marker lists stay as they are: they decide benchmark scoring, where adding a
+# phrase turns an `incorrect` into a `missing`. This one only decides whether a
+# refusal has to carry a citation, and it is read like a weak marker -- it
+# excuses the citation rule only when the sentence states nothing of its own.
+_DECLINE_RE = re.compile(
+    r"\bno\s+(?:\w+\s+){0,2}sources?\b[^.\n]{0,40}"
+    r"\b(?:mention|state|say|report|cover|address|answer|list|contain|show|indicate)"
+    r"|\bnone of the (?:sources?|documents?|results?)\b"
+    r"|\bthe sources?\b[^.\n]{0,20}\b(?:do|does) not\b[^.\n]{0,30}"
+    r"\b(?:mention|state|say|report|cover|address|answer|list|contain|show|indicate)"
+    r"|\bno (?:matching|relevant) (?:sources?|reports?|records?|documents?|results?)\b",
+    re.I)
+
+
+def _declines(text: str) -> bool:
+    """Does this sentence say the sources do not answer the question?"""
+    return bool(_DECLINE_RE.search(text or ""))
 
 
 def _deflects(text: str) -> bool:
@@ -196,7 +227,8 @@ def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
     # available to answer this question" is a real refusal, and llama3.1 writes
     # exactly that on an empty pool.
     abstained = (is_abstention(text, strong_only=True)
-                 or (is_abstention(text) and not _asserts(text)))
+                 or ((is_abstention(text) or _declines(text))
+                     and not _asserts(text, question)))
 
     if not labels:
         # Nothing retrieved: the only admissible answer is one that says so.

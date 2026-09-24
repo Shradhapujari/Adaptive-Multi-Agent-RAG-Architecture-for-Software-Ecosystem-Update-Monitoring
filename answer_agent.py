@@ -65,14 +65,63 @@ __all__ = [
 # panel, with its score; it just does not get to be the answer.
 TOP_COMMENT_FLOOR = 2
 
+def cite_tag(i: int) -> str:
+    """The short handle source `i` is cited by in the prompt."""
+    return f"S{i + 1}"
+
+
+# A citation the model wrote: one tag, several, or a range. llama3.1 emits all
+# three -- "[S1]", "[S2, S3, S4]", "[S1-S3]" -- and a form that does not expand
+# reaches the guardrail as an unknown citation, which throws the answer away.
+_TAG_BLOCK_RE = re.compile(
+    r"\[\s*(S\s*\d{1,3}(?:\s*(?:,|;|/|&|and|-|–|—|to)\s*S?\s*\d{1,3})*)\s*\]", re.I)
+_TAG_ITEM_RE = re.compile(
+    r"S\s*(\d{1,3})\s*(?:(?:-|–|—|to)\s*S?\s*(\d{1,3}))?", re.I)
+
+
+def _tag_indices(inner: str):
+    """The 1-based source numbers a bracket block names, ranges expanded."""
+    out = []
+    for m in _TAG_ITEM_RE.finditer(inner):
+        a = int(m.group(1))
+        b = m.group(2)
+        out.extend(range(a, int(b) + 1) if b else [a])
+    return out
+
+
+def expand_tags(text: str, evidence) -> str:
+    """Put the full label back wherever the model cited a short tag.
+
+    The model is asked for [S1] because it can copy that reliably; every reader
+    downstream -- the guardrail, the UI, the stored run -- wants the label it
+    stands for. A block naming a source that does not exist is left exactly as
+    written, so it is caught as an unknown citation rather than silently
+    dropped.
+    """
+    ev = list(evidence or ())
+
+    def sub(m):
+        idx = _tag_indices(m.group(1))
+        if not idx or any(not (1 <= i <= len(ev)) for i in idx):
+            return m.group(0)
+        seen, labels = set(), []
+        for i in idx:
+            if i not in seen:
+                seen.add(i)
+                labels.append(f"[{ev[i - 1].label}]")
+        return " ".join(labels)
+    return _TAG_BLOCK_RE.sub(sub, text or "")
+
+
 CITATION_RULE = (
     "Answer in ONE sentence of plain English \u2014 no more. If a [Top comment \u2026] "
     "source is listed, it is the Reddit community's own highest-upvoted answer "
     "to this question: base the sentence on what it says and cite it. "
     "Otherwise use the highest-upvoted community post, or the release notes "
-    "when no community answer is listed. Cite the source it came from in "
-    "square brackets exactly as it is labelled below, e.g. "
-    "[Release Notes - Linux v6.18.21, 2026-08-28]. Cite only from the list. "
+    "when no community answer is listed. Cite the source it came from by "
+    "its short tag in square brackets, e.g. [S1] or [S3] \u2014 copy the tag "
+    "exactly and put nothing else inside the brackets. Cite only tags that "
+    "appear in the list. "
     "Do not invent versions, dates or CVE numbers. If the sources do not "
     "answer the question, say so plainly in that one sentence.\n"
     "The sources were retrieved for this question and each carries its own "
@@ -114,7 +163,7 @@ class Evidence:
     security: bool = False
     sentiment: str = ""
 
-    def line(self) -> str:
+    def line(self, tag: str = "") -> str:
         """One source line for the prompt: the citation label, then the facts.
 
         The date and the SECURITY marker are repeated in the body because a
@@ -138,6 +187,12 @@ class Evidence:
         body = f"{self.title}{meta}"
         if self.detail:
             body += f": {self.detail}"
+        if tag:
+            # Cited by a short tag, named by the full label. Asking an 8B model
+            # to reproduce "Release Notes - windows v10.0.28000, 2026-09-08"
+            # character for character is where the citations were being lost;
+            # `expand_tags` puts the label back before anything sees the answer.
+            return f"- [{tag}] {self.label} — {body}"
         return f"- [{self.label}] {body}"
 
 
@@ -245,7 +300,8 @@ def build_cited_prompt(query: str, evidence: List[Evidence],
     except Exception:  # harness not importable (bare demo deploy)
         base = ("You are a software-update assistant. Answer the question "
                 "using ONLY the sources below.")
-    ctx = "\n".join(e.line() for e in evidence) or "No documents retrieved."
+    ctx = "\n".join(e.line(cite_tag(i)) for i, e in enumerate(evidence)) \
+        or "No documents retrieved."
     dated = f"\n\nTime frame asked about: {window_note}" if window_note else ""
     return (f"{rules_block()}{base}\n{CITATION_RULE}\n\nQuestion: {query}{dated}\n\n"
             f"Sources:\n{ctx}\n\nAnswer:")
@@ -481,8 +537,11 @@ def _present(query: str, results: Dict, model_spec: Optional[str] = None,
             if client.available():
                 text = client.generate(
                     build_cited_prompt(query, evidence, window_note),
-                    temperature=0.0, max_tokens=150)
-                text = _one_sentence(_strip_preamble(text))
+                    # 150 truncated long enumerations mid-citation: the
+                    # unclosed "[" never parses as a citation, so a real answer
+                    # came back "uncited" (stored run #50).
+                    temperature=0.0, max_tokens=400)
+                text = expand_tags(_one_sentence(_strip_preamble(text)), evidence)
                 if text:
                     # The model was given these sources and nothing else, so
                     # anything it states outside them is invented. Failing the

@@ -121,7 +121,10 @@ def test_prompt_names_the_bracket_rule_and_only_listed_sources():
     assert "square brackets" in prompt
     assert "ONLY the sources" in prompt
     assert "Time frame asked about: Aug 31, 2026" in prompt
-    assert "[Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28]" in prompt
+    # Sources are cited by a short tag and named by their full label on the
+    # same line: the model copies [S1]; expand_tags restores the label.
+    assert "[S1]" in prompt
+    assert "Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28" in prompt
 
 
 class _StubClient:
