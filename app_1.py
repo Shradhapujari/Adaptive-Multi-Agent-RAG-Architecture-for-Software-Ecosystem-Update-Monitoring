@@ -991,9 +991,30 @@ with st.sidebar:
         st.caption("From releasetrain.io/api/reddit/query/questions — the answer is "
                    "the thread's top-voted comment.")
 
+        # 25 was the whole picker: of 25 fetched rows only 8 survive the
+        # yes/no filter, so the list people actually chose from was eight
+        # threads deep while the feed held 3212. The endpoint honours deeper
+        # limits (checked at 100 and 200), and 100 yields ~22 questions a page.
+        QUESTION_POOL = 100
+
         @st.cache_data(ttl=600, show_spinner=False)
         def _questions(page: int):
-            return yesno.list_questions(limit=25, page=page)
+            return yesno.list_questions(limit=QUESTION_POOL, page=page)
+
+        @st.cache_data(ttl=3600, show_spinner=False)
+        def _questions_total() -> int:
+            return yesno.questions_total()
+
+        def _ask_thread(row: dict) -> None:
+            """Put a picked thread in the question box and remember which it is.
+
+            Shared by the dropdown and the two buttons so a thread arrives the
+            same way however it was chosen: `reddit_id` is what makes the run
+            answer from *this* thread's comments instead of searching for one.
+            """
+            st.session_state["main_query"] = row.get("title", "")
+            st.session_state["reddit_title"] = row.get("title", "")
+            st.session_state["reddit_id"] = row.get("redditId")
 
         @st.cache_data(ttl=3600, show_spinner=False)
         def _catalog():
@@ -1003,16 +1024,56 @@ with st.sidebar:
         q_page = st.number_input("Page", min_value=1, value=1, step=1)
         q_rows = yesno.filter_questions(_questions(int(q_page)),
                                         "" if q_vendor == "All" else q_vendor)
+        _total = _questions_total()
         st.caption(f"{len(q_rows)} yes/no question(s)"
-                   + (f" for {q_vendor}" if q_vendor != "All" else "") + " on this page")
+                   + (f" for {q_vendor}" if q_vendor != "All" else "")
+                   + f" on this page, of {_total or '?'} in the feed")
+
+        # Two ways to get a question without reading the list: the newest one
+        # the feed has, and one drawn from anywhere in it. Buttons rather than
+        # a mode that keeps applying itself -- a setting that rewrites the
+        # question box on every rerun takes it away from whoever is typing.
+        _vendor_arg = "" if q_vendor == "All" else q_vendor
+        bcol1, bcol2 = st.columns(2)
+
+        if bcol1.button("Latest", use_container_width=True,
+                        help="The most recently posted question in the feed. "
+                             "Page 1 regardless of the page above, sorted by "
+                             "post date rather than trusting the feed's order."):
+            _fresh = yesno.filter_questions(_questions(1), _vendor_arg)
+            _pick = yesno.newest(_fresh)
+            if _pick:
+                _ask_thread(_pick)
+            else:
+                st.caption("Nothing on the newest page matched that vendor.")
+
+        if bcol2.button("Random", use_container_width=True,
+                        help="A question from anywhere in the feed, not just "
+                             "the page on screen."):
+            import random
+            pages = max(1, -(-(_total or QUESTION_POOL) // QUESTION_POOL))
+            _pick = None
+            # A random page can hold no yes/no thread for the chosen vendor at
+            # all, which is a miss rather than a failure; try a few, then fall
+            # back to what is already on screen instead of reporting nothing.
+            for _ in range(3):
+                _rows = yesno.filter_questions(_questions(random.randint(1, pages)),
+                                               _vendor_arg)
+                if _rows:
+                    _pick = random.choice(_rows)
+                    break
+            if _pick is None and q_rows:
+                _pick = random.choice(q_rows)
+            if _pick:
+                _ask_thread(_pick)
+            else:
+                st.caption("No question matched — try All vendors.")
         q_opts = {f"r/{r.get('subreddit','')} · {r.get('title','')[:70]} "
                   f"({len(r.get('comments') or [])} comments)": r for r in q_rows}
         picked = st.selectbox("Question", ["—"] + list(q_opts), key="reddit_pick")
         # Applied once per pick, so the box stays editable afterwards.
         if picked != "—" and st.session_state.get("reddit_title") != q_opts[picked].get("title"):
-            st.session_state["main_query"] = q_opts[picked].get("title", "")
-            st.session_state["reddit_title"] = q_opts[picked].get("title", "")
-            st.session_state["reddit_id"] = q_opts[picked].get("redditId")
+            _ask_thread(q_opts[picked])
         elif not q_rows:
             st.caption("Feed unreachable — type a question instead.")
     st.divider()

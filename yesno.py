@@ -279,6 +279,44 @@ def list_questions(limit: int = 25, page: int = 1, timeout: int = 20) -> List[di
         return []
 
 
+def questions_total(timeout: int = 20) -> int:
+    """How many questions the feed holds, or 0 if it cannot be reached.
+
+    `list_questions` throws the pagination block away and returns only the
+    rows, which is all a page-at-a-time picker needs. Sampling the feed needs
+    the size of the thing being sampled: measured 2026-09-24 the feed held
+    3212 threads over 643 pages, and a picker that draws its "random" question
+    from whichever page is on screen is not sampling the feed, it is shuffling
+    25 rows of it.
+
+    Asks for one row, reads the count beside it -- `showCount` is what makes
+    the endpoint report the total at all.
+    """
+    import requests
+    try:
+        r = requests.get(QUESTIONS_API, params={"where": "either", "limit": 1,
+                                                "page": 1, "showCount": "true"},
+                         timeout=timeout)
+        r.raise_for_status()
+        return int(r.json().get("pagination", {}).get("total", 0) or 0)
+    except Exception:
+        return 0
+
+
+def newest(rows: List[dict]) -> Optional[dict]:
+    """The most recently posted of `rows`, by the feed's own timestamp.
+
+    Sorted here rather than trusted from the feed. The endpoint does return
+    newest-first today (checked over limits 100 and 200 on 2026-09-24), but
+    "the latest question" reading correctly only while an undocumented sort
+    holds is a promise made on someone else's behalf.
+    """
+    dated = [r for r in (rows or []) if r.get("created_utc")]
+    if not dated:
+        return (rows or [None])[0]
+    return max(dated, key=lambda r: str(r.get("created_utc")))
+
+
 def filter_questions(rows: List[dict], vendor_name: str = "") -> List[dict]:
     """Threads that are yes/no questions, optionally about one product.
 
