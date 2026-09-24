@@ -227,6 +227,48 @@ def test_an_answer_that_points_at_the_sources_falls_back(monkeypatch):
     assert "available in" not in out.text
 
 
+def test_a_deflection_whose_object_is_the_citation_falls_back(monkeypatch):
+    # The shape the presenter produces once it cites by tag: expansion leaves
+    # the label as the object, so there is no document noun to find after the
+    # citation is stripped. Caught by reading the object in the original text.
+    _no_env(monkeypatch)
+    _patch_client(monkeypatch, _StubClient(
+        "The latest Django release notes are available in "
+        "[Release Notes - Django v5.2.1, 2026-08-20]."))
+    out = present_answer("q", RESULTS, model_spec="stub:model")
+    assert out.mode == "rule-based"
+    assert "deflected" in out.note
+
+
+def test_an_answer_cut_mid_citation_falls_back(monkeypatch):
+    # The shape stored run #50 shipped in: the token budget ended the
+    # generation inside a label. Everything still visible is sourced, and the
+    # unclosed "[" never parses as a citation, so every other check passed it.
+    _no_env(monkeypatch)
+    _patch_client(monkeypatch, _StubClient(
+        "Django 5.2.1 is a routine bugfix release "
+        "[Release Notes - Django v5.2.1, 2026-08-20] "
+        "[Security Advisory - Linux advisory (affects Linux 6.18"))
+    out = present_answer("q", RESULTS, model_spec="stub:model")
+    assert out.mode == "rule-based"
+    assert "truncated" in out.note
+    assert out.text.count("[") == out.text.count("]")
+
+
+def test_a_stray_bracket_closed_by_a_later_citation_is_not_truncation(monkeypatch):
+    # The presenter quotes Reddit, and a comment may carry its own "[". Only a
+    # final unclosed bracket is a cut, so a real citation after it still passes.
+    # The stray must not be citation-shaped: a bracketed "[1]" is a label that
+    # is genuinely not in the pool, and unknown_citation is the right answer to
+    # that -- it is the unterminated kind this check is about.
+    _no_env(monkeypatch)
+    _patch_client(monkeypatch, _StubClient(
+        'The thread says "array[0 crashed" '
+        "[Release Notes - Django v5.2.1, 2026-08-20]."))
+    out = present_answer("q", RESULTS, model_spec="stub:model")
+    assert out.mode == "llm" and out.note == ""
+
+
 def test_a_version_the_fix_ships_in_is_not_a_deflection(monkeypatch):
     # Same construction, different object: this one points at a version, which
     # is an answer. The deflection check must not cost it the LLM path.

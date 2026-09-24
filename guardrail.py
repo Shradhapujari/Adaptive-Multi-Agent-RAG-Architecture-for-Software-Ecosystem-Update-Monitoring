@@ -64,6 +64,10 @@ _POINTER_RE = re.compile(
 _DOC_NOUN_RE = re.compile(
     r"\b(?:sources?|release notes?|advisor(?:y|ies)|changelogs?|documentation"
     r"|docs?|links?|pages?|articles?|feeds?|bulletins?)\b", re.I)
+# "...are available in [Release Notes - django v6.1.1]": the label itself is
+# the object. Only an article may sit between, so a version named before the
+# bracket keeps the sentence an answer.
+_CITE_AS_OBJECT_RE = re.compile(r"\s*(?:the\s+)?\[", re.I)
 
 
 @dataclass
@@ -185,15 +189,46 @@ def _deflects(text: str) -> bool:
     answers, and "no updates are *mentioned in* the release notes" is a finding
     about the source rather than a redirection to it -- which is why the verb
     list holds only verbs that redirect.
+
+    A deflection can point in two ways, and tag expansion decides which: when
+    the citation IS the object -- "are available in [Release Notes - django
+    v6.1.1]" -- there is no document noun left once the label is stripped, so
+    the object is read in the original text instead. Stripping alone missed
+    this the moment the presenter began citing by tag.
     """
-    # Citations are stripped first: every label in this domain reads "Release
-    # Notes - ..." or "Security Advisory - ...", so leaving them in makes the
-    # document noun match every cited sentence -- including "the fix is
-    # available in Django 6.1.1 [Release Notes - django v6.1.1]", which points
-    # at a version and is exactly what should pass.
-    prose = _CITE_RE.sub(" ", text or "")
+    t = text or ""
+    # Citations are stripped for the noun search: every label in this domain
+    # reads "Release Notes - ..." or "Security Advisory - ...", so leaving them
+    # in makes the document noun match every cited sentence -- including "the
+    # fix is available in Django 6.1.1 [Release Notes - django v6.1.1]", which
+    # points at a version and is exactly what should pass.
+    prose = _CITE_RE.sub(" ", t)
     m = _POINTER_RE.search(prose)
-    return bool(m and _DOC_NOUN_RE.search(prose[m.end():]))
+    if m and _DOC_NOUN_RE.search(prose[m.end():]):
+        return True
+    # The label as the object: the pointer has to run straight into the
+    # bracket, so a version named before it ("available in Django 6.1.1 [...]")
+    # still reads as an answer.
+    m = _POINTER_RE.search(t)
+    return bool(m and _CITE_AS_OBJECT_RE.match(t[m.end():]))
+
+
+def _truncated(text: str) -> bool:
+    """Did the answer stop in the middle of a citation?
+
+    A generation cut short by the token budget ends inside the label it was
+    writing: "... and CVE-2026-90385 (dated 2026-09-17, SECURITY). [Security
+    Advisory - CVE-2026-90385 (affects linux 7.1.3" -- which every other check
+    here passes, because an unclosed "[" never parses as a citation, so the
+    dangling span is invisible rather than invalid. Shipped that way as stored
+    run #50.
+
+    The test is the last bracket, not a count of both: an unbalanced "[" inside
+    a quoted Reddit comment is followed by the real citation that closes after
+    it, and only a genuine cut leaves the final "[" with nothing after it.
+    """
+    t = text or ""
+    return "[" in t and t.rfind("[") > t.rfind("]")
 
 
 def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
@@ -217,6 +252,14 @@ def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
 
     if not text:
         return Verdict(False, [Violation("empty", "no answer text")])
+
+    # Structural, so it is checked before anything reads the content: a cut
+    # answer's remaining prose is sound and every check below passes it, which
+    # is how a half-written citation reached the page. Declining does not
+    # excuse it -- a truncated refusal is still truncated.
+    if _truncated(text):
+        return Verdict(False, [Violation(
+            "truncated", "answer ends mid-citation (unclosed '[')")])
 
     # An unambiguous refusal phrase declines outright. A weak marker --
     # "unknown", "not found", "no information" -- declines only if the text
