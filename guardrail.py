@@ -165,10 +165,22 @@ def _deflects(text: str) -> bool:
     return bool(m and _DOC_NOUN_RE.search(prose[m.end():]))
 
 
-def check(answer: str, evidence: Sequence) -> Verdict:
-    """Check a presented answer against the evidence it was built from."""
+def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
+    """Check a presented answer against the evidence it was built from.
+
+    `question` is the user's own wording, and versions and dates in it are
+    treated as supported. The model did not invent what it was asked about:
+    "Windows 11 update broke printing?" over sources that version windows as
+    10.0.28000 used to fail `unsupported_version`, so a correct answer naming
+    KB5101650 was discarded and the rule-based stub shown instead. Every
+    question naming a versioned product hit this -- iOS 26.4, Ubuntu 24.04.
+    Omitting it keeps the old, stricter behaviour.
+    """
     text = (answer or "").strip()
     haystack, labels = _lines(evidence)
+    # The question grounds nothing else: it is not evidence, carries no label,
+    # and is never citable. It only stops a given from reading as a fabrication.
+    given = _ISO_RE.sub(" ", question or "")
     cited = {c.strip() for c in _CITE_RE.findall(text)}
     bad: List[Violation] = []
 
@@ -208,10 +220,11 @@ def check(answer: str, evidence: Sequence) -> Verdict:
                              "answer points at the sources instead of reporting them"))
 
     _known: dict = {}
-    for product, v in _named_versions(_ISO_RE.sub(" ", haystack)):
+    for product, v in _named_versions(_ISO_RE.sub(" ", haystack) + " " + given):
         _known.setdefault(product, set()).add(v)
 
     known_versions = set(extract_versions(_ISO_RE.sub(" ", haystack), multipart_only=True))
+    known_versions |= set(extract_versions(given, multipart_only=True))
     for v in extract_versions(_ISO_RE.sub(" ", text), multipart_only=True):
         if v not in known_versions:
             bad.append(Violation("unsupported_version", f"{v!r} is in no source"))
@@ -230,7 +243,7 @@ def check(answer: str, evidence: Sequence) -> Verdict:
                 f"{product} {claimed} is in no source (sources have "
                 f"{', '.join(sorted(known))})"))
 
-    known_dates = set(extract_dates(haystack))
+    known_dates = set(extract_dates(haystack)) | set(extract_dates(question or ""))
     for d in extract_dates(text):
         if d not in known_dates:
             bad.append(Violation("unsupported_date", f"{d} is in no source"))
@@ -238,9 +251,9 @@ def check(answer: str, evidence: Sequence) -> Verdict:
     return Verdict(not bad, bad)
 
 
-def guard(answer: str, evidence: Sequence) -> Tuple[str, Verdict]:
+def guard(answer: str, evidence: Sequence, question: str = "") -> Tuple[str, Verdict]:
     """The answer if it passes, the refusal if it does not, plus the verdict."""
-    v = check(answer, evidence)
+    v = check(answer, evidence, question)
     return (answer if v.ok else REFUSAL), v
 
 

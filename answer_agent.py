@@ -490,7 +490,7 @@ def _present(query: str, results: Dict, model_spec: Optional[str] = None,
                     # from the same evidence by code, so it cannot fail -- and
                     # not to a refusal, which would throw away a real answer
                     # over one bad span.
-                    verdict = guardrail.check(text, evidence)
+                    verdict = guardrail.check(text, evidence, query)
                     if verdict.ok:
                         return PresentedAnswer(text, "llm", client.spec,
                                                evidence=evidence)

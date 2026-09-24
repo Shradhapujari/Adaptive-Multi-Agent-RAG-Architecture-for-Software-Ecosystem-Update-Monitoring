@@ -66,3 +66,24 @@ def test_retriever_drops_a_document_carrying_instructions(monkeypatch):
     docs = r.run("windows printing", top_k=4, original_query="windows printing")
     assert [d["url"] for d in docs] == ["u2"]
     assert r.last_screened and r.last_screened[0][1] == "override"
+
+
+# ---- the question is not a fabrication -------------------------------------
+
+def test_a_version_from_the_question_is_not_an_unsupported_version():
+    """The web app answered "Windows 11 update broke printing?" with a
+    rule-based stub because the model's answer repeated "Windows 11", which the
+    sources version as 10.0.28000. A version the user typed is a given."""
+    import guardrail
+    from answer_agent import Evidence
+    ev = [Evidence(label="R1", title="windows v10.0.28000 released",
+                   detail="Cumulative update", url="u1", kind="release")]
+    ans = "Windows 11 update KB5101650 broke printing [R1]."
+    assert not guardrail.check(ans, ev).ok                      # old behaviour
+    assert guardrail.check(ans, ev, "Windows 11 update broke printing?").ok
+    # ...and a version in neither the sources nor the question still fails.
+    invented = "Windows 12 fixes it [R1]."
+    assert not guardrail.check(invented, ev, "Windows 11 update broke printing?").ok
+    # A date the user supplied is a given too.
+    dated = "Nothing shipped on 2026-01-01 [R1]."
+    assert guardrail.check(dated, ev, "What was out on 2026-01-01?").ok
