@@ -328,7 +328,7 @@ def fetch_live_reddit(query, limit=5):
                 }))
         scored.sort(key=lambda x:x[0], reverse=True)
         return [d for _,d in scored[:limit]]
-    except:
+    except Exception:
         return []
 
 def fetch_live_cve(query, limit=3):
@@ -347,7 +347,7 @@ def fetch_live_cve(query, limit=3):
             "date": p.get("created_utc","")[:10],
             "detail": (p.get("author_description") or "")[:150],
         } for p in posts]
-    except:
+    except Exception:
         return []
 
 import xml.etree.ElementTree as ET
@@ -436,7 +436,7 @@ def fetch_github_releases(query, limit=4):
                         "date":      rel.get("published_at","")[:10],
                         "detail":    (rel.get("body","") or "")[:150],
                     })
-            except:
+            except Exception:
                 pass
         return results
     except Exception as e:
