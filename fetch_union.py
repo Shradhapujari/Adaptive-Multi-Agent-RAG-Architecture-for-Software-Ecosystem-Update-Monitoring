@@ -8,11 +8,34 @@ and testable without a Streamlit runtime.
 from __future__ import annotations
 
 import re
-from typing import Callable, List, Optional
+from contextvars import ContextVar
+from typing import Callable, Dict, List, Optional
 
+from guardrail import screen
 from temporal import TemporalResolution, matches_window
 
-__all__ = ["union_fetch", "doc_key", "product_terms"]
+__all__ = ["union_fetch", "doc_key", "product_terms", "reset_screened"]
+
+# What the fetches of one pipeline run refused to hand on, as
+# {"doc": …, "pattern": …} entries. Same shape as the app's outage log, and
+# for the same reason: the drop happens three call levels below the code that
+# has to report it, and neither the docs nor the callers in between want a
+# second return value threaded through them.
+#
+# A ContextVar and not a module list: the log belongs to one run, so it is
+# reset once per run by the caller rather than per fetch. `union_fetch` is
+# called once per agent -- community, releases, CVE -- and a per-fetch clear
+# meant each agent erased the one before it, leaving only the last agent's
+# drops for a question that any of the three could have been attacked through.
+_SCREENED: ContextVar[Optional[List[Dict]]] = ContextVar(
+    "marag_screened", default=None)
+
+
+def reset_screened() -> List[Dict]:
+    """Start a fresh drop log for one pipeline run, and return it."""
+    log: List[Dict] = []
+    _SCREENED.set(log)
+    return log
 
 # The release endpoint (`/api/v/`) matches `q` against product names, not
 # free text: "Linux" returns 606 versions, "critical Linux updates" returns 0.
@@ -116,6 +139,17 @@ def union_fetch(fetch_fn: Callable, phrasings: List[str], limit: int,
             if k in seen:
                 continue
             seen.add(k)
+            # Screened here rather than at the presenter: a fetched row that
+            # carries an instruction reaches the ranker, the evidence list and
+            # the prompt through this one loop, so this is the only place a
+            # drop covers all three. Dropping before the `limit` cut also means
+            # an attack costs a real document its slot, not the user an answer.
+            attack = screen(item)
+            if attack:
+                log = _SCREENED.get()
+                if log is not None:
+                    log.append({"doc": item, "pattern": attack})
+                continue
             out.append(item)
     if temporal is not None and temporal.window:
         # False (outside) and None (undated / unparseable) both sort after the

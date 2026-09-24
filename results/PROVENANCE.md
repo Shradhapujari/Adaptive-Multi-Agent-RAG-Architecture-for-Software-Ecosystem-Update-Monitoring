@@ -340,6 +340,35 @@ not state. The prose arms, which say plainly they could not find it, score 0.
 This is the judge-independence confound (FINDINGS.md) showing up as a
 false positive; it needs a stronger judge before it means anything.
 
+## The tier-prior finding (Finding 9)
+
+`run_1789892227_8fda4edb2d21` — the clean-run configuration replayed under
+`strict:data/corpus_snapshot_b500_clean_0917` with `--dump-pools` and the judge
+off, 2026-09-20. Pools only; its `per_query.jsonl` carries no scores. Pools
+are 20-30% larger than the original run's (the snapshot backfilled under
+replay), so bench numbers compare rankers with each other, not with the clean
+run. `rerank_bench.jsonl` and `rerank_bench_llm_embed.jsonl` in that dir are
+the per-(query, ranker) rows; the judgments they added (3,142 + 16) are in
+`qrels_cache.json`.
+
+| Ranker (marag_llm / single_agent) | nDCG@3 | Recall@5 | MRR |
+|---|---:|---:|---:|
+| tiered:embed (as run) | 0.250 / 0.248 | 0.197 / 0.208 | 0.353 / 0.349 |
+| flat:bm25 | 0.322 / 0.315 | 0.318 / 0.313 | 0.429 / 0.430 |
+| flat:rrf | 0.410 / 0.400 | 0.386 / 0.381 | 0.502 / 0.512 |
+| flat:embed | 0.458 / 0.452 | 0.418 / 0.412 | 0.543 / 0.544 |
+| flat:llm12 over rrf (qwen2.5:7b-instruct) | 0.453 / 0.447 | 0.414 / 0.404 | 0.539 / 0.542 |
+| flat:llm20@embed (marag only, second pass) | 0.489 | 0.441 | 0.562 |
+
+`run_1789951801_3b855840be3a` (`rank_tiers: tiered`) and
+`run_1789951917_3b855840be3a` (`rank_tiers: flat`) — 100 questions of
+`benchmark_500.json`, `--stratify category --seed 42`, arms
+`marag:ollama:llama3.1,single_agent:ollama:llama3.1`, judge `ollama:llama3.1`,
+same strict snapshot, 2026-09-20. Paired flat - tiered: nDCG@3 +0.227 both
+arms (CIs above zero), faithfulness -0.02 / -0.03, answer relevance
+-0.03 / -0.03. Latency is not quotable from either: replay served nearly every
+call.
+
 ## The ablation ladder (grounding vs coordination)
 
 Two runs, same 100 questions, same eight arms. **Cite the frozen one.**

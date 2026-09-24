@@ -33,8 +33,9 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from temporal import resolve_temporal, matches_window
-from fetch_union import union_fetch, product_terms
+from fetch_union import union_fetch, product_terms, reset_screened
 from agent_rules import rules_block
+import answer_agent
 from answer_agent import present_answer
 from store import open_store, caching_fetch
 from grounding import ground
@@ -47,7 +48,7 @@ import monitor
 
 # ── PAGE CONFIG ──────────────────────────────────────────
 st.set_page_config(
-    page_title="Multi-Agent RAG System — Software Ecosystem Monitor",
+    page_title="Should You Update? — Multi-Agent RAG",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -455,6 +456,38 @@ def _step(label: str, show: bool):
     return st.spinner(label) if show else nullcontext()
 
 
+def vendor_subreddit_posts(query: str, already: list, per_sub: int = 8):
+    """The vendor's own subreddits, as the terminal trace searches them.
+
+    The community agent reads `/api/reddit/query/positive`, which ranks the
+    whole feed by text. The terminal's RetrieverAgent also asks
+    `/api/reddit/by-subreddit` for the detected vendor's subreddits, and that is
+    where a thread like "KB5101650 breaks printing" lives: on the demo question
+    the app returned no printing document at all while the terminal named the
+    KB. Same detector and same fetch as the terminal, so both views see it.
+
+    Returns `(kept, dropped)`; the caller adds the drops to the run's screen log.
+    """
+    import multiagent_rag_v3 as marag
+    from guardrail import screened as _screen
+
+    have = {(d.get("url") or "").rstrip("/").lower() for d in (already or ())}
+    out = []
+    for v in marag.extract_vendor(query)[:2]:
+        for sub in marag.VENDOR_SUBREDDITS.get(v, [v])[:3]:
+            try:
+                posts = marag.fetch_vendor_reddit(sub, query=query, limit=per_sub)
+            except Exception:  # noqa: BLE001 -- one dead subreddit is not an outage
+                continue
+            for p in posts:
+                u = (p.get("url") or "").rstrip("/").lower()
+                if u and u not in have:
+                    have.add(u)
+                    out.append(p)
+    kept, dropped = _screen(out)
+    return kept, [{"doc": d, "pattern": pat} for d, pat in dropped]
+
+
 def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
                  yesno_on: bool = True, unclear_as_no: bool = False,
                  survey_on: bool = True, source: str = "agent",
@@ -484,6 +517,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         "evaluation":      {},
         "timing":          {},
         "errors":          [],
+        "screened":        [],
     }
 
     # Step 0 — Temporal Grounder
@@ -493,6 +527,10 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # the absolute date instead of a token that cannot match.
     errors = _reset_fetch_errors()
     results["errors"] = errors
+    # Once per run, not once per fetch: the three agents below share one log,
+    # so a row screened out of the community fetch is still reported after the
+    # release and CVE fetches have run.
+    results["screened"] = reset_screened()
 
     t0 = time.time()
     # One call, and it is the same call the evaluation's `single_agent_grounded`
@@ -573,6 +611,11 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         t0 = time.time()
         results["community"] = union_fetch(community_fetch, phrasings,
                                            pool_limit, temporal)
+        # Vendor subreddits, unless the run is pinned to the local store.
+        if source != "store":
+            extra, dropped = vendor_subreddit_posts(query, results["community"])
+            results["community"] += extra
+            results["screened"].extend(dropped)
         results["timing"]["community"] = round(time.time()-t0, 1)
 
     # Step 3 — Release Notes Agent
@@ -652,7 +695,11 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
                                         thread.get("author_description") or "") is not None
     else:
         yesno_shaped = yesno.looks_yesno(query, is_title=True)
-    if thread is None and yesno_on and yesno_shaped:
+    # Not gated on the yes/no switches any more: the thread's highest-upvoted
+    # comment is the community's answer to *any* software question, and it is
+    # what the presenter now leads the answer with. The tally below stays
+    # gated -- counting stances only makes sense on a yes/no question.
+    if thread is None:
         thread = yesno.find_thread(query)
     if thread is not None:
         results["thread"] = thread
@@ -673,10 +720,16 @@ _CITE = re.compile(r"\s*\[[^\]]*\]")
 
 
 def _one_line(text: str) -> str:
-    """The first sentence of a presented answer, citations stripped."""
+    """The first sentence of a presented answer, citations stripped.
+
+    The sentence split is `answer_agent._one_sentence`, not "cut at the first
+    period": the presenter now quotes the thread's top-voted comment, and the
+    commenter's own full stop is inside the quotation marks. Cutting there
+    published half a quote -- `says \u201cI had a similar issue on a Windows 2019
+    server.` -- with the closing quote and the citation gone.
+    """
     plain = _CITE.sub("", text or "").strip()
-    m = re.match(r"(.+?[.!?])(\s|$)", plain, re.S)
-    return (m.group(1) if m else plain).strip() or "No answer could be composed."
+    return answer_agent._one_sentence(plain) or "No answer could be composed."
 
 
 def _answer_caption(presented, n_cited: int, secs) -> str:
@@ -1002,7 +1055,7 @@ with st.sidebar:
 
 # ── MAIN UI ───────────────────────────────────────────────
 
-st.caption("Software ecosystem monitor · releasetrain.io")
+st.caption("Should you update? Ask before you do.")
 
 if view == "Monitor":
     # releasetrain.io's component search, on top of the same feed the Release
@@ -1369,6 +1422,21 @@ elif run_btn and query:
                          "No documents from this feed are included below, and "
                          "nothing is cited from it.")
 
+        # ── SCREENED DOCUMENTS ────────────────────────────────
+        # Dropping is silent to the model and loud here: the model never sees
+        # the row, and the operator sees which row it was and what tripped it.
+        # Without this the screen was only half a control -- it dropped the
+        # document and told nobody, so an attempt on the corpus left no trace.
+        if results.get("screened"):
+            for d in results["screened"]:
+                doc = d["doc"]
+                title = (doc.get("title") or doc.get("text") or str(doc))[:120] \
+                    if isinstance(doc, dict) else str(doc)[:120]
+                st.warning(f"**Screened out ({d['pattern']})** — “{title}”")
+            st.caption("These rows carried text addressed to the model rather than "
+                       "to a reader. They were dropped before ranking, so nothing "
+                       "below is retrieved from them and nothing cites them.")
+
         gq = results.get("grounding")        # same: read by the raw-data payload
 
         if show_pipeline:
@@ -1724,7 +1792,7 @@ elif run_btn and not query:
 _last = st.session_state.get("last_answer")
 if _last:
     st.caption(f"Was this answer right? — “{_last['query']}”")
-    c1, c2, _ = st.columns([1, 1, 6])
+    c1, c2, _ = st.columns([2, 2, 5])
     for col, verdict, label in ((c1, "correct", "👍 Correct"), (c2, "wrong", "👎 Wrong")):
         if col.button(label, key=f"fb_{verdict}", use_container_width=True):
             results_view.record_feedback({"ts": datetime.now().isoformat(timespec="seconds"),
@@ -1738,6 +1806,6 @@ st.markdown("---")
 st.markdown("""
 <div style="text-align:center; color:#888; font-size:0.85rem;">
     Multi-Agent RAG System · Adaptive Multi-Agent RAG Architecture · University of the Pacific · 2026<br>
-    Shradha Devendra Pujari · Dr. Solomon Berhe · releasetrain.io
+    Shradha Devendra Pujari · Dr. Solomon Berhe
 </div>
 """, unsafe_allow_html=True)

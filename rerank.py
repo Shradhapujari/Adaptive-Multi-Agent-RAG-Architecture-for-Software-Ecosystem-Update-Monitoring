@@ -54,10 +54,15 @@ import urllib.error
 import urllib.request
 from typing import Dict, List, Optional, Sequence
 
+import tokens
+
 DEFAULT_EMBED_MODEL = "nomic-embed-text"
 DEFAULT_SPEC = os.environ.get("MARAG_RERANK", "embed")
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+(?:\.[a-z0-9]+)*")
+# llm20@embed:qwen2.5:7b-instruct -- N, base (bare spec; the embed base uses
+# DEFAULT_EMBED_MODEL), model (may contain ':').
+_LLM_SPEC_RE = re.compile(r"^llm(\d+)@(bm25|embed|none):([a-z0-9][a-z0-9:_.-]*)$")
 
 # BM25 constants (Robertson/Sparck-Jones defaults).
 _BM25_K1 = 1.5
@@ -227,6 +232,7 @@ class EmbeddingReranker(Reranker):
         )
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
             body = json.loads(resp.read().decode())
+        tokens.record_embed()
         vec = body.get("embedding") or []
         if not vec:
             raise RuntimeError(f"empty embedding from {self.model}")
@@ -260,6 +266,108 @@ class EmbeddingReranker(Reranker):
         s = self.scores(query, docs)
         order = sorted(range(len(docs)), key=lambda i: -s[i])
         return [docs[i] for i in order[:top_k]]
+
+
+class LLMCascadeReranker(Reranker):
+    """Grade the base ranker's top-N with a local model, then re-sort the head.
+
+    Spec `llm<N>@<base>:<ollama model>`, e.g. `llm20@embed:qwen2.5:7b-instruct`.
+    The base ranker orders the whole pool; the model grades only its top-N
+    (0 = unrelated, 1 = same product or area, 2 = answers the question) and
+    the head is re-sorted by grade, ties broken by the base score. The tail
+    keeps the base order. N model calls per pool, not |pool|.
+
+    Measured on the clean 500-question pools with every promoted document
+    judged (FINDINGS.md, Finding 9): over `flat:embed`, +0.027 nDCG@3
+    (95% CI +0.016..+0.039, 57/423/20) at 20 calls per question. Grading the
+    top-12 of an RRF fusion instead gained nothing -- the candidate set was
+    the limit, not the grader -- so the base ranker is part of the spec.
+
+    Pick a model from a different family than the evaluation judge, or the
+    reranker is grading with the judge's own preferences.
+    """
+
+    PROMPT = (
+        "You rank search results for a software-update question. Grade the "
+        "document's relevance: 2 = directly answers or is about the exact "
+        "product+version+issue asked; 1 = same product or area, not a direct "
+        "answer; 0 = unrelated.\n\n"
+        'Question: "{query}"\n\n'
+        "Document (source={source}):\nTitle: {title}\nContent: {text}\n\n"
+        'Respond with JSON only: {{"relevance": <0|1|2>}}'
+    )
+
+    def __init__(self, n: int, base: Reranker, model: str,
+                 host: str = "http://localhost:11434", timeout: int = 60):
+        self.n = n
+        self.base = base
+        self.model = model
+        self.host = host.rstrip("/")
+        self.timeout = timeout
+        self._grades: Dict[str, int] = {}
+        self.calls = 0
+
+    @property
+    def spec(self) -> str:  # type: ignore[override]
+        return f"llm{self.n}@{self.base.spec}:{self.model}"
+
+    def available(self) -> bool:
+        try:
+            self._generate("Respond with JSON only: {\"relevance\": 0}")
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _generate(self, prompt: str) -> str:
+        """One generate call to Ollama. Overridden in tests to avoid network."""
+        payload = json.dumps({"model": self.model, "prompt": prompt, "stream": False,
+                              "options": {"temperature": 0.0, "num_predict": 40}}).encode()
+        req = urllib.request.Request(f"{self.host}/api/generate", data=payload,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            body = json.loads(resp.read().decode())
+        tokens.record(body, "rerank")
+        return body.get("response", "")
+
+    def grade(self, query: str, doc: dict) -> int:
+        key = f"{query.strip().lower()[:200]}|{doc_text(doc)[:300]}"
+        if key in self._grades:
+            return self._grades[key]
+        g = 0
+        try:
+            raw = self._generate(self.PROMPT.format(
+                query=query, source=doc.get("source", "?"), title=doc.get("title", ""),
+                text=(doc.get("detail") or doc.get("text") or "")[:600]))
+            self.calls += 1
+            g = int(round(float(json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+                                .get("relevance", 0))))
+        except Exception:  # noqa: BLE001 -- an ungradable candidate keeps its base rank
+            g = 0
+        g = max(0, min(2, g))
+        self._grades[key] = g
+        return g
+
+    def scores(self, query: str, docs: Sequence[dict]) -> List[float]:
+        # Base score plus a grade bonus large enough to dominate within the head,
+        # so sorting by this alone reproduces rank(). Tail scores are untouched
+        # and therefore below every graded candidate's floor only if the base
+        # score is bounded; cosine is, BM25 is not -- rank() is authoritative.
+        base = self.base.scores(query, docs)
+        head = sorted(range(len(docs)), key=lambda i: -base[i])[:self.n]
+        out = list(base)
+        for i in head:
+            out[i] = base[i] + 10.0 * self.grade(query, docs[i])
+        return out
+
+    def rank(self, query: str, docs: Sequence[dict], top_k: int = 4) -> List[dict]:
+        if not docs:
+            return []
+        base = self.base.scores(query, docs)
+        order = sorted(range(len(docs)), key=lambda i: -base[i])
+        head, tail = order[:self.n], order[self.n:]
+        grades = {i: self.grade(query, docs[i]) for i in head}
+        head.sort(key=lambda i: (-grades[i], -base[i]))
+        return [docs[i] for i in head + tail][:top_k]
 
 
 class _FallbackReranker(Reranker):
@@ -325,6 +433,15 @@ def make_reranker(spec: Optional[str] = None) -> Reranker:
         if r.available():
             return r
         return _FallbackReranker(f"embed:{model}", "ollama embedding model unavailable")
+    m = _LLM_SPEC_RE.match(spec)
+    if m:
+        n, base_spec, model = int(m.group(1)), m.group(2), m.group(3)
+        base = make_reranker(base_spec)
+        r = LLMCascadeReranker(n=n, base=base, model=model)
+        if r.available():
+            return r
+        return _FallbackReranker(spec, f"ollama model {model} unavailable")
     raise ValueError(
-        f"unknown rerank spec {spec!r} (expected none|bm25|embed|embed:<model>)"
+        f"unknown rerank spec {spec!r} "
+        f"(expected none|bm25|embed|embed:<model>|llm<N>@<base>:<model>)"
     )

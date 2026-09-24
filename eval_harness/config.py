@@ -48,6 +48,10 @@ class EvalConfig:
     # and the retrieval score is a lookup rate (FINDINGS.md, Finding 7). Every
     # run before 2026-09-17 was made with this off.
     exclude_own_post: bool = True
+    # Also write pools.jsonl: every pre-rerank candidate with its text, per
+    # (query, system). Lets a reranker be re-scored offline against the same
+    # pools instead of re-running retrieval. Off by default (~10 MB per arm).
+    dump_pools: bool = False
     # Frozen-corpus control, "record:<dir>" or "replay:<dir>"; see
     # corpus_snapshot.py. Empty means read the live endpoints, which makes two
     # runs incomparable and so must never be used for an ablation.

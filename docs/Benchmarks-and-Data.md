@@ -34,6 +34,14 @@ distinguishable in analysis.
 
 ## Live sources
 
+> These counts are the figures measured for the conference paper and are not
+> re-measurable: the endpoints return query results without a collection total.
+> The one that can be checked has moved — `/api/c/names` returned 14,223 product
+> names then and returns **1,348** today (checked 2026-09-23), with 364
+> subreddits. Read every absolute size below as a reading of the service at a
+> point in time; evaluation runs record or replay their own corpus snapshot and
+> are unaffected.
+
 **Verified (Tier 1)**
 
 - Vendor registry — 6,578 entries

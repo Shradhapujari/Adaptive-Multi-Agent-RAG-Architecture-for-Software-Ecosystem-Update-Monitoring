@@ -203,6 +203,15 @@ Top learned terms after 50 queries (interpretable on inspection): `vulnerability
 
 Verified and community sources are kept separate and weighted differently in the Evaluator's score.
 
+> **On these counts.** They are the figures measured for the conference paper and
+> are not re-measurable: the endpoints return query results without a collection
+> total. The one that can be checked has moved a long way — `/api/c/names`, the
+> product vocabulary vendor matching is built from, returned 14,223 names then and
+> returns **1,348** today (checked 2026-09-23, full response, not paginated), with
+> 364 subreddits. Treat every absolute size here as a reading of the service at a
+> point in time. Evaluation runs are unaffected: each one records or replays its
+> own corpus snapshot.
+
 The lake behind these endpoints is a MongoDB store covering Reddit posts, Stack
 Overflow posts, software release notes, CVE advisories, and LLM/AI model
 releases. The retrieval layer currently consumes release notes, CVE, LLM

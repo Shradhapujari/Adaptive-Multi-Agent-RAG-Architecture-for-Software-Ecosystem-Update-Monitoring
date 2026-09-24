@@ -83,7 +83,7 @@ def explain(query: str, answer: str, evidence: Sequence) -> Trace:
             "grounded": bool(cites) or not facts,
         })
 
-    v = guardrail.check(text, evidence)
+    v = guardrail.check(text, evidence, query)
     return Trace(query, sources, sentences, [str(x) for x in v.violations])
 
 

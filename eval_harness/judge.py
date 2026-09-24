@@ -53,6 +53,7 @@ def _clamp01(x) -> float:
 class Judge:
     def __init__(self, spec: str = "ollama:llama3.1"):
         self.client: LLMClient = make_client(spec)
+        self.client.role = "judge"
         self.spec = self.client.spec
 
     def available(self) -> bool:

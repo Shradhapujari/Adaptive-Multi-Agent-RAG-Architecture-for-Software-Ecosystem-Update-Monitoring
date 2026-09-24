@@ -70,3 +70,36 @@ def test_bad_environment_variable_raises(monkeypatch):
 
 def test_choices_are_exactly_the_two_documented_arms():
     assert marag.RANK_QUERY_CHOICES == ("original", "rewritten")
+
+
+# ---- resolve_rank_tiers: whether the verified-before-community prior ranks --
+
+def test_rank_tiers_default_is_flat_and_tiered_is_the_ablation_arm(monkeypatch):
+    # Finding 9: the tier prior cost every arm 0.23 nDCG@3. Flat is the default
+    # since 2026-09-22; the historical order is reachable only by asking for it.
+    monkeypatch.delenv("MARAG_RANK_TIERS", raising=False)
+    assert marag.resolve_rank_tiers() == "flat"
+    assert marag.resolve_rank_tiers("tiered") == "tiered"
+
+
+def test_rank_tiers_flat_from_env_or_argument(monkeypatch):
+    monkeypatch.setenv("MARAG_RANK_TIERS", "FLAT")
+    assert marag.resolve_rank_tiers() == "flat"
+    assert marag.resolve_rank_tiers("flat") == "flat"
+
+
+def test_rank_tiers_rejects_typos():
+    with pytest.raises(ValueError):
+        marag.resolve_rank_tiers("flatt")
+
+
+# ---- _gather: concurrent fetches must come back in call order --------------
+
+def test_gather_preserves_call_order_under_concurrency(monkeypatch):
+    import time
+    monkeypatch.delenv("MARAG_FETCH_WORKERS", raising=False)
+    # Later calls finish first; results must still line up with the calls.
+    calls = [lambda i=i: (time.sleep(0.02 * (5 - i)), i)[1] for i in range(5)]
+    assert marag._gather(calls) == [0, 1, 2, 3, 4]
+    monkeypatch.setenv("MARAG_FETCH_WORKERS", "1")
+    assert marag._gather(calls) == [0, 1, 2, 3, 4]

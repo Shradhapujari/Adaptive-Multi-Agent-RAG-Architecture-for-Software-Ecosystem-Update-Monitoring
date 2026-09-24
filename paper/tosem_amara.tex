@@ -946,7 +946,9 @@ incorporated before query generation.
 The Retriever performs vendor-aware document retrieval. It first
 attempts to identify the software vendor referenced in the query using
 exact matching, alias lookup, and fuzzy matching against a registry of
-14,223 software product names and 628 software-related subreddits. If a
+software product names and subreddits fetched at startup (14,223 and 628
+respectively when this was written; 1,348 and 364 as of 2026-09-23 --- see
+Section~\ref{sec:datasources}). If a
 vendor is detected, retrieval is restricted to vendor-specific
 release notes, advisories, and community discussions. Otherwise, a
 general retrieval logic is used. The Retriever returns ranked
@@ -963,7 +965,10 @@ evaluation harness, whose carried-over measurements
 Section~\ref{sec:carried-over} reports, used $\theta = 0.30$. A second
 constant of 0.30 appears in the same scoring method and is unrelated to the
 retry decision: it is a quality floor applied when a Tier~1 or Apple source
-is present. The Evaluator does not generate answers \cite{zhuge2024}.
+is present. Since the fix described in Section~\ref{sec:retry}, the retry
+signal is read from the overlap score before any such floor is applied, while
+the floored score remains what is reported. The Evaluator does not generate
+answers \cite{zhuge2024}.
 
 \subsection{Adaptive Feedback and Self-Improvement}
 
@@ -1007,6 +1012,19 @@ obtained through multiple API endpoints.
 
 To support vendor-aware retrieval, a registry of software vendors and
 associated subreddits is loaded at startup and cached locally.
+
+The entry counts above are those measured when the conference version was
+written. They are not re-measurable: the endpoints return query results
+without a collection total, so a reader cannot check them against the live
+service. The one count that can be checked has moved substantially ---
+\texttt{/api/c/names}, the product vocabulary the vendor matcher is built
+from, returned 14,223 names then and returns 1,348 today (2026-09-23, full
+response, not paginated). We report the original figures rather than silently
+restate them, and note that any absolute corpus size in this section should be
+read as a measurement of the service at that time rather than a stable
+property of it. Retrieval results in this paper are unaffected: every run
+either records its own corpus snapshot or is replayed from one
+(Section~\ref{sec:tier-control}).
 
 \subsection{Two Roles for a Rewritten Query}\label{sec:rewrite-roles}
 
@@ -1262,10 +1280,13 @@ therefore slightly less than a doubling of retrieval calls. For a
 question with no model mention and a recognized vendor whose lookups
 return documents, the request count rises from 13 to 24; for a question
 with no recognized vendor, from 7 to 14. An open model gate adds up to
-4 concurrent per-term searches per phrasing on top of either figure. No
-additional language model calls are incurred: the Query Rewriter is
+4 concurrent per-term searches per phrasing on top of either figure. Under the reranking
+functions available at the time of that measurement, no additional
+language model calls are incurred: the Query Rewriter is
 invoked once either way, and reranking is either arithmetic over the
-pool or one local embedding call per distinct document.
+pool or one local embedding call per distinct document. The grading
+cascade of Section~\ref{sec:tier} changes this, and
+Section~\ref{sec:efficiency} prices it.
 
 On the ten-question ground-truth set, mean end-to-end latency is
 approximately 23~s per question for the multi-agent pipeline against
@@ -1452,6 +1473,126 @@ Ollama with temperature set to zero. The evaluation platform consisted
 of Apple Silicon hardware with 24\,GB memory and Metal GPU
 acceleration.
 
+\subsection{How a Reported Number Is Produced}\label{sec:protocol}
+
+Every retrieval number in Section~\ref{sec:results} is the mean over questions
+of a per-question, per-arm quantity computed by one harness
+(\texttt{eval\_harness/run\_eval.py}) in one pass. Because the arms differ in
+what they fetch, and because an LLM supplies the relevance labels, the order in
+which those steps happen decides what the number can be read to mean. We
+therefore trace a single question end to end rather than name the metrics and
+leave the protocol implicit.
+
+\paragraph{1. The question.} A benchmark record carries an id, the question
+text, its ecosystem and category, the endpoint and record type it was mined
+from, and---for a community-mined question---the URL of the post whose title it
+is. Every arm in the run receives the same question string.
+
+\paragraph{2. Retrieval.} Each arm retrieves through the same
+\texttt{RetrieverAgent} against the endpoints of
+Section~\ref{sec:datasources}: the baseline on the question, the multi-agent
+arm on the union of the question and its rewriting
+(Section~\ref{sec:union-fetch}). Before any ranking, the record's own source
+URL is struck from the candidate pool of \emph{every} arm
+(Section~\ref{sec:leak}). A run reads its documents in one of two corpus
+modes, and which one decides what its numbers can later be re-derived from. In
+\emph{record} mode the endpoints are queried live and every response is written
+to a snapshot directory; in \emph{replay} mode the fetch is served from that
+directory, and in the \emph{strict} variant a document request the snapshot
+does not hold aborts the run rather than quietly going live. Either way the
+arms of a single run are compared against one corpus, which is what every
+comparison in this paper rests on. Only replay makes a run reproducible
+afterwards, and the asymmetry is worth stating precisely because it is easy to
+assume otherwise: a snapshot holds one response body per request key, a live
+feed answers the same key differently over the hours a 500-question run takes,
+and the directory keeps the last of those answers. A record-mode run therefore
+cannot be replayed back into itself. Replaying one of ours reproduced its
+multi-agent arm's candidate pools on 1 of 12 questions, while two replays of a
+single configuration agree on 12 of 12 and are byte-identical. Record-mode
+numbers are internally valid and externally irreproducible; replay-mode numbers
+are both. Where a table's arms come from different runs we say so, and we do
+not read a difference between a live-recorded arm and a replayed one as an
+effect of the architecture.
+
+Retrieval also reads the clock, which a snapshot of HTTP responses does not
+freeze: a question carrying \emph{latest} or \emph{last week} becomes a date
+filter, so the same snapshot replayed a day later can admit a different set of
+documents. A recording now stamps its directory with the date it was made and
+a replay pins the process clock to that stamp, which removes the drift between
+two runs made on different days; an explicitly set clock overrides it, and a
+snapshot recorded before the stamp existed reports no recording date rather
+than a guessed one.
+
+\paragraph{3. Ranking and cut.} The candidate pool is ordered by the run's
+ranking function and cut to $k=4$. Two settings decide the ordering and are
+recorded per run: the scorer (BM25, embedding cosine, reciprocal-rank fusion,
+or an LLM grading cascade) and whether the verified-source tier prior is
+applied before it or not (Section~\ref{sec:rerank}). The top-$k$ list of
+document ids is what the metrics see; the documents themselves are what the
+answer is synthesized from.
+
+\paragraph{4. Judging.} The judged pool for a question is the union of what
+\emph{all} arms returned for it---optionally widened to everything they
+considered, which is what makes pool recall computable. Each
+(question,~document) pair is labelled once, by \texttt{llama3.1} at temperature
+zero, on a graded scale: 2 highly relevant, 1 related, 0 irrelevant. The label
+is keyed by a hash of the question text together with the document id and
+cached on disk, so it is computed once and reused for every arm in the run and
+for every later run that retrieves the same document for the same question. No
+arm is scored against a private set of judgments, and no arm is penalized for a
+document that only a competing arm surfaced.
+
+\paragraph{5. Metrics.} From the ranked list and those labels:
+nDCG@$k$ with gain $2^g-1$ and the standard $\log_2$ discount, its ideal
+computed from the same per-question pool; Recall@$k$ over the relevant
+documents in that pool; MRR on the first document with grade $\geq 1$. The
+denominators are therefore \emph{pool-relative}. A system cannot be charged for
+relevant documents no arm retrieved, which makes these numbers valid for the
+paired within-run comparisons this paper draws and invalid as absolute values
+to compare against published figures computed over a fixed judged corpus. We
+state the pooling protocol with every absolute number for this reason, and
+Section~\ref{sec:pool-demo} measures what ignoring it costs: two arms whose
+retrieved lists are byte-identical, scored in pools of different width, differ
+by $+0.055$ recall@5.
+
+\paragraph{6. Answer scoring.} The same judge scores each arm's answer for
+faithfulness to its own retrieved contexts and for answer relevance, each in
+$[0,1]$, and for correctness against the reference answer on the questions that
+carry one. Section~\ref{sec:metric-threat} states what an LLM judge scoring a
+template against prose measures, and why the \texttt{marag\_llm} arm exists.
+
+\paragraph{7. Cost.} The harness counts, per arm and per question, every model
+call and every prompt and completion token the arm itself spent, attributed by
+role---rewriting, ranking, synthesis---with the judge's own calls excluded, so
+an accuracy difference between arms can be read against what it cost to obtain.
+
+\paragraph{8. Statistics.} Arms are compared pairwise on the per-question
+values, never on the difference of two means: the paired difference vector
+feeds an exact two-sided Wilcoxon signed-rank test at the sample sizes where it
+is exact, a percentile bootstrap 95\% confidence interval over question-level
+differences (10{,}000 resamples, fixed seed), and a win/tie/loss count.
+Families of comparisons carry a Holm correction.
+
+\paragraph{9. What is left behind.} A run writes a directory
+\texttt{results/run\_\textless epoch\textgreater\_\textless dataset
+hash\textgreater/} holding: \texttt{config.json}, the arm configuration
+actually used---ranking function, tier mode, own-post exclusion, corpus
+snapshot statistics, agent-rules hash---read back from the objects the run
+built rather than from the environment it was launched with;
+\texttt{per\_query.jsonl}, one row per question per arm with the ranked
+document ids, every metric, latency, model calls and tokens;
+\texttt{qrels.json}, the labels used by \emph{this} run alone, so its numbers
+recompute from its own artifacts without the accumulated cache;
+\texttt{aggregate.csv} and \texttt{report.md}. Each table in
+Section~\ref{sec:results} names the run id it was computed from. Two senses of
+recovery apply to it, and they are not the same. Every metric recomputes from
+that directory alone, for any run: the ranked document ids and the judgments
+are both on disk, so a reader can re-derive the numbers, re-score them under a
+different metric, or pool them with another run's judgments without touching
+the endpoints. Re-executing the pipeline and arriving at the same ranked lists
+is the stronger sense, and it holds for runs made in replay, not for runs made
+in record mode against the live feeds.
+
 \subsection{Arm Comparability and the Ablation Ladder}\label{sec:ladder}
 
 Set side by side, the two arms do not hold the same capabilities. The
@@ -1496,8 +1637,8 @@ so every adjacent pair is a single-factor comparison. A1g branches from A1
 rather than continuing the chain: it adds question grounding \emph{without}
 any coordination, which is what separates understanding the question from
 coordinating agents. All rungs are now measured against a frozen corpus
-(Table~\ref{tab:ladder-results}); A4 executed but never triggered, for the
-reason given in Section~\ref{sec:ladder-results}.}
+(Table~\ref{tab:ladder-results}); A4 executed but cannot trigger, for the
+structural reason given in Section~\ref{sec:retry}.}
 \label{tab:ladder}
 \begin{tabular}{llll}
 \toprule
@@ -1508,7 +1649,7 @@ A1 & \texttt{single\_agent} & retrieval on the user's question & Measured \\
 A1g & \texttt{single\_agent\_grounded} & question grounding, no coordination & Measured \\
 A2 & \texttt{rewrite\_only} & query rewriting & Measured \\
 A3 & \texttt{marag\_llm} & union fetch over both phrasings & Measured \\
-A4 & \texttt{marag\_llm\_retry} & Orchestrator retry & Never triggered \\
+A4 & \texttt{marag\_llm\_retry} & Orchestrator retry & Could not trigger as run \\
 A5 & \texttt{marag} & template rendering & Measured \\
 \bottomrule
 \end{tabular}
@@ -2105,9 +2246,9 @@ indistinguishable from the full pipeline ($p=0.22$).
 documents \emph{and} identical answers to A3 on all 100 questions. The retry
 fires when the Evaluator's quality score falls below 0.15; the minimum observed
 across the benchmark was 0.300. Rung A4 is therefore reported as executed and
-never triggered rather than as measured with no effect --- the distinction
-matters, because a benchmark that exercises the retry would have to contain
-questions this retriever handles badly, and this one does not.
+never triggered rather than as measured with no effect. Section~\ref{sec:retry}
+returns to it at 500 questions and shows the gap is structural rather than a
+property of these questions.
 
 \textbf{Rewriting alone loses the source post, and the union is what
 restores it.} A2 scores nDCG@5 0.231 against A1's 0.742, and A3 adds the union
@@ -2245,7 +2386,11 @@ judge \texttt{llama3.1}, $\text{top-}k=4$. Mean over 500 questions; latency is
 the per-question median. The lower rows give the paired difference against
 \texttt{single\_agent}, the questions won/tied/lost, and the Holm-corrected
 $p$ across the family. Correctness ($n=72$, the ground-truth subset) is
-omitted from the paired rows for the reason given in the text.}
+omitted from the paired rows for the reason given in the text. Run
+\texttt{run\_1789703506}, which queried the endpoints live and recorded them:
+by Section~\ref{sec:protocol} its three arms share one corpus and its numbers
+recompute from its artifacts, but re-executing the pipeline against the
+recorded snapshot does not reproduce its ranked lists.}
 \label{tab:clean}
 \small\setlength{\tabcolsep}{4pt}
 \begin{tabular}{lrrrrrr}
@@ -2300,6 +2445,395 @@ against a reference the answer does not contain. It is the judge-independence
 threat of Section~\ref{sec:threats} appearing as a false positive, and it wants
 a judge from a different model family before it means anything.
 
+\subsection{A Ranking Prior That Excluded the Corpus}\label{sec:tier}
+
+The leak-free measurement of Section~\ref{sec:leak} leaves both architectures
+at nDCG@3 near 0.30 and 273 of 500 questions with nothing any arm retrieved
+that the judge accepts. That is a low absolute number, and parity at a low
+number admits two readings: the arms are equally good, or they are equally
+obstructed by something neither of them controls. This section reports that the
+second reading was the right one, that the obstruction was a single line of
+ranking policy, and that removing it moves \emph{both} arms by roughly four
+times the largest architectural effect this paper measures.
+
+\subsubsection{The Mechanism}
+
+The Retriever assembles its candidates into source tiers and ranks
+\emph{within} tier before the top-$k$ cut: every verified record---release
+note, vendor advisory, CISA entry---precedes every community post, whatever the
+scorer says about the latter. The comment justifying the ordering referred to
+the ``verified sources'' block of the Evaluator's answer template, a rendering
+concern, but the ordering was applied to retrieval itself.
+
+The consequence is arithmetic rather than subtle. Across the 500 benchmark
+questions the top-4 of every arm is 0\% community posts, on a question set that
+is 60\% community-mined (Section~\ref{sec:benchmark}). The multi-agent arm's
+candidate pool held 455 judged-relevant documents to the baseline's 425 and
+left 48 of them outside its top-4, against the baseline's 6. Ranked by an
+oracle, the same two pools score nDCG@3 0.419 and 0.389. The retrieval
+advantage the union fetch produces exists in the pool; the tier prior discards
+it before the metric can see it.
+
+\subsubsection{Ranking the Pool Without the Prior}
+
+We re-ranked the recorded pools of the clean 500-question run with every
+scoring function the system implements, in both modes, and judged every
+document any ranker promoted into a top-4 that the incumbent had never shown
+the judge---3{,}142 additional labels---so that a new ranker is not scored zero
+for surfacing something no previous configuration exposed. The bench reproduces
+the run it replays exactly in the incumbent configuration, on 500 of 500
+questions for both arms.
+
+\begin{table}[t]
+\caption{Offline re-ranking of the multi-agent arm's recorded candidate pools,
+$n=500$, pooled graded relevance. The scorer barely matters; the tier prior
+does. The baseline's pools move the same way (\texttt{tiered:embed} 0.248 to
+\texttt{flat:embed} 0.452), and strict relevance---grade 2 only---tells the
+same story at a lower level, 0.087 to 0.176. These numbers are comparable to
+each other and not to Table~\ref{tab:clean}: the replay pools are 20--30\%
+larger than the original run's. Bench over the dumped pools of
+\texttt{run\_1789892227}, a strict replay.}
+\label{tab:tier-offline}
+\begin{tabular}{lrrr}
+\toprule
+Ranking function & nDCG@3 & Recall@5 & MRR \\
+\midrule
+\texttt{tiered:bm25}   & 0.153 & & \\
+\texttt{tiered:rrf}    & 0.221 & & \\
+\texttt{tiered:llm}    & 0.238 & & \\
+\texttt{tiered:embed} (as run) & 0.250 & 0.197 & 0.353 \\
+\midrule
+\texttt{flat:bm25}     & 0.322 & 0.318 & 0.429 \\
+\texttt{flat:rrf}      & 0.410 & 0.386 & 0.502 \\
+\texttt{flat:embed}    & 0.458 & 0.418 & 0.543 \\
+\texttt{flat:llm20@embed} & \textbf{0.489} & \textbf{0.441} & \textbf{0.562} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:tier-offline} separates the two factors cleanly. Every tiered
+configuration sits between 0.15 and 0.25 and every flat one between 0.32 and
+0.49, so the choice of scoring function---lexical, dense, fused, or
+model-graded---moves the metric less than the single decision of whether to
+apply the prior at all. Three successive reranker generations were evaluated in
+Section~\ref{sec:localizing} against a ceiling that was not the reranker's to
+reach.
+
+\subsubsection{End to End, and Who Gains}
+
+Offline re-ranking of recorded pools is not the system running. We therefore
+re-ran the pipeline end to end in both modes on 100 questions stratified by
+category, against the same frozen corpus snapshot, changing nothing but the
+prior.
+
+\begin{table}[t]
+\caption{The tier prior removed, end to end. $n=100$ stratified by category,
+seed 42, both modes against one frozen snapshot; paired differences with
+percentile bootstrap 95\% CI and win/tie/loss over questions. Both arms gain
+the same amount, which is what makes this a defect fix rather than an
+architectural result. Runs \texttt{run\_1789951801} (tiered) and
+\texttt{run\_1789951917} (flat), both strict replays of one snapshot.}
+\label{tab:tier-e2e}
+\begin{tabular}{lrrlr}
+\toprule
+Arm & tiered & flat & paired $\Delta$ (95\% CI) & W/T/L \\
+\midrule
+\texttt{marag\_llm}    & 0.357 & 0.584 & $+0.227$ $[+0.146, +0.316]$ & 44/41/15 \\
+\texttt{single\_agent} & 0.388 & 0.616 & $+0.227$ $[+0.144, +0.319]$ & 40/42/18 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The two arms gain an identical $+0.227$, and parity between them is unchanged
+under the new ranking (offline at $n=500$: 0.458 against 0.452; end to end at
+$n=100$: $-0.031$, 6 wins, 78 ties, 16 losses). This is again a quantity first read as a property of the
+architecture that resolved into one shared by both arms, and we report it in
+those terms: the tier prior
+was a defect in the retrieval component, it cost roughly 0.23 nDCG@3, and
+fixing it benefits a single agent exactly as much as four.
+
+Two costs come with it. Faithfulness falls $0.022$ for the multi-agent arm and
+$0.026$ for the baseline, and answer relevance $0.026$ and $0.034$, with
+confidence intervals that exclude zero for the baseline on both. The flat
+top-4 is 38\% community posts and 17\% news, and a model answering from
+community text is answering from weaker ground than one answering from a
+vendor advisory. The fix trades a little grounding for a large amount of
+retrieval, and the trade is visible rather than hidden. We also checked the
+obvious follow-up---demoting news, which reads like noise---and it is not:
+removing news from the pool costs 0.14 nDCG@3, because 58\% of news documents
+are judged relevant and 24\% are judged highly relevant. News is the most
+relevant source in this corpus.
+
+\subsubsection{The One Lever That Is the Agents'}
+
+Under flat ranking the architectures are again at parity, so the question this
+paper has asked four times returns: is there anything the decomposition buys
+that a single agent does not get for free? One candidate survives measurement.
+Reading the candidate documents---grading the top 20 with a local model and
+re-sorting the head by grade, the Evaluator's natural job---improves ranking
+where counting sources did not: $+0.027$ nDCG@3 over \texttt{flat:embed},
+95\% CI $[+0.016, +0.039]$, 57 wins to 20 losses over 500 questions, at 20
+model calls per question. The gains concentrate on \texttt{releases}
+($+0.043$) and \texttt{security} ($+0.040$) and are nil on \texttt{general}.
+It is the first per-candidate model call in this project that buys ranking,
+and it is the mechanism by which a larger pool could in principle be cashed:
+the multi-agent arm's union holds 1{,}439 judged-relevant documents to the
+baseline's 1{,}232 under the enlarged judgments, 303 of them fetched by the
+multi-agent arm alone.
+
+Run end to end on all 500 benchmark questions with flat ranking throughout and
+the grading cascade on the multi-agent arm, that arm appeared to lead the
+baseline on every rank-sensitive metric: nDCG@1 $+0.049$, nDCG@3 $+0.032$, MRR
+$+0.025$, each with a confidence interval excluding zero and surviving a Holm
+correction. We report those numbers because the next subsection is about why
+they are wrong, and because the error they contain is one an evaluation of this
+kind invites.
+
+The two arms of that comparison did not run in the same pass. The multi-agent
+arm came from a run that queried the endpoints live and recorded them; the
+baseline came from a strict replay of that recording. By
+Section~\ref{sec:protocol} those are not the same corpus: a snapshot holds one
+response per request key and a live feed answers the same key differently over
+the hours a 500-question run takes. We measured the size of that gap directly
+--- replaying the live-recorded run reproduced its multi-agent candidate pools
+on 1 of 12 questions, while two replays of a single configuration agree on 12
+of 12 --- so the comparison graded an arm that had seen a wider, fresher
+community feed against one that had not.
+
+\subsubsection{The Attributing Control, and the Frozen Run}\label{sec:tier-control}
+
+Two comparisons were needed. The first gives the baseline the same grading
+cascade, to separate a gain from decomposition from a gain from 20 extra model
+calls. The second puts all three arms in one pass against one frozen corpus, to
+remove the cross-run confound just described. Both were run, and the second
+overturns the first.
+
+The control gives the baseline the cascade over the same 500 questions in
+strict replay. Scored against the union of both runs' judgments---each run
+judges its own pool, and an arm measured alone carries a narrower one, so
+comparing the runs' own figures would read a pooling difference as an
+effect---it does not improve: nDCG@3 $0.479 \to 0.467$ with a confidence
+interval spanning zero, and recall@5 $-0.035$ with one that does not. Reading
+candidates is not worth 20 model calls to an arm with nothing extra in its pool
+to promote. Against that control the multi-agent arm led by $+0.044$ nDCG@3.
+But the multi-agent arm in that comparison was still the live-recorded one, so
+the lead inherits the confound and cannot be read as an architectural effect.
+
+\begin{table}[t]
+\caption{All three arms in one pass: 500 questions, flat ranking, the grading
+cascade on every arm, strict replay of one snapshot with the process clock
+pinned to that snapshot's recording date (33{,}454 document reads served from
+disk, no miss on any document host). Paired over questions with percentile
+bootstrap 95\% CI and Holm correction. \texttt{marag} and \texttt{marag\_llm}
+share a retrieval path and differ only in rendering, so their retrieval rows
+are identical by construction. Run \texttt{run\_1790126271}; a repeat of this
+configuration reproduces it document for document.}
+\label{tab:tier-control}
+\begin{tabular}{lrrrl}
+\toprule
+Metric & Multi-agent & Single-agent & $\Delta$ (95\% CI) & W/T/L \\
+\midrule
+nDCG@1   & 0.462 & 0.445 & $+0.017$ $[-0.001, +0.035]$ & 17/475/8 \\
+nDCG@3   & 0.496 & 0.490 & $+0.006$ $[-0.009, +0.021]$ & 43/410/47 \\
+nDCG@5   & 0.509 & 0.499 & $+0.010$ $[-0.004, +0.025]$ & 56/390/54 \\
+Recall@5 & 0.551 & 0.532 & $+0.018$ $[-0.001, +0.038]$ & 46/426/28 \\
+MRR      & 0.536 & 0.528 & $+0.008$ $[-0.004, +0.022]$ & 22/457/21 \\
+\midrule
+Faithfulness      & 0.900 & 0.897 & $+0.003$ $[-0.006, +0.012]$ & 72/375/53 \\
+Answer relevance  & 0.950 & 0.948 & $+0.002$ $[-0.007, +0.011]$ & 55/408/37 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:tier-control} is the measurement that settles it, and it is
+null. With the tier prior removed, the grading cascade on both arms, one
+corpus, one judge, one clock, and one pass, the multi-agent architecture does
+not beat the single-agent baseline on any retrieval metric. The largest
+difference is $+0.018$ recall@5, whose interval includes zero and which does
+not survive the correction; nDCG@3 is $+0.006$ with 43 questions won and 47
+lost. Faithfulness and answer relevance are likewise indistinguishable once
+answer format is matched, while the template arm remains $0.059$ below the
+baseline on faithfulness---the format artifact of
+Section~\ref{sec:scaled-eval}, unchanged.
+
+So the lever of Section~\ref{sec:tier} is real as a ranking improvement and
+does not belong to the agents. Both halves of the earlier story survive on
+their own terms: the tier prior cost every arm roughly 0.23 nDCG@3
+(Table~\ref{tab:tier-e2e}), and grading the top 20 candidates improves ranking
+over an embedding scorer offline. What does not survive is the claim that the
+multi-agent arm converts them into an advantage. Read against the parity result
+of Section~\ref{sec:leak}, nothing has changed except the absolute level: every
+arm now retrieves at roughly 0.49 nDCG@3 rather than 0.30, and the arms remain
+indistinguishable.
+
+We state what this episode cost us to see, because the error is not exotic. The
+confounded comparison was not careless---each run was internally frozen, the
+judgments were pooled across arms, the statistics were paired and
+corrected---and it still produced a significant result with a plausible
+mechanism, a clean interaction with the control, and a story about where the
+advantage was created and destroyed. What it lacked was one pass. The rule we
+would offer is narrow and mechanical: in a live-corpus domain, two arms
+compared against each other must execute in the same run, and the only way to
+be sure of that is to make the run frozen and reproducible and then reproduce
+it.
+
+\subsection{The Retry That Cannot Fire}\label{sec:retry}
+
+Retrieval parity between the architectures leaves one capability of the
+decomposition unmeasured, and it is the one a single agent structurally lacks:
+the Orchestrator's adaptive retry, which re-issues a widened fetch when the
+Evaluator judges the first attempt poor. Section~\ref{sec:ladder-results}
+reported it as executed but never triggered on 100 questions. We ran it frozen
+on all 500, in strict replay against the snapshot of
+Section~\ref{sec:tier-control}, and the result is not that the retry helps or
+fails to help. It is that the retry cannot occur.
+
+Across 500 questions the Evaluator's quality score has a minimum of exactly
+0.300, and the retry fires below 0.15. The arm returned candidate lists
+identical to \texttt{marag\_llm} on 500 of 500 questions and answers identical
+on 500 of 500; zero retries fired.
+
+The exact minimum is the tell. The Evaluator does not compute a quality score
+so much as raise one through a ladder of floors: a document from a verified
+advisory source sets it to at least 0.30, a tier-one hit to at least 0.30,
+community posts to at least 0.50, release notes to at least 0.50, and both
+together to at least 0.65. Any retrieval that returns one recognized document
+is therefore floored at or above twice the retry threshold, and the union fetch
+returns one for every question in this benchmark. The gate is not conservative;
+it is closed. A retry can occur only when retrieval comes back empty, which is
+the one case a wider re-fetch is least likely to repair.
+
+This changes what the ladder's A4 row means. It is not a capability that
+happened not to help on these questions --- it is a capability that the
+system's own control signal cannot request. Reporting it as a measured null
+would have been the more flattering error: it would suggest adaptive retrieval
+was tested and found neutral, when what was tested was a threshold that the
+scoring function makes unreachable. Making the rung measurable requires
+changing the system rather than the benchmark: either the threshold rises above
+the floors, or the floors come out of the Evaluator --- and the second touches
+the bespoke score this paper already retired for unrelated reasons
+(Section~\ref{sec:metric-threat}), so the two changes cannot be made
+independently of each other.
+
+The released implementation now takes a third route that touches neither. The
+retry signal is read from the term-overlap score \emph{before} the floors are
+applied; the floored score is still what the Evaluator reports, so the
+self-quality column of every run above is unchanged, and the threshold stays at
+0.15. Under that reading, recomputed offline over the retry arm's own top-4
+lists with no further model calls, the retry would fire on 13\% of the 500
+questions (8\% at a threshold of 0.10, 31\% at 0.30), spread across every
+category. The loop it triggers is the Orchestrator's: the Query Rewriter is
+re-invoked with the phrasings already searched and asked for different
+vocabulary, for at most two rounds, rather than the fixed widening string the
+harness once carried. Whether those retries change retrieval or answers is not
+yet measured; the frozen one-pass comparison is queued and will be reported
+when it completes. Until then the rung is reachable but unmeasured, which is a
+different claim from the null it could have been mistaken for.
+
+\subsubsection{An Accidental Demonstration}\label{sec:pool-demo}
+
+The retry arm ran alone, so it judged only its own candidates, while
+\texttt{marag\_llm} was judged inside a three-arm pool. The two arms retrieved
+\emph{byte-identical} lists on every question. Scored as each run reports
+itself, they differ: nDCG@3 0.518 against 0.496, recall@5 0.606 against 0.551.
+Re-scored against the union of both runs' judgments they differ by $0.000$ on
+every metric, on 500 of 500 questions.
+
+We keep this as the clearest available statement of a caveat that is easy to
+nod at and hard to feel. A pooled-judgment metric is not a property of a
+ranking alone; it is a property of a ranking and the pool it was judged in. Two
+systems that retrieve the same documents in the same order can be separated by
+$+0.055$ recall@5 by nothing but the company their judgments kept --- larger
+than every architectural difference this paper reports. Absolute retrieval
+numbers from different runs cannot be compared, and a difference of this size
+between two published systems evaluated separately would be indistinguishable
+from a real effect.
+
+\subsection{What the Accuracy Costs}\label{sec:efficiency}
+
+The gain of Section~\ref{sec:tier-control} is bought with model calls, and a
+retrieval improvement reported without its price is not a result a practitioner
+can act on. This section prices it. The harness counts every generation and
+every prompt and completion token each arm spends on its own work, attributed
+by role and excluding the judge (Section~\ref{sec:protocol}); each
+configuration below was measured with the arm alone in its own process, over
+the same 25 questions, against the same frozen snapshot, so no arm inherits
+cached work from another.
+
+\begin{table}[t]
+\caption{Cost per question, by architecture and ranking function. Generations
+are calls to a language model; embedding calls are counted separately because
+they are far cheaper. ``Cold'' is the first question of a process; ``mean'' is
+the average over 25, which is lower because the grading cascade caches a grade
+per (question, document) pair and this benchmark's questions retrieve
+overlapping documents---a property of the corpus, not of the architecture. A
+deployed system answering unrelated questions pays the cold price. The two
+\texttt{llm20} rows carry nDCG@3 from the frozen run of
+Table~\ref{tab:tier-control}; the \texttt{embed} rows are left blank rather
+than filled from a run made under other conditions, since the comparison this
+table invites across its rows is exactly the one
+Section~\ref{sec:tier-control} shows a cross-run figure cannot support. Cost
+runs \texttt{run\_1790122626},
+\texttt{run\_1790122667}, \texttt{run\_1790122759} and
+\texttt{run\_1790122836}, all strict replays with the judge off.}
+\label{tab:cost}
+\begin{tabular}{llrrrrr}
+\toprule
+& & \multicolumn{2}{c}{Generations} & \multicolumn{2}{c}{Tokens} & \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+Arm & Ranking function & cold & mean & cold & mean & nDCG@3 \\
+\midrule
+Single-agent & \texttt{flat:embed}       &  1 &  1.0 &   332 &   315 & --- \\
+Single-agent & \texttt{flat:llm20@embed} & 22 & 12.6 & 5{,}033 & 2{,}984 & 0.490 \\
+Multi-agent  & \texttt{flat:embed}       &  3 &  3.0 & 1{,}199 & 1{,}105 & --- \\
+Multi-agent  & \texttt{flat:llm20@embed} & 23 & 16.4 & 6{,}012 & 4{,}192 & 0.496 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Read down the table, three things are priced.
+
+\paragraph{Decomposition without the cascade costs 3 generations to the
+baseline's 1.} The Query Rewriter accounts for one, answer synthesis for one,
+and the third is an artifact we report rather than defend: the Evaluator
+assembles its template unconditionally, and the template embeds an answer
+generated by a second model, which the prose arm then discards in favour of the
+answer it synthesizes itself. Roughly 900 tokens per question are paid for and
+thrown away in every multi-agent measurement in this paper. Removing the
+discarded call would put the multi-agent arm at 2 generations against the
+baseline's 1, and changes no retrieval number: it is generation, not retrieval.
+Embedding calls rise from 11.4 to 15.0 per question, the union fetch's larger
+pool, and the HTTP request count roughly doubles as
+Section~\ref{sec:retrieval-cost} describes.
+
+\paragraph{The cascade costs about 12 generations and 2{,}700 tokens per
+question, and buys neither architecture a lead over the other.} Given that
+budget the single-agent arm does not improve on its own embedding-ranked
+configuration, and given it on both arms the two are indistinguishable
+(Table~\ref{tab:tier-control}). What the cascade does buy is ranking quality
+for \emph{every} arm, like the tier prior before it: this is a retriever
+improvement sold at 20 model calls per question, and whether it is worth that
+price is a deployment question rather than an architectural one.
+
+\paragraph{The best configuration costs roughly 16 generations and 4{,}200
+tokens per question against the cheapest one's 1 and 315.} That is 16 times the
+calls and 13 times the tokens, and at matched cost it retrieves
+indistinguishably from the single-agent baseline ($+0.006$ nDCG@3,
+Table~\ref{tab:tier-control}). End-to-end latency in the
+live-fetch run was 107\,s per question for the multi-agent arm against
+35\,s for the baseline, measured before the cascade was added to both; under
+replay, latency is not a meaningful measurement and we do not report it.
+
+We draw the practitioner's conclusion rather than the architectural one. If
+retrieval quality at minimum cost is the objective, the single-agent baseline
+with flat ranking and an embedding reranker is the configuration to deploy.
+The decomposition costs 16 times the model calls and 13 times the tokens and
+returns no measurable retrieval advantage over it; the cascade costs 12 times
+the calls and lifts ranking for whichever architecture it is attached to. The
+one intervention in this paper that is both large and free is the removal of
+the tier prior (Section~\ref{sec:tier}): $+0.227$ nDCG@3 for every arm, at no
+additional model call at all.
+
 \subsection{Observations Carried Over From the Earlier Evaluation}
 \label{sec:carried-over}
 
@@ -2332,7 +2866,8 @@ Orchestrator at all (Section~\ref{sec:setup}). None of the retrieval numbers in
 this paper include a retry. Before the union fetch, a retry re-issued a second
 rewritten query in place of the user's question --- the defect of
 Section~\ref{sec:localizing} repeated; under the union it inherits both
-phrasings.
+phrasings, and in the released implementation each further round asks the
+Query Rewriter for vocabulary it has not yet tried (Section~\ref{sec:retry}).
 
 \textbf{Self-improvement.} The bespoke retrieval score rose from 0.756 in the
 first tertile of the 50-question run to 0.826 in the last ($+9.3\%$;
@@ -2398,6 +2933,26 @@ intermittently emitted invalid tool calls, a property of that agent under an
   was an artifact of answer format rather than answer content; leak-free it is
   0.066, and the same retrieval rendered as prose is indistinguishable from the
   baseline.
+  \item The parity of item~4 was parity under an obstruction. The Retriever
+  ranked within source tiers, placing every verified record ahead of every
+  community post, which made the top-4 0\% community documents on a benchmark
+  that is 60\% community-mined. Removing the prior raises nDCG@3 by $0.227$ end
+  to end --- roughly four times the largest architectural effect measured here
+  --- and raises it by the same $0.227$ for \emph{both} arms
+  (Table~\ref{tab:tier-e2e}). The choice of scoring function is worth less than
+  this one decision: every tiered configuration scores 0.15--0.25 and every flat
+  one 0.32--0.49 (Table~\ref{tab:tier-offline}).
+  \item With the prior removed, the architectures are again indistinguishable.
+  All three arms in one frozen, reproducible pass over 500 questions, with the
+  grading cascade on every arm, put the multi-agent architecture $+0.006$
+  nDCG@3 ahead of the baseline (43 won, 47 lost) and $+0.018$ recall@5, neither
+  surviving correction (Table~\ref{tab:tier-control}). An earlier comparison
+  that put the same arms $+0.044$ apart drew them from two different runs, one
+  recorded live and one replayed, which is not one corpus; we report it and its
+  correction because the error produced a significant result with a plausible
+  mechanism and was caught only by repeating the measurement in a single pass.
+  The ranking gains of items~6 and~8 are real and belong to the retriever, not
+  to the decomposition.
 \end{enumerate}
 
 \section{Discussion}\label{sec:discussion}

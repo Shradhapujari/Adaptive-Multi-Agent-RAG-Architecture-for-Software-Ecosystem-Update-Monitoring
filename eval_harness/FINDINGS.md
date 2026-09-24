@@ -283,6 +283,212 @@ result.
 
 ---
 
+## Finding 9 — The ranking stage has a second defect: the tier prior keeps every community post out of the top-k
+
+Started from the clean n=500 run's own pools. The multi-agent arm's candidate
+pool held **455** judged-relevant documents to the baseline's **425**, then
+left **48** of them outside its top-4 (baseline: 6). Ranked by oracle, the same
+pools score nDCG@3 0.419 vs 0.389. The retrieval edge exists; ranking loses it.
+
+`RetrieverAgent` ranks within tier — every verified record (release note,
+CISA, CVE) before every community post — and cuts top-k afterwards. On the
+benchmark that means the top-4 is **0% Reddit** across 500 questions, for a
+question set that is 60% Reddit-mined. The comment justifying it was about the
+template's "VERIFIED SOURCES" block.
+
+`eval_harness/rerank_bench.py` re-ranks the dumped pools (`--dump-pools`,
+`run_1789892227_8fda4edb2d21`, strict replay of the b500 snapshot) with every
+scorer in both modes, and `--judge` labels every document any ranker promotes
+into a top-4 (3,142 new `llama3.1` judgments), so a new ranker is not scored
+zero for surfacing something the incumbent never showed the judge.
+
+| Ranker (marag_llm, n=500) | nDCG@3 | Recall@5 | MRR |
+|---|---:|---:|---:|
+| as run — `tiered:embed` | 0.250 | 0.197 | 0.353 |
+| `tiered:bm25` / `tiered:rrf` / `tiered:llm` | 0.153 / 0.221 / 0.238 | | |
+| `flat:bm25` | 0.322 | 0.318 | 0.429 |
+| `flat:rrf` | 0.410 | 0.386 | 0.502 |
+| `flat:embed` | **0.458** | 0.418 | 0.543 |
+| `flat:llm20@embed` (qwen2.5-7b grades embed's top-20) | **0.489** | 0.441 | 0.562 |
+
+The scorer barely matters; the tier prior does. Every `tiered:*` sits at
+0.15-0.25, every `flat:*` at 0.32-0.49. The baseline moves identically
+(0.248 -> 0.452 under `flat:embed`). Strict relevance (grade 2 only) tells the
+same story, 0.087 -> 0.176. The bench reproduces the run exactly first:
+`tiered:embed` equals `as_run` on 500/500 for both arms.
+
+End to end (`MARAG_RANK_TIERS=flat`, commit `f405e59`), 100 questions
+stratified by category, seed 42, both modes on the same frozen snapshot
+(`run_1789951801` tiered, `run_1789951917` flat):
+
+| Arm | nDCG@3 tiered -> flat | paired delta (95% CI) | W/T/L | Faithfulness | Ans. rel. |
+|---|---:|---:|---:|---:|---:|
+| marag_llm | 0.357 -> 0.584 | **+0.227** [+0.146, +0.316] | 44/41/15 | -0.022 [-0.040, +0.001] | -0.026 [-0.043, -0.001] |
+| single_agent | 0.388 -> 0.616 | **+0.227** [+0.144, +0.319] | 40/42/18 | -0.026 [-0.041, -0.011] | -0.034 [-0.044, -0.023] |
+
+Three things this settles:
+
+1. **It is a defect fix, not a multi-agent win.** Both arms gain the same
+   +0.23. Under `flat` the parity is unchanged (n=500 offline: 0.458 vs
+   0.452; n=100 end to end: -0.031, 6/78/16).
+2. **Reading the candidates is the first per-candidate model call in this
+   project that buys ranking.** `flat:llm20@embed` over `flat:embed`: +0.027,
+   95% CI [+0.016, +0.039], 57/423/20, 20 calls per question. Gains are on
+   `releases` (+0.043) and `security` (+0.040), nil on `general`. This is
+   the Checker's natural job — grade the top-20, not count sources — and the
+   only lever found so far by which the multi-agent arm's larger pool (1,439
+   relevant documents to the baseline's 1,232 under the enlarged qrels; 303
+   fetched only by marag) could be cashed.
+3. **Community documents in context cost a little grounding.** Faithfulness
+   -0.02 and answer relevance -0.03 for both arms; the flat top-4 is 38%
+   Reddit and 17% Google News. News is the obvious next thing to demote.
+
+Caveats: the new judgments come from the same `llama3.1` judge as every run;
+the replay snapshot is not frozen (pools are 20-30% larger than the original
+run's), so the offline numbers are comparable to each other, not to Finding 8;
+and Reddit-mined questions may favour neighbours of their source post even with
+the post itself excluded.
+
+---
+
+## Finding 10 — The grading cascade is worth 20 calls only to the arm with the bigger pool
+
+The control Finding 9 asked for. `single_agent` re-run with the same ranker the
+multi-agent arm had (`flat:llm20@embed:qwen2.5:7b-instruct`), n=500, strict
+replay of `corpus_snapshot_b500_flat_0921` (10,310 hits, 0 corpus misses, so
+both arms read the same documents). Run `run_1790117750_8fda4edb2d21`.
+
+Arms ran in separate runs, so all three are re-scored against the **union** of
+both runs' qrels before pairing — `scripts/cross_run_compare.py`. Without that,
+the control's narrower judged pool gives it a smaller IDCG and the comparison
+reads a pooling difference as an effect.
+
+| Arm | ranker | nDCG@1 | nDCG@3 | Recall@5 | MRR |
+|---|---|---:|---:|---:|---:|
+| single_agent | `flat:embed` | 0.460 | 0.479 | 0.513 | 0.550 |
+| single_agent | `flat:llm20@embed` | 0.441 | 0.467 | 0.478 | 0.528 |
+| marag_llm | `flat:llm20@embed` | **0.509** | **0.511** | **0.525** | **0.575** |
+
+- **The cascade does nothing for the baseline.** −0.012 nDCG@3 (CI spans zero),
+  −0.035 recall@5 (CI excludes zero, p_holm 0.027). 20 calls per question for
+  nothing. Reading candidates pays only when the pool holds something to
+  promote.
+- **Like for like** (both arms `flat:llm20@embed`, one corpus, one judge, one
+  cost): marag_llm leads on **every** metric — nDCG@1 +0.068 [+0.039, +0.097],
+  nDCG@3 +0.044 [+0.020, +0.069], recall@5 +0.047 [+0.017, +0.076], MRR +0.047
+  [+0.023, +0.071]; W/T/L 93/342/65 at rank 3. All p_holm ≤ 0.002.
+- **Recall moves for the first time.** Every earlier multi-agent result was an
+  ordering effect on an identical candidate set. Here the union's extra
+  documents reach the top-5.
+
+The advantage was created at fetch time by the union, held in the pool through
+every measurement in Findings 1–8, and destroyed at ranking time by the tier
+prior. Both had to be fixed before either was visible.
+
+Caveats: separate runs rather than one three-arm run (the corpus is identical
+by construction, not by design); same `llama3.1` judge; the baseline is still
+a strong competitor at a third of the latency.
+
+---
+
+## Finding 11 — Finding 10 was a cross-run artifact; frozen and in one pass, the arms are identical
+
+`run_1790126271_8fda4edb2d21` — 500 questions, `flat`, `llm20@embed:qwen2.5:7b-instruct`
+on **all three arms**, strict replay of `corpus_snapshot_b500_flat_0921`, clock
+pinned to the snapshot stamp (33,454 document reads from disk, 0 corpus misses).
+
+| metric | marag_llm | single_agent | Δ (95% CI) | p_holm | W/T/L |
+|---|---:|---:|---:|---:|---:|
+| nDCG@1 | 0.462 | 0.445 | +0.017 [−0.001, +0.035] | 0.134 | 17/475/8 |
+| nDCG@3 | 0.496 | 0.490 | +0.006 [−0.009, +0.021] | 0.864 | 43/410/47 |
+| Recall@5 | 0.551 | 0.532 | +0.018 [−0.001, +0.038] | 0.120 | 46/426/28 |
+| MRR | 0.536 | 0.528 | +0.008 [−0.004, +0.022] | 0.415 | 22/457/21 |
+| Faithfulness | 0.900 | 0.897 | +0.003 | 0.532 | 72/375/53 |
+
+**Null on everything.** Finding 10's +0.044 is withdrawn.
+
+Why it was wrong: the marag arm came from `run_1789976732`, which ran in
+**record** mode against live endpoints; the control came from a strict replay.
+A snapshot stores one body per request key and the live Reddit feed answers the
+same key differently over the hours a 500-question run takes, so the two arms
+did not see one corpus. Measured: replaying `run_1789976732` reproduces its
+marag pools on **1 of 12** questions; two replays of one config agree **12/12**
+and are byte-identical.
+
+Ruled out on the way: grade-cache key collisions (7 aliasing keys in 3,630) and
+clock drift (pinned and unpinned replays are identical). The clock fix landed
+anyway (`temporal.now()`, `MARAG_NOW`, snapshot `_meta.json`) — real drift,
+wrong suspect.
+
+**Rules this leaves:**
+1. Arms compared against each other must run in **one pass**. A run is only as
+   frozen as its least frozen arm.
+2. Only `replay`/`strict` runs are reproducible. Every `record` run in this
+   project — including the headline clean 500 (`run_1789703506`) — is
+   internally valid and externally irreproducible.
+3. Score cross-run comparisons with `scripts/cross_run_compare.py` if you must
+   make one, but prefer not to make one.
+
+What survives: the tier prior costs ~0.23 for every arm (Finding 9), the
+cascade improves ranking for whichever arm carries it, and every arm now sits
+near 0.49 nDCG@3 instead of 0.30 — with the arms still indistinguishable, which
+is the same parity Findings 4–8 report at a lower level.
+
+---
+
+## Finding 12 — The retry cannot fire, and an accidental demonstration of the pooling caveat
+
+`run_1790129244_8fda4edb2d21` — A4 (`marag_llm_retry`) alone, 500 questions,
+flat + cascade, strict replay, 0 corpus misses.
+
+**The retry is structurally unreachable.** Fires at Evaluator quality < 0.15;
+the minimum over 500 questions is exactly **0.300**. `EvaluatorAgent`
+(multiagent_rag_v3.py:1620-1646) raises the score through floors: verified
+advisory source or tier-1 hit -> >= 0.30, community posts -> >= 0.50, release
+notes -> >= 0.50, both -> >= 0.65. Any recognized document floors the score at
+twice the threshold. Retry can only fire on an empty fetch.
+
+Result: **500/500 identical top-4 lists and 500/500 identical answers** to
+`marag_llm`, 0 retries. A4 is not a measured null — it is unmeasurable in this
+configuration. Fixing it means raising the threshold or removing the floors,
+and the floors are the retired bespoke score, so the two are entangled.
+
+Bug found on the way: line 1643 sets `quality = max(quality, 0.40)` for
+community posts and line 1644 immediately overwrites it with
+`max(quality, 0.5)`. The 0.40 floor is dead code.
+
+**The demonstration.** A4 ran alone so it judged only its own candidates;
+`marag_llm` was judged in a 3-arm pool. Same documents, same order, every
+question:
+
+| scored as | nDCG@3 | Recall@5 |
+|---|---:|---:|
+| each run's own report | 0.518 vs 0.496 | 0.606 vs 0.551 |
+| pooled over both runs' qrels | **0.000 difference, 500/500** | **0.000, 500/500** |
+
+A +0.055 recall gap out of nothing but pool width — larger than every
+architectural difference in this project. Use `scripts/cross_run_compare.py`,
+or better, one run.
+
+**Fixed, 2026-09-23** (`98fee98`, `f66c639`). The signal now reads the
+term-overlap score *before* any floor (returned as `relevance`); the floored
+`quality` is still what is reported as `self_quality`, so past runs stay
+comparable. The threshold is unchanged at 0.15 (`MARAG_RETRY_THRESHOLD`). The
+retry itself is ManagerAgent's loop — re-rewrite with an avoid list, up to
+`MARAG_MAX_ROUNDS` (2) rounds — and the harness's `marag_retry` arm now calls
+that loop instead of a stale copy that widened with a fixed string. The dead
+0.40 floor is gone (`4d1e64b`).
+
+Recomputed offline over A4's own top-4 (no model calls), the retry would fire
+on **13%** of the 500 questions at 0.15 (8% at 0.10, 31% at 0.30), spread
+across every category. Whether those retries change anything is **not yet
+measured**: a one-pass `marag_llm` vs `marag_llm_retry` run on a fresh copy of
+the b500 snapshot is queued behind the b1000 baseline
+(`results/b500_retry_signal.log`). Until it reports, A4 is "reachable,
+unmeasured", not "null".
+
+---
+
 ## Confounds, and what has been done about them
 
 | Confound | Status |

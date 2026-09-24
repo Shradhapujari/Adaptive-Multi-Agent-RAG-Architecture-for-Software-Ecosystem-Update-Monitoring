@@ -20,6 +20,8 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import answer_agent  # noqa: E402
+import guardrail  # noqa: E402
+from eval_harness.benchmarks import is_abstention  # noqa: E402
 from answer_agent import (  # noqa: E402
     build_cited_prompt, collect_evidence, deterministic_paragraph, present_answer,
 )
@@ -119,7 +121,10 @@ def test_prompt_names_the_bracket_rule_and_only_listed_sources():
     assert "square brackets" in prompt
     assert "ONLY the sources" in prompt
     assert "Time frame asked about: Aug 31, 2026" in prompt
-    assert "[Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28]" in prompt
+    # Sources are cited by a short tag and named by their full label on the
+    # same line: the model copies [S1]; expand_tags restores the label.
+    assert "[S1]" in prompt
+    assert "Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28" in prompt
 
 
 class _StubClient:
@@ -203,6 +208,31 @@ def test_grounded_model_output_passes_the_guardrail(monkeypatch):
     _no_env(monkeypatch)
     _patch_client(monkeypatch, _StubClient(
         "Django 5.2.1 is a routine bugfix release [Release Notes - Django v5.2.1, 2026-08-20]."))
+    out = present_answer("q", RESULTS, model_spec="stub:model")
+    assert out.mode == "llm" and out.note == ""
+
+
+def test_an_answer_that_points_at_the_sources_falls_back(monkeypatch):
+    # llama3.1's real output for "Latest Django release notes": it invents
+    # nothing and cites correctly, so every other check passes it, and it tells
+    # the reader only what they already asked. The fallback reports the release
+    # and quotes its note, which is the answer that was asked for.
+    _no_env(monkeypatch)
+    _patch_client(monkeypatch, _StubClient(
+        "The latest Django release notes are available in the "
+        "[Release Notes - Django v5.2.1, 2026-08-20] source."))
+    out = present_answer("q", RESULTS, model_spec="stub:model")
+    assert out.mode == "rule-based"
+    assert "deflected" in out.note
+    assert "available in" not in out.text
+
+
+def test_a_version_the_fix_ships_in_is_not_a_deflection(monkeypatch):
+    # Same construction, different object: this one points at a version, which
+    # is an answer. The deflection check must not cost it the LLM path.
+    _no_env(monkeypatch)
+    _patch_client(monkeypatch, _StubClient(
+        "The fix is available in Django 5.2.1 [Release Notes - Django v5.2.1, 2026-08-20]."))
     out = present_answer("q", RESULTS, model_spec="stub:model")
     assert out.mode == "llm" and out.note == ""
 
@@ -309,3 +339,175 @@ def test_a_reddit_row_is_never_labelled_as_an_advisory_feed():
                                     "date": "2026-08-25", "url": ""}]})
     assert ev[0].label.startswith("Security Discussion")
     assert "CVE Feed" not in ev[0].label
+
+
+# ── the two guards wrapped around the presenter ──────────────────────────
+
+def test_a_credential_in_the_evidence_is_not_read_back_to_the_user(monkeypatch):
+    """`check()` cannot catch this one: a key that was in a retrieved row is
+    supported by the sources, which is the only question check() asks."""
+    monkeypatch.setattr(answer_agent, "_present",
+                        lambda *a, **k: answer_agent.PresentedAnswer(
+                            "The fix rotates AKIAIOSFODNN7EXAMPLE [R1].", "llm", "m"))
+    out = present_answer("q", RESULTS)
+    assert out.text == guardrail.LEAK_REFUSAL
+    assert "leak scan: aws_key" in out.note
+
+
+def test_the_rule_based_fallback_is_scanned_too(monkeypatch):
+    """The fallback is composed from the same rows by code, so falling back to
+    it is not an escape from a leak — it is the same leak, written by us."""
+    monkeypatch.setattr(answer_agent, "_present",
+                        lambda *a, **k: answer_agent.PresentedAnswer(
+                            "Reported for SSN 123-45-6789 [R1].", "rule-based"))
+    assert present_answer("q", RESULTS).text == guardrail.LEAK_REFUSAL
+
+
+def test_a_clean_answer_passes_through_unchanged(monkeypatch):
+    monkeypatch.setattr(answer_agent, "_present",
+                        lambda *a, **k: answer_agent.PresentedAnswer(
+                            "Fedora 44 shipped on 2026-09-01 [R1].", "llm", "m", "note"))
+    out = present_answer("q", RESULTS)
+    assert out.text == "Fedora 44 shipped on 2026-09-01 [R1]." and out.note == "note"
+
+
+class _Grounded:
+    def __init__(self, vendors):
+        self.vendors = vendors
+
+
+def test_an_unresolvable_product_declines_instead_of_answering(monkeypatch):
+    monkeypatch.setattr(answer_agent.vendor, "catalog_is_full", lambda *a: True)
+    out = present_answer("Is Blorptastic 9 out?",
+                         dict(RESULTS, grounding=_Grounded([])))
+    assert "no matching vendor" in out.text.lower()
+    assert "Blorptastic" in out.text
+    assert is_abstention(out.text, strong_only=True)
+
+
+@pytest.mark.parametrize("query", [
+    "Did anything break after the Tuesday patch?",
+    "What broke in September?",
+    "Any issues reported by Reddit users this week?",
+    "Is Blorptastic out?",
+])
+def test_an_ordinary_capitalised_word_does_not_decline_the_question(monkeypatch, query):
+    """The gate's input is `product_terms`, whose fallback rule takes any
+    capitalised non-initial word as a product name. That is right for a fetch
+    -- the cost of being wrong is one extra search phrasing -- and wrong for a
+    refusal. All three of these were declined outright: "No matching vendor for
+    'Tuesday'". A version number is what separates a product the catalog does
+    not know from a weekday.
+    """
+    monkeypatch.setattr(answer_agent.vendor, "catalog_is_full", lambda *a: True)
+    out = present_answer(query, dict(RESULTS, grounding=_Grounded([])))
+    assert "no matching vendor" not in out.text.lower()
+
+
+def test_naming_no_product_at_all_is_answered_normally(monkeypatch):
+    """Naming nothing and naming something unrecognisable are different
+    failures. Only the second declines — 'what shipped this week?' is a
+    question this system exists to answer."""
+    monkeypatch.setattr(answer_agent.vendor, "catalog_is_full", lambda *a: True)
+    out = present_answer("what are the 3 latest updates?",
+                         dict(RESULTS, grounding=_Grounded([])))
+    assert "no matching vendor" not in out.text.lower()
+
+
+def test_a_resolved_vendor_is_answered_normally(monkeypatch):
+    monkeypatch.setattr(answer_agent.vendor, "catalog_is_full", lambda *a: True)
+    out = present_answer("Is Blorptastic 9 out?",
+                         dict(RESULTS, grounding=_Grounded(["blorptastic"])))
+    assert "no matching vendor" not in out.text.lower()
+
+
+def test_the_offline_fallback_catalog_never_declines(monkeypatch):
+    """74 bundled names against the catalog's 14k: on a host with no catalog,
+    abstaining on 'unresolved' would decline nearly every question."""
+    monkeypatch.setattr(answer_agent.vendor, "catalog_is_full", lambda *a: False)
+    out = present_answer("Is Blorptastic 9 out?",
+                         dict(RESULTS, grounding=_Grounded([])))
+    assert "no matching vendor" not in out.text.lower()
+
+
+def test_a_question_with_no_grounding_step_is_never_gated():
+    assert answer_agent.unresolved_products("Is Blorptastic 9 out?", RESULTS) == []
+
+
+# ── Reddit's own answer, in one sentence ─────────────────────────────────
+# The pipeline fetches the retrieved thread's highest-upvoted comment
+# (`yesno.top_comment`) and it used to go nowhere: the presenter never saw it,
+# so the answer was composed off release rows while the community's own answer
+# sat unused in `results`.
+
+_WITH_TOP = dict(RESULTS, thread={"title": "Did the Fedora 44 update eat grub?",
+                                  "subreddit": "Fedora",
+                                  "url": "https://example.invalid/t"},
+                 top_comment={"body": "Yes, reinstall grub2-efi and regenerate "
+                                      "the config, it comes back.",
+                              "score": 214, "author": "someuser"})
+
+
+def test_top_voted_comment_is_cited_first():
+    ev = collect_evidence(_WITH_TOP)
+    assert ev[0].kind == "answer"
+    assert ev[0].label == "Top comment - r/Fedora, 214 upvotes"
+    two = collect_evidence(dict(_WITH_TOP,
+                                top_comment={**_WITH_TOP["top_comment"], "score": 2}))
+    assert two[0].label.endswith("2 upvotes")
+    assert "reinstall grub2-efi" in ev[0].detail
+
+
+def test_community_posts_are_ordered_by_upvotes():
+    results = {"community": [
+        {"title": "quiet one", "subreddit": "linux", "score": 3},
+        {"title": "the one everyone agreed with", "subreddit": "linux", "score": 99},
+    ]}
+    assert "everyone agreed" in collect_evidence(results, per_kind=1)[0].title
+
+
+def test_rule_based_answer_is_one_sentence_off_the_top_comment():
+    text = deterministic_paragraph("Did the Fedora 44 update eat grub?",
+                                   collect_evidence(_WITH_TOP))
+    assert "reinstall grub2-efi" in text
+    assert "[Top comment - r/Fedora, 214 upvotes]" in text
+    # One sentence of prose: the period inside the quoted comment is the
+    # commenter's, not a second sentence, so the trim must leave it alone.
+    assert text.endswith("].")
+    assert answer_agent._one_sentence(text) == text
+
+
+def test_model_answer_is_trimmed_to_one_sentence(monkeypatch):
+    _no_env(monkeypatch)
+    long = ("Yes, reinstalling grub2-efi fixes it [Top comment - r/Fedora, 214 "
+            "upvotes]. It has been reported by others too. Check elsewhere as well.")
+    monkeypatch.setattr(answer_agent, "_one_sentence",
+                        answer_agent._one_sentence)  # not stubbed: exercise it
+    assert answer_agent._one_sentence(long).endswith("214 upvotes].")
+    # A version number mid-sentence must not read as a sentence end.
+    assert answer_agent._one_sentence("Linux v6.18.21 shipped [R1].") == \
+        "Linux v6.18.21 shipped [R1]."
+    # A citation after the closing period belongs to the sentence before it --
+    # cutting there is what made the model's answer read as uncited.
+    trailing = "No printing issues are reported. [Top comment - r/sysadmin, 1 upvote]"
+    assert answer_agent._one_sentence(trailing) == trailing
+
+
+def test_top_comment_below_the_floor_does_not_become_the_answer():
+    """A 1-point comment is its author's own upvote and nobody else's.
+
+    The r/Fedora case: top comment "What?" at 1 point, and the answer written
+    off it asserted the update had deleted people's kernels.
+    """
+    thin = dict(_WITH_TOP, top_comment={"body": "What?", "score": 1,
+                                        "author": "someuser"})
+    ev = collect_evidence(thin)
+    assert not [e for e in ev if e.kind == "answer"]
+    # The rest of the evidence still stands, so the question is still answered.
+    assert ev and "What?" not in deterministic_paragraph("q", ev)
+
+
+def test_top_comment_at_the_floor_is_the_answer():
+    at = dict(_WITH_TOP, top_comment={**_WITH_TOP["top_comment"],
+                                      "score": answer_agent.TOP_COMMENT_FLOOR})
+    assert collect_evidence(at)[0].kind == "answer"

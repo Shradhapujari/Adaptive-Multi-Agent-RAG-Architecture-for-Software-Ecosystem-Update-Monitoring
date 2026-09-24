@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Dict, List, Optional
 
@@ -46,24 +46,108 @@ __all__ = [
     "collect_evidence",
     "build_cited_prompt",
     "deterministic_paragraph",
+    "_one_sentence",
     "present_answer",
     "CITATION_RULE",
+    "TOP_COMMENT_FLOOR",
 ]
 
+# How many upvotes a thread's top comment needs before the answer is written
+# off it. Reddit gives every comment 1 point the moment it is posted -- the
+# commenter's own -- so a 1-point "top comment" is the *only* comment, or the
+# one nobody voted on either way, and it is not a community answer. 2 means at
+# least one other reader agreed with it.
+#
+# Measured against the case that prompted this: r/Fedora "fedora update", whose
+# top comment is the single word "What?" at 1 point, led the presenter to state
+# that the update deleted people's kernels -- while the stance tally under it
+# read No (4 users). Below the floor the comment is still shown in the details
+# panel, with its score; it just does not get to be the answer.
+TOP_COMMENT_FLOOR = 2
+
+def cite_tag(i: int) -> str:
+    """The short handle source `i` is cited by in the prompt."""
+    return f"S{i + 1}"
+
+
+# A citation the model wrote: one tag, several, or a range. llama3.1 emits all
+# three -- "[S1]", "[S2, S3, S4]", "[S1-S3]" -- and a form that does not expand
+# reaches the guardrail as an unknown citation, which throws the answer away.
+_TAG_BLOCK_RE = re.compile(
+    r"\[\s*(S\s*\d{1,3}(?:\s*(?:,|;|/|&|and|-|–|—|to)\s*S?\s*\d{1,3})*)\s*\]", re.I)
+_TAG_ITEM_RE = re.compile(
+    r"S\s*(\d{1,3})\s*(?:(?:-|–|—|to)\s*S?\s*(\d{1,3}))?", re.I)
+
+
+def _tag_indices(inner: str):
+    """The 1-based source numbers a bracket block names, ranges expanded."""
+    out = []
+    for m in _TAG_ITEM_RE.finditer(inner):
+        a = int(m.group(1))
+        b = m.group(2)
+        out.extend(range(a, int(b) + 1) if b else [a])
+    return out
+
+
+def expand_tags(text: str, evidence) -> str:
+    """Put the full label back wherever the model cited a short tag.
+
+    The model is asked for [S1] because it can copy that reliably; every reader
+    downstream -- the guardrail, the UI, the stored run -- wants the label it
+    stands for. A block naming a source that does not exist is left exactly as
+    written, so it is caught as an unknown citation rather than silently
+    dropped.
+    """
+    ev = list(evidence or ())
+
+    def sub(m):
+        idx = _tag_indices(m.group(1))
+        if not idx or any(not (1 <= i <= len(ev)) for i in idx):
+            return m.group(0)
+        seen, labels = set(), []
+        for i in idx:
+            if i not in seen:
+                seen.add(i)
+                labels.append(f"[{ev[i - 1].label}]")
+        return " ".join(labels)
+    return _TAG_BLOCK_RE.sub(sub, text or "")
+
+
 CITATION_RULE = (
-    "Write ONE flowing paragraph of plain English (3-6 sentences) that a "
-    "developer could read aloud. After every factual claim, cite the source it "
-    "came from in square brackets exactly as it is labelled below, e.g. "
-    "[Release Notes - Linux v6.18.21, 2026-08-28]. Cite only from the list. "
+    "Answer in ONE sentence of plain English \u2014 no more. If a [Top comment \u2026] "
+    "source is listed, it is the Reddit community's own highest-upvoted answer "
+    "to this question: base the sentence on what it says and cite it. "
+    "Otherwise use the highest-upvoted community post, or the release notes "
+    "when no community answer is listed. Cite the source it came from by "
+    "its short tag in square brackets, e.g. [S1] or [S3] \u2014 copy the tag "
+    "exactly and put nothing else inside the brackets. Cite only tags that "
+    "appear in the list. "
     "Do not invent versions, dates or CVE numbers. If the sources do not "
-    "answer the question, say so plainly in one sentence.\n"
+    "answer the question, say so plainly in that one sentence.\n"
     "The sources were retrieved for this question and each carries its own "
     "date and, where applicable, a SECURITY marker: a dated source inside the "
     "time frame IS an answer to a question about that time frame, so report it "
     "rather than saying nothing was found.\n"
-    "Output the paragraph only — no preamble, no heading, no surrounding "
+    "Output the one sentence only \u2014 no preamble, no heading, no surrounding "
     "quotation marks, no closing advice about checking elsewhere."
 )
+
+
+# A sentence ends where punctuation is followed by a capitalised new start;
+# "v6.18.21" and "2026-08-28]" do not qualify, so a cited version or date in
+# mid-sentence is not mistaken for the end of one.
+#
+# "[" is deliberately NOT a sentence opener. llama3.1 puts the citation after
+# the closing period -- "...after the latest Windows 11 update. [Top comment -
+# r/sysadmin, 1 upvote]" -- and cutting there threw the only citation away, so
+# the guardrail rejected the answer as uncited and the rule-based paragraph
+# replaced a perfectly good model sentence.
+_SENT_END = re.compile(r"(?<=[.!?])\s+(?=[\"\u201c\'(]?[A-Z])")
+
+
+def _one_sentence(text: str) -> str:
+    """The first sentence, citations intact. The rule says one; models drift."""
+    return _SENT_END.split((text or "").strip(), 1)[0].strip()
 
 
 @dataclass
@@ -71,7 +155,7 @@ class Evidence:
     """One retrieved item, in the shape the presenter cites it by."""
 
     label: str            # what appears inside the brackets
-    kind: str             # release | community | cve
+    kind: str             # answer | release | advisory | community | cve
     title: str
     detail: str = ""
     url: str = ""
@@ -79,7 +163,7 @@ class Evidence:
     security: bool = False
     sentiment: str = ""
 
-    def line(self) -> str:
+    def line(self, tag: str = "") -> str:
         """One source line for the prompt: the citation label, then the facts.
 
         The date and the SECURITY marker are repeated in the body because a
@@ -103,6 +187,12 @@ class Evidence:
         body = f"{self.title}{meta}"
         if self.detail:
             body += f": {self.detail}"
+        if tag:
+            # Cited by a short tag, named by the full label. Asking an 8B model
+            # to reproduce "Release Notes - windows v10.0.28000, 2026-09-08"
+            # character for character is where the citations were being lost;
+            # `expand_tags` puts the label back before anything sees the answer.
+            return f"- [{tag}] {self.label} — {body}"
         return f"- [{self.label}] {body}"
 
 
@@ -133,6 +223,27 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
     `community`, `cve` lists), so nothing upstream has to change.
     """
     ev: List[Evidence] = []
+
+    # The thread's highest-upvoted comment is the community's own answer to the
+    # question, chosen by the people who read it. It is cited first so the
+    # presenter leads with it rather than with a release row -- but only once
+    # somebody other than its author has voted for it (`TOP_COMMENT_FLOOR`).
+    tc = results.get("top_comment") or {}
+    thread = results.get("thread") or {}
+    votes = int(tc.get("score") or 0)
+    if (tc.get("body") or "").strip() and votes >= TOP_COMMENT_FLOOR:
+        sub = thread.get("subreddit", "")
+        ev.append(Evidence(
+            # "1 upvotes" is what a model silently corrects to "1 upvote",
+            # and the guardrail matches the label verbatim -- so the answer
+            # came back uncited over a plural.
+            label=("Top comment" + (f" - r/{sub}" if sub else "")
+                   + f", {votes} upvote" + ("" if votes == 1 else "s")),
+            kind="answer",
+            title=_clean(thread.get("title", ""), 120) or "Reddit thread",
+            detail=_clean(tc.get("body", ""), 400),
+            url=thread.get("url", ""), date=_iso(thread.get("created_utc", "")),
+        ))
 
     for r in (results.get("releases") or [])[:per_kind]:
         # An advisory row is named by its CVE id, not by its versionNumber:
@@ -165,7 +276,11 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
             url=c.get("url", ""), date=date, security=True,
         ))
 
-    for p in (results.get("community") or [])[:per_kind]:
+    # Upvotes are the community's ranking of its own posts; the feed's order
+    # is not. Highest first, so `per_kind` keeps the posts people agreed with.
+    community = sorted(results.get("community") or [],
+                       key=lambda p: int(p.get("score") or 0), reverse=True)
+    for p in community[:per_kind]:
         date = _iso(p.get("date"))
         sub = p.get("subreddit", "")
         label = "Community" + (f" - r/{sub}" if sub else "") + (f", {date}" if date else "")
@@ -185,7 +300,8 @@ def build_cited_prompt(query: str, evidence: List[Evidence],
     except Exception:  # harness not importable (bare demo deploy)
         base = ("You are a software-update assistant. Answer the question "
                 "using ONLY the sources below.")
-    ctx = "\n".join(e.line() for e in evidence) or "No documents retrieved."
+    ctx = "\n".join(e.line(cite_tag(i)) for i, e in enumerate(evidence)) \
+        or "No documents retrieved."
     dated = f"\n\nTime frame asked about: {window_note}" if window_note else ""
     return (f"{rules_block()}{base}\n{CITATION_RULE}\n\nQuestion: {query}{dated}\n\n"
             f"Sources:\n{ctx}\n\nAnswer:")
@@ -227,6 +343,11 @@ def deterministic_paragraph(query: str, evidence: List[Evidence],
         return ("Nothing in the release feeds, the CVE feed or the community "
                 "feed matched this question, so there is no grounded answer to "
                 "give — try naming a specific product or version.")
+
+    top = next((e for e in evidence if e.kind == "answer"), None)
+    if top:
+        return (f"The top-voted Reddit answer to this question says "
+                f"\u201c{_clean(top.detail, 300)}\u201d [{top.label}].")
 
     rel = [e for e in evidence if e.kind == "release"]
     sec = [e for e in rel if e.security]
@@ -312,8 +433,94 @@ def _resolve_spec(explicit: Optional[str]) -> Optional[str]:
             or _selected_spec())
 
 
+# Worded around "no matching vendor", which is already a strong abstention
+# marker: what is substituted has to read as a declined answer, not a claim.
+VENDOR_ABSTENTION = (
+    "No matching vendor for {terms} in the product catalog. Rather than answer "
+    "from sources that are about something else, I am declining: check the "
+    "spelling, or name the vendor alongside the product."
+)
+
+
+# "Blorptastic 9", "Blorptastic v9.2" — a capitalised word carrying a version
+# is the evidence that the word names a product. Capitalisation alone is not:
+# see the docstring below.
+_VERSIONED = r"\b{}\s+v?\d"
+
+
+def unresolved_products(query: str, results: Dict) -> List[str]:
+    """Product-shaped words in `query` that the vendor catalog does not know.
+
+    Four conditions, and all four are needed to avoid declining questions
+    that are perfectly answerable:
+
+    * the grounding step ran and resolved no vendor at all — without it there
+      is nothing to say the question was about a product;
+    * the catalog in use is the real one, not the offline fallback;
+    * the leftover word is not one of the products `fetch_union` knows by
+      name, because a known product the catalog missed is a catalog problem,
+      not an unresolvable vendor;
+    * the word carries a version number.
+
+    That last one is what keeps this from declining ordinary questions.
+    `product_terms` is a *fetch* heuristic: its fallback rule takes any
+    capitalised non-initial word as a product name, which is right when the
+    cost of being wrong is one extra search phrasing. Refusing to answer
+    inverts that cost, and the rule is wrong often enough to matter —
+    "Did anything break after the Tuesday patch?" yielded "Tuesday",
+    "What broke in September?" yielded "September", and both were declined
+    outright. Weekdays, months and ordinary proper nouns do not appear with a
+    version number after them; unrecognised products, which is the case this
+    gate exists for, almost always do.
+
+    So "Is Blorptastic 9 out?" still declines and "Is Blorptastic out?" no
+    longer does. That is the intended direction: answering a question about an
+    unknown product from whatever the sources returned is a smaller failure
+    than refusing a question the system can answer.
+
+    A question that names no product — "what are the 3 latest updates?" —
+    yields nothing here either. Naming nothing and naming something
+    unrecognisable are different failures; only the second declines.
+    """
+    g = results.get("grounding")
+    if g is None or getattr(g, "vendors", None):
+        return []
+    if not vendor.catalog_is_full():
+        return []
+    from fetch_union import _KNOWN_PRODUCTS, product_terms
+    return [t for t in product_terms(query)
+            if t.lower() not in _KNOWN_PRODUCTS
+            and re.search(_VERSIONED.format(re.escape(t)), query, re.I)]
+
+
 def present_answer(query: str, results: Dict, model_spec: Optional[str] = None,
                    window_note: str = "", per_kind: int = 4) -> PresentedAnswer:
+    """`_present`, with a vendor gate before it and a leak scan after it.
+
+    The scan is here and not inside `_present` because it has to cover the
+    rule-based fallback too. `check()` cannot do this job: a credential that
+    was in a retrieved row is *supported by the sources*, which is exactly what
+    check() is asking, so it passes — and the fallback paragraph is composed
+    from those same rows by code, so falling back leaks just as readily.
+    """
+    unknown = unresolved_products(query, results)
+    if unknown:
+        terms = _join([f"\u201c{t}\u201d" for t in unknown])
+        return PresentedAnswer(VENDOR_ABSTENTION.format(terms=terms),
+                               "rule-based", note="vendor unresolved",
+                               evidence=collect_evidence(results, per_kind=per_kind))
+
+    out = _present(query, results, model_spec, window_note, per_kind)
+    text, hits = guardrail.scrub(out.text)
+    if not hits:
+        return out
+    note = "leak scan: " + ", ".join(hits)
+    return replace(out, text=text,
+                   note=f"{out.note}; {note}" if out.note else note)
+
+
+def _present(query: str, results: Dict, model_spec: Optional[str] = None,
+             window_note: str = "", per_kind: int = 4) -> PresentedAnswer:
     """Turn a pipeline result into a readable, cited paragraph.
 
     Tries the LLM presenter first; falls back to the rule-based paragraph on
@@ -330,8 +537,11 @@ def present_answer(query: str, results: Dict, model_spec: Optional[str] = None,
             if client.available():
                 text = client.generate(
                     build_cited_prompt(query, evidence, window_note),
+                    # 150 truncated long enumerations mid-citation: the
+                    # unclosed "[" never parses as a citation, so a real answer
+                    # came back "uncited" (stored run #50).
                     temperature=0.0, max_tokens=400)
-                text = _strip_preamble(text)
+                text = expand_tags(_one_sentence(_strip_preamble(text)), evidence)
                 if text:
                     # The model was given these sources and nothing else, so
                     # anything it states outside them is invented. Failing the
@@ -339,7 +549,7 @@ def present_answer(query: str, results: Dict, model_spec: Optional[str] = None,
                     # from the same evidence by code, so it cannot fail -- and
                     # not to a refusal, which would throw away a real answer
                     # over one bad span.
-                    verdict = guardrail.check(text, evidence)
+                    verdict = guardrail.check(text, evidence, query)
                     if verdict.ok:
                         return PresentedAnswer(text, "llm", client.spec,
                                                evidence=evidence)

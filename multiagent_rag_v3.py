@@ -10,6 +10,7 @@ Run:
 """
 
 import json, os, re, time, sys, urllib.request
+import tokens as _tokens
 from pathlib import Path
 from agent_rules import rules_block
 
@@ -750,6 +751,15 @@ SUBREDDIT_VENDOR_MAP = {
     "nginx": "nginx",
 }
 
+# How many products one question may resolve to. RetrieverAgent has always
+# looped over `vendors[:2]` and its comment has always said "max 2 vendors",
+# but extract_vendor returned `found[:1]`, so the second slot could never be
+# filled: "Which is more stable, Teams or Zoom?" put both products in `found`
+# -- both are in the catalog -- and then searched Teams only. 1 restores the
+# single-vendor behaviour every run before 2026-09-23 measured.
+MAX_VENDORS = max(1, int(os.environ.get("MARAG_MAX_VENDORS", "2")))
+
+
 def extract_vendor(query: str, _subreddit_hint: str = "") -> list:
     """
     Extract vendor/product names from a query.
@@ -862,8 +872,8 @@ def extract_vendor(query: str, _subreddit_hint: str = "") -> list:
         if sub_vendor:
             found.append(sub_vendor)
 
-        # Score each vendor by how strongly it matches the query
-    # and return only the single best match
+        # Score each vendor by how strongly it matches the query,
+    # best first, and return at most MAX_VENDORS of them.
     found = list(dict.fromkeys(found))
     if len(found) <= 1:
         return found
@@ -882,7 +892,7 @@ def extract_vendor(query: str, _subreddit_hint: str = "") -> list:
         return 2
 
     found.sort(key=vendor_score)
-    return found[:1]
+    return found[:MAX_VENDORS]
 
 def extract_date_from_query(query: str):
     """Extract a target date from a query.
@@ -892,8 +902,13 @@ def extract_date_from_query(query: str):
     """
     import re
     from datetime import datetime, timedelta
+    import temporal as _temporal
     q = query.lower()
-    today = datetime.now()
+    # Not datetime.now(): a question carrying "latest" or "last week" turns
+    # into a date filter here, and that filter decides what is fetched. Reading
+    # the wall clock made a replayed snapshot return different pools on
+    # different days -- see temporal.now().
+    today = _temporal.now()
 
     # ── Relative date tokens ────────────────────────────────────────────
     RELATIVE_TOKENS = {
@@ -1156,7 +1171,51 @@ def fetch_vendor_reddit(vendor: str, query: str = "", limit: int = 10) -> list:
         return []
 
 
+# Subreddits searched for a detected vendor. Module scope so the Streamlit
+# app can search the same ones the terminal trace does -- the two views of
+# a question disagreed because only one of them looked here.
+VENDOR_SUBREDDITS = {
+            "linux":     ["linux","linuxquestions","Fedora","Ubuntu","debian"],
+            "ollama":    ["ollama","LocalLLaMA","openclaw"],
+            "llama":     ["LocalLLaMA","ollama","MachineLearning"],
+            "gpt":       ["OpenAI","ChatGPT","LocalLLaMA"],
+            "claude":    ["ClaudeAI","Anthropic","LocalLLaMA"],
+            "gemini":    ["Bard","GoogleGeminiAI","LocalLLaMA"],
+            "mistral":   ["LocalLLaMA","MistralAI"],
+            "deepseek":  ["LocalLLaMA","DeepSeek"],
+            "qwen":      ["LocalLLaMA"],
+            "grok":      ["grok","LocalLLaMA"],
+            "comfyui":   ["comfyui"],
+            "openclaw":  ["openclaw"],
+            "Ubiquiti":  ["Ubiquiti"],
+            "ios":       ["applehelp","ios","apple"],
+            "macos":     ["MacOS","applehelp"],
+            "windows":   ["windows","techsupport"],
+            "chrome":    ["chrome","chromium"],
+            "homeassistant": ["homeassistant"],
+}
+
+
 RANK_QUERY_CHOICES = ("original", "rewritten")
+RANK_TIERS_CHOICES = ("tiered", "flat")
+
+
+def resolve_rank_tiers(mode: str = None) -> str:
+    """Whether ranking respects the verified-before-community tier prior.
+
+    `tiered` is what every run before 2026-09-20 did. `flat` ranks the pool as
+    one list and is the default since 2026-09-22: on the same frozen snapshot
+    it is +0.23 nDCG@3 for every arm (FINDINGS.md, Finding 9) at no extra
+    model call. `MARAG_RANK_TIERS=tiered` is kept as the ablation arm. Raises
+    on an unrecognised value for the same reason resolve_rank_query does.
+    """
+    if mode is None:
+        mode = os.environ.get("MARAG_RANK_TIERS", "flat")
+    mode = str(mode).strip().lower()
+    if mode not in RANK_TIERS_CHOICES:
+        raise ValueError(
+            f"MARAG_RANK_TIERS={mode!r} (expected {'|'.join(RANK_TIERS_CHOICES)})")
+    return mode
 
 
 def resolve_rank_query(original_query: str, rewritten_query: str,
@@ -1257,6 +1316,7 @@ def call_llama(prompt: str, model: str = "llama3.1") -> str:
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             result = json.loads(resp.read())
+            _tokens.record(result, "rewrite")
             return result.get("response", "").strip()
     except Exception as e:
         return f"[Ollama error: {e}]"
@@ -1268,7 +1328,15 @@ def call_llama(prompt: str, model: str = "llama3.1") -> str:
 class QueryRewriterAgent:
     name = "🔄  Query Rewriter Agent  (Llama 3.1 via Ollama)"
 
-    def run(self, query: str) -> dict:
+    # One rule-based widening per round, so the fallback path does not hand the
+    # retriever the same padded string twice either.
+    FALLBACK_TERMS = (
+        "software update bug fixes release notes changelog",
+        "security advisory patch CVE vulnerability fixed version",
+        "stable release announcement upgrade migration notes",
+    )
+
+    def run(self, query: str, avoid: tuple = ()) -> dict:
         print(f"\n  {self.name}")
         bar()
         print(f"  Purpose  : Real LLM detects semantic gap + rewrites query")
@@ -1290,15 +1358,34 @@ Rules:
 - Keep it under 20 words
 - Focus on: bug fixes, releases, changelogs, security patches, performance
 - Return ONLY the rewritten query, nothing else
-
+{{tried}}
 Rewritten query:"""
+
+        # A retry that reissues the phrasing that just came back thin is a
+        # round of latency spent to get the same pool. The rewriter is the only
+        # agent that can produce different vocabulary, so it is told what has
+        # already been tried rather than being asked the same question twice.
+        prompt = prompt.format(tried=(
+            "\nThese phrasings were already searched and returned too little:\n"
+            + "\n".join(f"- {t}" for t in avoid)
+            + "\nUse different vocabulary: the vendor's own product names, the "
+              "component names, or the words a changelog would use. Do not "
+              "reuse the phrasings above.\n") if avoid else "")
 
         rewritten = call_llama(prompt)
 
         # fallback if Ollama fails
         if rewritten.startswith("[Ollama error"):
             print(f"  ⚠️  Ollama unavailable — using rule-based fallback")
-            rewritten = f"{query} software update bug fixes release notes changelog"
+            rewritten = f"{query} {self.FALLBACK_TERMS[len(avoid) % len(self.FALLBACK_TERMS)]}"
+
+        # The model can ignore the instruction above and repeat itself. If it
+        # does, the round is worthless as issued, so widen by rule instead --
+        # a different pool is the only thing that makes another round worth
+        # paying for.
+        if rewritten in avoid:
+            print(f"  ⚠️  Rewriter repeated a tried phrasing — widening by rule")
+            rewritten = f"{query} {self.FALLBACK_TERMS[len(avoid) % len(self.FALLBACK_TERMS)]}"
 
         print(f"  Output   : \"{rewritten[:70]}\"")
         return {"original": query, "rewritten": rewritten}
@@ -1306,6 +1393,24 @@ Rewritten query:"""
 # ─────────────────────────────────────────────────────────────
 # AGENT 2 — RETRIEVER (unchanged — searches real dataset)
 # ─────────────────────────────────────────────────────────────
+
+def _gather(calls, workers=None):
+    """Run zero-arg fetch thunks concurrently; return their results in call order.
+
+    Every live source is an independent HTTP round trip (15 s timeout each),
+    and the retriever issues ~10 of them per phrasing back to back, so wall
+    time was the sum of the slowest endpoints. Order is preserved, so the
+    pool -- and therefore dedupe order and every downstream number -- is the
+    same as the sequential loop produced. MARAG_FETCH_WORKERS=1 restores it.
+    """
+    if workers is None:
+        workers = max(1, int(os.environ.get("MARAG_FETCH_WORKERS", "8")))
+    if workers == 1 or len(calls) < 2:
+        return [c() for c in calls]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(workers, len(calls))) as ex:
+        return [f.result() for f in [ex.submit(c) for c in calls]]
+
 
 def _norm_url(u) -> str:
     """Same post whether it arrives as reddit.com or www.reddit.com, with or
@@ -1324,6 +1429,12 @@ class RetrieverAgent:
     last_rank_query: str = ""
     last_rerank_spec: str = ""
     last_rerank_degraded: bool = False
+    # (doc, pattern) pairs the injection screen removed from the last pool.
+    last_screened: list = []
+    # A reranker for this instance only; None means the process-wide one
+    # (MARAG_RERANK). The multi-agent arm sets this so the Checker's grading
+    # pass applies to it and not to the baseline that shares this class.
+    reranker = None
     # URLs to strike from the candidate pool before ranking. The eval harness
     # sets this to the benchmark question's own source post: a question mined
     # from a Reddit title otherwise retrieves that very post, the judge grades
@@ -1365,29 +1476,10 @@ class RetrieverAgent:
 
         if vendors:
             # Expand vendor to related subreddits for better coverage
-            VENDOR_SUBREDDITS = {
-                "linux":     ["linux","linuxquestions","Fedora","Ubuntu","debian"],
-                "ollama":    ["ollama","LocalLLaMA","openclaw"],
-                "llama":     ["LocalLLaMA","ollama","MachineLearning"],
-                "gpt":       ["OpenAI","ChatGPT","LocalLLaMA"],
-                "claude":    ["ClaudeAI","Anthropic","LocalLLaMA"],
-                "gemini":    ["Bard","GoogleGeminiAI","LocalLLaMA"],
-                "mistral":   ["LocalLLaMA","MistralAI"],
-                "deepseek":  ["LocalLLaMA","DeepSeek"],
-                "qwen":      ["LocalLLaMA"],
-                "grok":      ["grok","LocalLLaMA"],
-                "comfyui":   ["comfyui"],
-                "openclaw":  ["openclaw"],
-                "Ubiquiti":  ["Ubiquiti"],
-                "ios":       ["applehelp","ios","apple"],
-                "macos":     ["MacOS","applehelp"],
-                "windows":   ["windows","techsupport"],
-                "chrome":    ["chrome","chromium"],
-                "homeassistant": ["homeassistant"],
-            }
+            rel_calls, red_calls = [], []
             for v in vendors[:2]:  # max 2 vendors
                 print(f"  Fetching : releasetrain.io/api/c/name/{v} ...")
-                vendor_releases += fetch_vendor_releases(v, limit=8, target_date=target_date)
+                rel_calls.append(lambda v=v: fetch_vendor_releases(v, limit=8, target_date=target_date))
                 # Search all related subreddits for this vendor
                 subs_to_search = VENDOR_SUBREDDITS.get(v, [v])
                 for sub in subs_to_search[:3]:
@@ -1396,9 +1488,11 @@ class RetrieverAgent:
                     # below: the subreddit filter is keyed on the vendor, but
                     # the ranking within it is keyed on the query wording, so
                     # both phrasings have to be asked for.
-                    vendor_reddit += fetch_vendor_reddit(sub, query=rewritten_query, limit=8)
+                    red_calls.append(lambda sub=sub: fetch_vendor_reddit(sub, query=rewritten_query, limit=8))
                     if union and original_query and original_query.strip().lower() != rewritten_query.strip().lower():
-                        vendor_reddit += fetch_vendor_reddit(sub, query=original_query, limit=8)
+                        red_calls.append(lambda sub=sub: fetch_vendor_reddit(sub, query=original_query, limit=8))
+            for r in _gather(rel_calls): vendor_releases += r
+            for r in _gather(red_calls): vendor_reddit += r
 
         # ── STEP 3: General sources, fetched for BOTH phrasings ──
         # Measured on the 10-question ground-truth set: 22 of the 23 relevant
@@ -1414,28 +1508,52 @@ class RetrieverAgent:
         gen_releases, gen_apple, gen_cisa, gen_circl = [], [], [], []
         gen_cve, gen_llm, gen_reddit, gen_news = [], [], [], []
 
+        # Gate on the question before spending a round trip per search term.
+        # Check the original wording too: a rewrite can drop the model name.
+        _wants_llm = query_mentions_llm(f"{original_query or ''} {rewritten_query}")
+        _sinks = {"releases": gen_releases, "apple": gen_apple, "cisa": gen_cisa,
+                  "circl": gen_circl, "cve": gen_cve, "llm": gen_llm,
+                  "reddit": gen_reddit, "news": gen_news}
+        _calls = []   # (sink, thunk), in the order the sequential loop appended
         for qi, q in enumerate(search_queries):
             tag = "rewritten" if qi == 0 else "original"
             print(f"  Fetching : general sources for {tag} query ...")
             if not vendor_releases:
-                gen_releases += fetch_live_releases(q, limit=4)
-            gen_apple += fetch_apple_rss(q, limit=3)
-            gen_cisa  += fetch_cisa_kev(q, limit=2)
-            gen_circl += fetch_circl_apple(q, limit=2)
-            gen_cve   += fetch_live_cve(q, limit=2)
-            # Gate on the question before spending a round trip per search term.
-            # Check the original wording too: a rewrite can drop the model name.
-            if query_mentions_llm(f"{original_query or ''} {rewritten_query}"):
-                gen_llm += fetch_llm_releases(q, limit=3, gate=False)
+                _calls.append(("releases", lambda q=q: fetch_live_releases(q, limit=4)))
+            _calls.append(("apple", lambda q=q: fetch_apple_rss(q, limit=3)))
+            _calls.append(("cisa",  lambda q=q: fetch_cisa_kev(q, limit=2)))
+            _calls.append(("circl", lambda q=q: fetch_circl_apple(q, limit=2)))
+            _calls.append(("cve",   lambda q=q: fetch_live_cve(q, limit=2)))
+            if _wants_llm:
+                _calls.append(("llm", lambda q=q: fetch_llm_releases(q, limit=3, gate=False)))
             if not vendor_reddit:
-                gen_reddit += fetch_live_reddit(q, limit=3)
-            gen_news += fetch_google_news(q, limit=2)
+                _calls.append(("reddit", lambda q=q: fetch_live_reddit(q, limit=3)))
+            _calls.append(("news",  lambda q=q: fetch_google_news(q, limit=2)))
+        for (sink, _), r in zip(_calls, _gather([c for _, c in _calls])):
+            _sinks[sink] += r
 
         # ── Tier 1: vendor-specific first, then general verified ──
         tier1 = dedupe_docs(vendor_releases + gen_releases + gen_apple
                             + gen_cisa + gen_circl + gen_cve + gen_llm)
         # ── Tier 2: vendor reddit first, then general community ──
         tier2 = dedupe_docs(vendor_reddit + gen_reddit + gen_news, seen=doc_keys(tier1))
+
+        # ── Screen the pool: a fetched row is data, never instruction ──
+        # `union_fetch` screens the demo app's pool, but this class is what the
+        # Manager, the CLI trace and every eval arm retrieve through, and it
+        # calls the fetch_* functions directly -- so until now a post carrying
+        # "ignore all previous instructions" reached the ranker, the evidence
+        # list and the synthesis prompt unscreened here while being dropped in
+        # the app. Screened before ranking so an attack costs a document its
+        # slot rather than costing the user an answer. Measured on the 500
+        # question pools of run_1790129244: 6 of 7,676 documents trip it.
+        from guardrail import screened as _screened
+        tier1, dropped1 = _screened(tier1)
+        tier2, dropped2 = _screened(tier2)
+        self.last_screened = dropped1 + dropped2
+        if self.last_screened:
+            print(f"  ⚠ Screened: dropped {len(self.last_screened)} document(s) "
+                  f"carrying instructions ({', '.join(sorted({p for _, p in self.last_screened}))})")
 
         # ── Rank the candidate pool against the ORIGINAL question ──
         # The rewritten query is what widened the pool (recall); ranking it a
@@ -1467,7 +1585,7 @@ class RetrieverAgent:
         # One reranker per process. EmbeddingReranker memoises embeddings and
         # make_reranker() spends an extra probe embedding on every call, so
         # building one per retrieval threw the cache away before it could hit.
-        _reranker = _rerank.get_reranker()
+        _reranker = self.reranker or _rerank.get_reranker()
         self.last_rerank_spec = _reranker.spec
         self.last_rerank_degraded = bool(_reranker.degraded)
         print(f"  Ranking  : {_reranker.spec} over {len(pool)} candidates "
@@ -1495,14 +1613,19 @@ class RetrieverAgent:
                 except Exception:
                     return list(docs)
 
-        # Rank *within* tier, then concatenate. Ranking the flat pool discards
-        # the verified-before-community prior: BM25 favours long Reddit bodies
-        # that repeat the query terms, so a release question could come back as
-        # four community posts and zero verified records -- which flips the
-        # Evaluator's tier1_hits/has_live branches and empties the
-        # "VERIFIED SOURCES" block. The top_k cut still happens once, at the
-        # return.
-        results = _safe_rank(tier1) + _safe_rank(tier2)
+        # Tiered (default): rank *within* tier, then concatenate, so a
+        # community post can never outrank a verified record. That prior
+        # protects the template's "VERIFIED SOURCES" block and the Evaluator's
+        # tier1_hits branch -- and on the 500-question benchmark it is what
+        # costs retrieval: with it the top-4 is 0% community on a question set
+        # that is 60% Reddit-mined, and every scorer sits at nDCG@3 0.22-0.25;
+        # ranked flat the same embedding scorer reaches 0.46
+        # (eval_harness/rerank_bench.py, run_1789892227). MARAG_RANK_TIERS=flat
+        # ranks the whole pool once; the top_k cut still happens at the return.
+        if resolve_rank_tiers() == "flat":
+            results = _safe_rank(tier1 + tier2)
+        else:
+            results = _safe_rank(tier1) + _safe_rank(tier2)
 
         # Fallback to local if live APIs return nothing
         if not results:
@@ -1536,6 +1659,10 @@ class RetrieverAgent:
 class EvaluatorAgent:
     name = "📊  Evaluator Agent"
 
+    # Fraction of the question's terms the best retrieved document must
+    # share, before any source floor, for the Manager not to retry.
+    RETRY_THRESHOLD = float(os.environ.get("MARAG_RETRY_THRESHOLD", "0.15"))
+
     def run(self, docs: list, original_query: str) -> dict:
         print(f"\n  {self.name}")
         bar()
@@ -1558,13 +1685,14 @@ class EvaluatorAgent:
                 scores.append(hits)
             best = max(scores) if scores else 0
             quality = round(min(best / max(len(query_terms), 1), 1.0), 2)
+            relevance = quality
             # If we have verified Apple sources, minimum quality is MEDIUM
             has_apple = any(d.get("source") in ["apple_rss","cisa_kev","circl_cve"]
                            for d in docs)
             if has_apple and quality < 0.3:
                 quality = 0.3
         else:
-            quality = 0.0
+            quality = relevance = 0.0
         # If vendor-targeted releases found — that IS a quality signal
         has_vendor_releases = any(d.get("source") == "vendor_releases" for d in docs)
         has_vendor_reddit   = any(d.get("source") == "vendor_reddit"   for d in docs)
@@ -1582,12 +1710,19 @@ class EvaluatorAgent:
         elif has_vendor_releases:
             quality = max(quality, 0.50)  # MEDIUM-HIGH — release notes found
         elif has_vendor_reddit:
-            quality = max(quality, 0.40)  # MEDIUM — community posts found
-            quality = max(quality, 0.5)
+            quality = max(quality, 0.5)   # MEDIUM — community posts found
         elif tier1_hits and quality < 0.3:
             quality = 0.3
 
-        signal = "✅ positive" if quality >= 0.15 else "⚠️  negative — manager will retry"
+        # The retry fires on how well the documents match the *question*, not on
+        # which sources happened to answer. The source floors above lift
+        # `quality` to >= 0.30 whenever anything recognisable was fetched, so a
+        # signal read off the floored score could never fire (FINDINGS.md,
+        # Finding 12: min 0.300 over 500 questions against a 0.15 threshold).
+        # `relevance` is the term-overlap score before any floor; `quality`
+        # keeps the floors so the reported self_quality is unchanged.
+        signal = ("✅ positive" if relevance >= self.RETRY_THRESHOLD
+                  else "⚠️  negative — manager will retry")
 
         print(f"  Quality  : {quality:.2f} / 1.0")
         print(f"  RLAIF    : {signal}")
@@ -1602,9 +1737,14 @@ class EvaluatorAgent:
         # Sources that mean the answer came off a live API this run, rather than
         # out of the bundled dataset. llm_releases belongs here: it is a live
         # releasetrain.io query like 'releases' and 'cve' are.
-        LIVE_SOURCES = ['releases', 'llm_releases', 'vendor_releases',
-                        'reddit_live', 'cve']
-        has_live     = any(s in LIVE_SOURCES for s in verified_src)
+        # Everything fetch_* returns came off a live endpoint this run; only the
+        # bundled dataset (the fallback when every API returns nothing) did not.
+        # This used to be an allow-list of live sources, which silently went
+        # stale as sources were added: an answer built entirely from
+        # vendor_reddit and google_news announced itself as "From local
+        # dataset". Naming the one local case instead cannot rot that way.
+        LOCAL_SOURCES = ['local']
+        has_live     = any(s not in LOCAL_SOURCES for s in verified_src)
         confidence   = "HIGH" if quality >= 0.5 else "MEDIUM" if quality >= 0.3 else "LOW"
         verified_tag = "✅ VERIFIED from live releasetrain.io APIs" if has_live else "⚠️  From local dataset — may not reflect today's data"
 
@@ -1807,14 +1947,70 @@ Answer:"""
             lines.append("")
             src_str = ", ".join(verified_src)
             lines.append(f"  Data sourced from: {src_str} | releasetrain.io")
-        return {"quality": quality, "signal": signal, "answer": "\n".join(lines)}
+        return {"quality": quality, "relevance": relevance, "signal": signal,
+                "answer": "\n".join(lines)}
 
 # ─────────────────────────────────────────────────────────────
 # MANAGER AGENT — ORCHESTRATOR
 # ─────────────────────────────────────────────────────────────
 
+def orchestrate(rewriter, retriever, evaluator, query: str, top_k: int = 4,
+                union: bool = True, max_rounds: int = None) -> dict:
+    """ManagerAgent's retrieve-evaluate-retry loop, with everything it saw.
+
+    One implementation for the demo and the eval harness: the harness used to
+    carry its own copy of this loop, and the two drifted -- the copy kept a
+    fixed widening string and a one-round cap after the Manager had moved to
+    re-rewriting with an avoid list, so the `marag_retry` arm was measuring a
+    retry the app no longer shipped. Returns `rewrite`, `docs`, `result`,
+    `rounds`, and `pool`: the union of every round's candidate pool, first
+    round first, so pool recall is the ceiling of everything fetched.
+    """
+    if max_rounds is None:
+        max_rounds = ManagerAgent.MAX_ROUNDS
+    rewrite = rewriter.run(query)
+    docs = retriever.run(rewrite["rewritten"], top_k=top_k,
+                         original_query=query, union=union)
+    pool = list(getattr(retriever, "last_pool", []) or [])
+    seen = doc_keys(pool)
+    result = evaluator.run(docs, query)
+    tried = [rewrite["rewritten"]]
+    while "negative" in result.get("signal", "") and len(tried) < max_rounds:
+        print(f"\n  Manager: RLAIF signal negative — round "
+              f"{len(tried) + 1} of {max_rounds}, rewriting...")
+        # The rewriter is handed what has already been searched, so the
+        # round buys a different pool instead of reissuing the same one.
+        rewrite = rewriter.run(query, avoid=tuple(tried))
+        tried.append(rewrite["rewritten"])
+        # Rank against the user's own words: without original_query the
+        # reranker falls back to the widened string, which is exactly the
+        # precision loss rerank.py exists to fix.
+        docs = retriever.run(rewrite["rewritten"], top_k=top_k,
+                             original_query=query, union=union)
+        for d in (getattr(retriever, "last_pool", []) or []):
+            if doc_key(d) not in seen:
+                seen.add(doc_key(d)); pool.append(d)
+        result = evaluator.run(docs, query)
+    if "negative" in result.get("signal", ""):
+        print(f"\n  Manager: retry ceiling reached ({max_rounds} "
+              f"round(s)) — answering from what was retrieved.")
+    return {"rewrite": rewrite, "docs": docs, "result": result,
+            "rounds": len(tried), "pool": pool}
+
+
 class ManagerAgent:
     name = "🧠  Manager Agent (Orchestrator)"
+
+    # How many retrieve-then-evaluate rounds the loop may run, counting the
+    # first. 2 is what the hardcoded single retry did, so the default changes
+    # nothing; an operator raises it per deployment rather than per question.
+    #
+    # This replaces a guard that read `"retry" not in query`, which capped the
+    # loop by asking whether the *user's wording* contained the word retry: a
+    # question about retry logic could never widen its fetch, and nothing
+    # capped a loop that the Evaluator kept scoring negative once the rounds
+    # became more than one.
+    MAX_ROUNDS = max(1, int(os.environ.get("MARAG_MAX_ROUNDS", "2")))
 
     def __init__(self):
         self.rewriter  = QueryRewriterAgent()
@@ -1830,21 +2026,8 @@ class ManagerAgent:
         print(f"    Step 3 → delegate to Evaluator Agent (RLAIF)")
         print(f"    Step 4 → if quality low, trigger retry")
 
-        rewrite = self.rewriter.run(query)
-        docs    = self.retriever.run(rewrite["rewritten"], original_query=query)
-        result  = self.evaluator.run(docs, query)
-
-        if "negative" in result["signal"] and "retry" not in query:
-            print(f"\n  Manager: RLAIF signal negative — retrying with broader query...")
-            # Widen the FETCH with filler terms, but keep ranking against the
-            # user's own words -- without original_query the reranker falls
-            # back to the padded string, which is exactly the precision loss
-            # rerank.py exists to fix.
-            docs   = self.retriever.run(query + " software update release",
-                                        top_k=4, original_query=query)
-            result = self.evaluator.run(docs, query)
-
-        return result["answer"]
+        return orchestrate(self.rewriter, self.retriever, self.evaluator,
+                           query, top_k=4, max_rounds=self.MAX_ROUNDS)["result"]["answer"]
 
 # ─────────────────────────────────────────────────────────────
 # RUNNER

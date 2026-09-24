@@ -49,6 +49,7 @@ __all__ = [
     "VendorMatch",
     "load_catalog",
     "detect_vendors",
+    "catalog_is_full",
     "disambiguate",
     "classify_record",
     "is_release_record",
@@ -226,6 +227,20 @@ def load_catalog(path: Optional[str] = None, fetch: bool = True,
             seen.add(low)
             out.append(low)
     return out
+
+
+def catalog_is_full(catalog: Optional[Sequence[str]] = None) -> bool:
+    """True when the catalog in use is the real one, not the bundled fallback.
+
+    `load_catalog` never fails: with no cache and no network it returns
+    `_FALLBACK_NAMES`, 74 names against the catalog's 14k. That is the right
+    behaviour for detection -- resolving the common products beats resolving
+    none -- but it is the wrong basis for *abstaining* on an unresolved one,
+    which would decline almost every question on an offline host. Size is the
+    only thing that separates the two, so size is what is asked.
+    """
+    names = catalog if catalog is not None else load_catalog(fetch=False)
+    return len(names) > len(_FALLBACK_NAMES)
 
 
 def detect_vendors(query: str, catalog: Optional[Sequence[str]] = None,

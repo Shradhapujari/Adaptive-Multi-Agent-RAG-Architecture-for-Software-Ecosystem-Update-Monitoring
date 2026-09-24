@@ -28,6 +28,8 @@ import urllib.request
 import urllib.error
 from typing import Optional
 
+import tokens
+
 
 class LLMError(Exception):
     pass
@@ -37,6 +39,9 @@ class LLMClient:
     """Base interface. Subclasses implement _generate()."""
 
     backend = "base"
+    # Label for the token tally. The harness's judge sets "judge"; anything a
+    # generator owns is "synth".
+    role = "synth"
 
     def __init__(self, model: str):
         self.model = model
@@ -95,7 +100,9 @@ class OllamaClient(LLMClient):
             headers={"Content-Type": "application/json"}, method="POST",
         )
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            return json.loads(resp.read()).get("response", "")
+            body = json.loads(resp.read())
+        tokens.record(body, self.role)
+        return body.get("response", "")
 
 
 class OpenAIClient(LLMClient):

@@ -47,6 +47,7 @@ if _ROOT not in sys.path:
 
 import corpus_snapshot
 import rerank
+import tokens
 
 from .config import EvalConfig
 from .dataset import load_dataset, dataset_hash
@@ -330,6 +331,7 @@ def run(cfg: EvalConfig) -> str:
               f"scored for all {len(gens)} systems, "
               f"{len(records) - len(done_ids)} to go")
     stream = open(os.path.join(run_dir, PER_QUERY), "a")
+    pool_stream = open(os.path.join(run_dir, "pools.jsonl"), "a") if cfg.dump_pools else None
     # The judgments actually used to score THIS run, per query. Kept separate
     # from `qrels_cache`: the cache accumulates across every run and dataset
     # that shares the results dir, so dumping it as the run's qrels made the
@@ -358,6 +360,7 @@ def run(cfg: EvalConfig) -> str:
         sys_outputs: Dict[str, dict] = {}
         for g in gens:
             t0 = time.time()
+            tokens.reset()
             try:
                 out = g.generate(query)
             except corpus_snapshot.CorpusMiss:
@@ -369,6 +372,7 @@ def run(cfg: EvalConfig) -> str:
             except Exception as e:  # noqa: BLE001
                 out = {"answer": f"[system error: {e}]", "docs": [], "self_quality": None}
             out["latency_s"] = round(time.time() - t0, 2)
+            out["tokens"] = tokens.snapshot()
             sys_outputs[g.name] = out
             print(f"    {g.name:28s} {len(out['docs'])} docs  {out['latency_s']}s")
 
@@ -443,6 +447,10 @@ def run(cfg: EvalConfig) -> str:
                 "rerank_spec": out.get("rerank_spec", ""),
                 "rerank_degraded": out.get("rerank_degraded", False),
                 "latency_s": out["latency_s"],
+                # This arm's own model spend on this question: calls and
+                # Ollama-reported prompt/completion tokens by role (rewrite,
+                # rerank, synth), plus embedding calls. The judge is excluded.
+                "tokens": out.get("tokens"),
                 "self_quality": out.get("self_quality"),
                 "answer": out["answer"],
                 # Only set by the synthesising multi-agent arm: which model wrote
@@ -460,6 +468,12 @@ def run(cfg: EvalConfig) -> str:
             stream.write(json.dumps(row) + "\n")
         stream.flush()
         os.fsync(stream.fileno())
+        if pool_stream:
+            for name, out in sys_outputs.items():
+                pool_stream.write(json.dumps({"query_id": rec["id"], "system": name,
+                                              "query": query, "docs": out["docs"],
+                                              "pool": out.get("pool") or []}) + "\n")
+            pool_stream.flush()
         _save_qrels_cache(cfg.results_dir, qrels_cache)
         json.dump(qrels_used, open(os.path.join(run_dir, "qrels.json"), "w"), indent=1)
 
@@ -487,6 +501,9 @@ def run(cfg: EvalConfig) -> str:
     cfg_dict["exclude_own_post"] = cfg.exclude_own_post
     cfg_dict["rerank_spec"] = _rr.spec
     cfg_dict["rerank_degraded"] = bool(_rr.degraded)
+    cfg_dict["rank_tiers"] = marag.resolve_rank_tiers()
+    cfg_dict["rerank_multi"] = os.environ.get("MARAG_RERANK_MULTI", "")
+    cfg_dict["rank_query"] = os.environ.get("MARAG_RANK_QUERY", "original")
     # Same rule for the rules factor: ask the generator what it used. The sha
     # is the part that matters across arms -- AGENT_RULES.md is a file anyone
     # can edit between two passes, and two arms built from different rule text
@@ -565,6 +582,9 @@ def _parse_args() -> EvalConfig:
                         "pool (pre-2026-09-17 behaviour; FINDINGS.md Finding 7)")
     p.add_argument("--judge-pool", action="store_true", default=cfg.judge_pool,
                    help="judge every pre-rerank candidate, enabling pool recall")
+    p.add_argument("--dump-pools", action="store_true", default=cfg.dump_pools,
+                   help="write pools.jsonl: every candidate with its text, so "
+                        "rerankers can be re-scored offline on the same pools")
     p.add_argument("--corpus", default=cfg.corpus,
                    help="record:<dir> | replay:<dir> — freeze the live sources "
                         "so arms of an ablation see identical documents")
@@ -581,6 +601,7 @@ def _parse_args() -> EvalConfig:
     cfg.corpus = a.corpus
     cfg.resume = a.resume
     cfg.exclude_own_post = a.exclude_own_post
+    cfg.dump_pools = a.dump_pools
     return cfg
 
 
