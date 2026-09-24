@@ -638,27 +638,97 @@ import requests as requests
 _VENDOR_NAMES    = []   # from /api/c/names        — 14,223 products
 _SUBREDDIT_NAMES = []   # from /api/reddit/meta/subreddits — 628 subreddits
 _VENDORS_LOADED  = False
+_CATALOG_SOURCE  = "unloaded"   # "live", "cache", "bundled" or "unloaded"
+_CATALOG_ERRORS  = []           # why the live fetch was not used, if it was not
+# Epoch before which a load that produced nothing at all will not be retried.
+# Only reached when the live endpoint AND the local catalog both fail, which
+# leaves _VENDORS_LOADED False by design -- without a floor, every question
+# then pays the live timeout again.
+_CATALOG_RETRY_AFTER = 0.0
+CATALOG_RETRY_SECONDS = 60.0
+
+
+def catalog_status() -> dict:
+    """Where the vendor vocabulary came from, and what failed to load.
+
+    extract_vendor returns [] both when a query names no product and when it
+    could not find out, and those mean opposite things: the first is a
+    finding, the second is an outage wearing its clothes. Nothing could tell
+    them apart, because a failed fetch left the list empty and said so only on
+    stdout, which nothing reads on a deployed host.
+    """
+    return {
+        "source": _CATALOG_SOURCE,
+        "vendors": len(_VENDOR_NAMES),
+        "subreddits": len(_SUBREDDIT_NAMES),
+        "errors": list(_CATALOG_ERRORS),
+        "degraded": _CATALOG_SOURCE not in ("live",),
+    }
+
 
 def load_vendor_lists():
-    """Cache vendor + subreddit lists once at startup."""
+    """Cache vendor + subreddit lists once, live if possible and locally if not.
+
+    A failed fetch used to leave _VENDOR_NAMES empty and set _VENDORS_LOADED
+    anyway, so one timeout at startup meant no vendor matched anything for the
+    life of the process -- every question answered unscoped, silently, until
+    someone restarted it. On a host that had never reached the endpoint at all
+    that was every question.
+
+    The disk cache and bundled list vendor.load_catalog() already maintains
+    are the answer to that; this module simply did not use them. 5613 names
+    cached against 74 bundled here today, either of which scopes a search
+    better than nothing does.
+    """
     global _VENDOR_NAMES, _SUBREDDIT_NAMES, _VENDORS_LOADED
-    if _VENDORS_LOADED:
+    global _CATALOG_SOURCE, _CATALOG_ERRORS, _CATALOG_RETRY_AFTER
+    # Not latching the empty case is what stops one timeout poisoning the
+    # process; the cost is that the empty case retries, and the live fetch it
+    # retries is a 15 s timeout when the endpoint is down. Both have to hold,
+    # so the retry is floored rather than removed: a host that can reach
+    # neither the endpoint nor a local catalog tries once a minute instead of
+    # once a question.
+    if _VENDORS_LOADED or time.time() < _CATALOG_RETRY_AFTER:
         return
+    _CATALOG_ERRORS = []
     try:
         r1 = requests.get("https://releasetrain.io/api/c/names", timeout=15)
+        r1.raise_for_status()
         _VENDOR_NAMES = [v.lower() for v in r1.json() if isinstance(v, str)]
+        _CATALOG_SOURCE = "live"
         print(f"  Loaded {len(_VENDOR_NAMES)} vendor names")
     except Exception as e:
-        print(f"  Warning: could not load vendor names: {e}")
+        _CATALOG_ERRORS.append(f"vendor names: {type(e).__name__}: {e}")
+        try:
+            # fetch=False: the live endpoint just refused, and asking it again
+            # through another door would only spend the timeout twice.
+            import vendor as _vendor_catalog
+            _VENDOR_NAMES = [v.lower() for v in _vendor_catalog.load_catalog(fetch=False)]
+            _CATALOG_SOURCE = "cache" if len(_VENDOR_NAMES) > 100 else "bundled"
+            print(f"  Vendor names unavailable ({e}); using {len(_VENDOR_NAMES)} "
+                  f"from the local catalog")
+        except Exception as inner:
+            _CATALOG_ERRORS.append(f"local catalog: {type(inner).__name__}: {inner}")
+            _CATALOG_SOURCE = "unloaded"
+            print(f"  Warning: could not load vendor names: {e}")
 
     try:
         r2 = requests.get("https://releasetrain.io/api/reddit/meta/subreddits", timeout=15)
+        r2.raise_for_status()
         _SUBREDDIT_NAMES = [s.lower() for s in r2.json().get("data", []) if isinstance(s, str)]
         print(f"  Loaded {len(_SUBREDDIT_NAMES)} subreddit names")
     except Exception as e:
+        # No local equivalent for this one, and none is invented here: the
+        # subreddit list is the third matching step, after aliases and vendor
+        # names, so losing it narrows the match rather than removing it.
+        _CATALOG_ERRORS.append(f"subreddits: {type(e).__name__}: {e}")
         print(f"  Warning: could not load subreddits: {e}")
 
-    _VENDORS_LOADED = True
+    # Only remember a load that produced a vocabulary. Caching the empty case
+    # is what turned one timeout into a process that never matched again.
+    _VENDORS_LOADED = bool(_VENDOR_NAMES)
+    if not _VENDORS_LOADED:
+        _CATALOG_RETRY_AFTER = time.time() + CATALOG_RETRY_SECONDS
 
 # Common aliases — maps query terms to canonical vendor names
 VENDOR_ALIASES = {
@@ -2114,11 +2184,14 @@ def show_why():
     → That post sat in 72–98% of every top-k list we had reported on
     → Invisible to paired comparison: every arm drew on it equally
 
-  WHAT IS LEFT, LEAK-FREE (n=500, 24 ecosystems):
-    → multi-agent 0.304 vs single-agent 0.301 nDCG@3 — a match, not a win
-    → no paired difference exceeds 0.015, at roughly twice the latency
-    → the 0.23 faithfulness gap was an answer-FORMAT artifact: same
-      retrieval through the baseline's prompt scores 0.919 vs 0.929
+  WHAT IS LEFT, LEAK-FREE (n=500, 24 ecosystems, flat ranking):
+    → multi-agent 0.496 vs single-agent 0.490 nDCG@3 — a match, not a win
+      (Δ +0.006, 95% CI [-0.009, +0.021], 43 won / 410 tied / 47 lost)
+    → no paired difference exceeds 0.018, none survives Holm, at roughly
+      twice the latency (0.28s vs 0.12s)
+    → the faithfulness gap was an answer-FORMAT artifact: same retrieval
+      as prose scores 0.900 vs the baseline's 0.897 (Δ +0.003, n.s.);
+      rendered as a template it drops to 0.837 (Δ -0.059, p<0.001)
 
   SO WHY RUN THIS PIPELINE AT ALL?
     → Decomposition per se is not what produced the original result

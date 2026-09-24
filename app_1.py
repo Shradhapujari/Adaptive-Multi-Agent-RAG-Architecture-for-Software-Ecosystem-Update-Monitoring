@@ -810,8 +810,25 @@ def _presenter_caption(configured: str, presented=None) -> str:
             f"({presented.note}).")
 
 
-def _agent_table(results=None, presented=None) -> str:
+def _agent_table(results=None, presented=None, view: str = "detailed") -> str:
     """The sidebar's agent roster, reporting what each agent actually did.
+
+    Two views over one pipeline, which is not restructured either way.
+
+    "paper" is the architecture the paper and the RISE deck describe, and the
+    one multiagent_rag_v3.py implements: an Orchestrator that plans and
+    retries, a Query Rewriter, a Retriever, an Evaluator. This page grew a
+    different decomposition -- it split the Retriever into one agent per feed
+    and promoted the two pre-search grounding steps to agents of their own --
+    so a viewer holding the slides counted seven rows against four and had to
+    work out which was wrong. Neither was; they were the same pipeline named
+    twice. The folding is stated in the caption rather than hidden, and the
+    Answer Presenter stays on its own row in both: it is outside the deck's
+    four, and dropping the line that says whether a model or a rule wrote the
+    answer would mislead about the thing this app is most careful about.
+
+    "detailed" is the per-step view, and stays the default here so a caller
+    that does not ask gets the fuller report.
 
     It used to be a static table: "Query Rewriter | Llama 3.1" whether or not
     a model was reachable, "CVE Security | Live API" whether or not the feed
@@ -827,14 +844,20 @@ def _agent_table(results=None, presented=None) -> str:
         return f"| {name} | {status} |"
 
     head = ["| Agent | Status |", "|-------|--------|"]
+    paper = view == "paper"
     if results is None:
-        return "\n".join(head + [
-            row("Temporal Grounder", "Rule-based"),
-            row("Vendor & Intent", "Catalog + cues"),
-            row("Query Rewriter", "Llama 3.1 / rule"),
-            row("Community", "Live API"),
-            row("Release Notes", "Live API"),
-            row("Security", "Live API"),
+        idle = ([row("Orchestrator", "Plans and retries"),
+                 row("Query Rewriter", "User words → search words"),
+                 row("Retriever", "Vendor-scoped, 3 feeds"),
+                 row("Evaluator", "Scores evidence")]
+                if paper else
+                [row("Temporal Grounder", "Rule-based"),
+                 row("Vendor & Intent", "Catalog + cues"),
+                 row("Query Rewriter", "Llama 3.1 / rule"),
+                 row("Community", "Live API"),
+                 row("Release Notes", "Live API"),
+                 row("Security", "Live API")])
+        return "\n".join(head + idle + [
             row("Answer Presenter", "LLM / rule-based"),
             "", "*Idle — statuses fill in after a run.*"])
 
@@ -877,16 +900,53 @@ def _agent_table(results=None, presented=None) -> str:
     else:
         presenter_status = "Rule-based"
 
+    community_row = feed("Community", results.get("community") or [])
+    release_row = feed("Release Notes",
+                       [r for r in rel if vendor.is_release_record(r)], rel_extra)
+    security_row = feed("CVE", results.get("cve") or [],
+                        f" · {dropped} off-topic dropped" if dropped else "")
+
+    if not paper:
+        return "\n".join(head + [
+            row("Temporal Grounder", temporal_status),
+            row("Vendor & Intent", vendor_status),
+            row("Query Rewriter", rewriter_status),
+            row("Community", community_row),
+            row("Release Notes", release_row),
+            row("Security", security_row),
+            row("Answer Presenter", presenter_status),
+        ])
+
+    # One row per agent in the deck, each reporting the same facts the
+    # per-step rows carry -- folded, never softened. A feed that did not
+    # answer is still named as down here, because "3 feeds" over two live
+    # ones would overstate the pool the answer rests on.
+    feeds_down = sorted(down & {"Community", "Release Notes", "CVE"})
+    n_docs = sum(len(results.get(k) or []) for k in ("community", "releases", "cve"))
+    retriever_status = f"{n_docs} doc(s) · {3 - len(feeds_down)}/3 feeds"
+    if feeds_down:
+        retriever_status += f" · ⚠️ {', '.join(feeds_down)} unreachable"
+
+    phrasings = results.get("fetch_phrasings") or []
+    orchestrator_status = (f"{len(phrasings)} phrasing(s) · "
+                           f"{results.get('source', 'agent')} source")
+
+    # The rewriter row carries the two steps folded into it, so the grounding
+    # that happened before the rewrite is still visible in this view.
+    rewriter_paper = f"{rewriter_status} · {temporal_status.lower()} · {vendor_status}"
+
+    ev = results.get("evaluation") or {}
+    if ev:
+        evaluator_status = (f"quality {ev.get('quality', 0)} · "
+                            f"{ev.get('signal', '—')} signal")
+    else:
+        evaluator_status = "Not run"
+
     return "\n".join(head + [
-        row("Temporal Grounder", temporal_status),
-        row("Vendor & Intent", vendor_status),
-        row("Query Rewriter", rewriter_status),
-        row("Community", feed("Community", results.get("community") or [])),
-        row("Release Notes",
-            feed("Release Notes", [r for r in rel if vendor.is_release_record(r)], rel_extra)),
-        row("Security",
-            feed("CVE", results.get("cve") or [],
-                 f" · {dropped} off-topic dropped" if dropped else "")),
+        row("Orchestrator", orchestrator_status),
+        row("Query Rewriter", rewriter_paper),
+        row("Retriever", retriever_status),
+        row("Evaluator", evaluator_status),
         row("Answer Presenter", presenter_status),
     ])
 
@@ -900,10 +960,29 @@ with st.sidebar:
         st.image("https://upload.wikimedia.org/wikipedia/en/b/bb/University_of_the_Pacific_seal.svg", width=80)
         st.markdown("**Adaptive Multi-Agent RAG Architecture** · University of the Pacific · 2026")
         st.markdown("##### Active Agents")
+        # Which decomposition to name. The pipeline is identical either way --
+        # this picks how its steps are grouped, so the roster can be read
+        # against the paper's four agents or against the steps themselves.
+        agent_view = st.radio(
+            "Architecture", ["Paper (4 agents)", "Detailed (7 steps)"],
+            horizontal=True, label_visibility="collapsed", key="agent_view",
+            help="Paper: the Orchestrator, Query Rewriter, Retriever and "
+                 "Evaluator the paper and the seminar deck describe, which is "
+                 "what multiagent_rag_v3.py implements. Detailed: this page's "
+                 "own steps, with the Retriever's three feeds and the "
+                 "Rewriter's two grounding steps on rows of their own. Same "
+                 "run, same numbers, different grouping.")
+        agent_view_key = "paper" if agent_view.startswith("Paper") else "detailed"
         # Filled in again at the end of the run, once every status is a fact
         # rather than an advertisement.
         agent_status_slot = st.empty()
-        agent_status_slot.markdown(_agent_table())
+        agent_status_slot.markdown(_agent_table(view=agent_view_key))
+        if agent_view_key == "paper":
+            st.caption("Four agents as in the paper. The Retriever's three "
+                       "feeds and the Rewriter's temporal and vendor grounding "
+                       "are folded into their rows; the Answer Presenter sits "
+                       "outside the four. Nothing is hidden — switch to "
+                       "Detailed for a row each.")
     # Not `presenter_spec() or rule-based`: the presenter falls back to
     # whatever model_select finds reachable, so on a host with Ollama running
     # this caption promised rule-based prose and the run then used llama3.1.
@@ -1405,6 +1484,15 @@ elif run_btn and query and compare_mode:
         st.caption(f"{ev['community_count']} community · {ev['release_count']} "
                    f"releases · {ev['cve_count']} CVE · quality {ev['quality']:.2f} · "
                    f"source `{source}` · {round(time.time() - t0, 1)}s")
+    # The roster and the presenter line belong to the pipeline, and the
+    # pipeline just ran -- but these two updates used to live only in the
+    # multi-agent branch below. Compare mode left the sidebar reading "Idle --
+    # statuses fill in after a run" with a finished run on screen beside it,
+    # and that is now the default view, so it was the state most visitors saw.
+    # The same argument as everywhere else here: report the run, not the
+    # advertisement.
+    agent_status_slot.markdown(_agent_table(results, presented, view=agent_view_key))
+    presenter_slot.caption(_presenter_caption(presenter_spec(), presented))
     st.session_state["last_answer"] = {"query": query, "reddit_id": reddit_id, "arm": "compare"}
 
 elif run_btn and query:
@@ -1469,7 +1557,7 @@ elif run_btn and query:
 
     # The roster now describes this run: which feeds answered, whether the
     # rewrite came from a model, how many advisories were separated out.
-    agent_status_slot.markdown(_agent_table(results, presented))
+    agent_status_slot.markdown(_agent_table(results, presented, view=agent_view_key))
     presenter_slot.caption(_presenter_caption(presenter_spec(), presented))
 
     # The trace is what knows which sources the answer actually cited, so it is
