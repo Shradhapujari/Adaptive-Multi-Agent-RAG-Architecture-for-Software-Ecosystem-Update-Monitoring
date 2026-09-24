@@ -1404,6 +1404,8 @@ class RetrieverAgent:
     last_rank_query: str = ""
     last_rerank_spec: str = ""
     last_rerank_degraded: bool = False
+    # (doc, pattern) pairs the injection screen removed from the last pool.
+    last_screened: list = []
     # A reranker for this instance only; None means the process-wide one
     # (MARAG_RERANK). The multi-agent arm sets this so the Checker's grading
     # pass applies to it and not to the baseline that shares this class.
@@ -1530,6 +1532,23 @@ class RetrieverAgent:
                             + gen_cisa + gen_circl + gen_cve + gen_llm)
         # ── Tier 2: vendor reddit first, then general community ──
         tier2 = dedupe_docs(vendor_reddit + gen_reddit + gen_news, seen=doc_keys(tier1))
+
+        # ── Screen the pool: a fetched row is data, never instruction ──
+        # `union_fetch` screens the demo app's pool, but this class is what the
+        # Manager, the CLI trace and every eval arm retrieve through, and it
+        # calls the fetch_* functions directly -- so until now a post carrying
+        # "ignore all previous instructions" reached the ranker, the evidence
+        # list and the synthesis prompt unscreened here while being dropped in
+        # the app. Screened before ranking so an attack costs a document its
+        # slot rather than costing the user an answer. Measured on the 500
+        # question pools of run_1790129244: 6 of 7,676 documents trip it.
+        from guardrail import screened as _screened
+        tier1, dropped1 = _screened(tier1)
+        tier2, dropped2 = _screened(tier2)
+        self.last_screened = dropped1 + dropped2
+        if self.last_screened:
+            print(f"  ⚠ Screened: dropped {len(self.last_screened)} document(s) "
+                  f"carrying instructions ({', '.join(sorted({p for _, p in self.last_screened}))})")
 
         # ── Rank the candidate pool against the ORIGINAL question ──
         # The rewritten query is what widened the pool (recall); ranking it a
