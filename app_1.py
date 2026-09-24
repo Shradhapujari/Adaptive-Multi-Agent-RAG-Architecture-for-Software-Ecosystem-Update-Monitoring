@@ -547,7 +547,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     grounded = temporal.query
 
     # Step 1 — Query Rewriter
-    with _step("🔄 Query Rewriter Agent — Llama 3.1 rewriting query...", show_steps):
+    with _step("Query Rewriter Agent — Llama 3.1 rewriting query...", show_steps):
         t0 = time.time()
         # The rewriter sees the *stripped* phrasing: its job is vocabulary
         # expansion, and handing it the resolved date only gets the date
@@ -607,7 +607,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     pool_limit = max(limit * 10, 50)
 
     # Step 2 — Community Agent
-    with _step("💬 Community Agent — fetching Reddit feedback...", show_steps):
+    with _step("Community Agent — fetching Reddit feedback...", show_steps):
         t0 = time.time()
         results["community"] = union_fetch(community_fetch, phrasings,
                                            pool_limit, temporal)
@@ -619,14 +619,14 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         results["timing"]["community"] = round(time.time()-t0, 1)
 
     # Step 3 — Release Notes Agent
-    with _step("📦 Release Notes Agent — fetching live releases...", show_steps):
+    with _step("Release Notes Agent — fetching live releases...", show_steps):
         t0 = time.time()
         results["releases"] = union_fetch(release_fetch, release_phrasings,
                                           pool_limit, temporal)
         results["timing"]["releases"] = round(time.time()-t0, 1)
 
     # Step 4 — CVE Agent
-    with _step("🔐 CVE Agent — fetching security vulnerabilities...", show_steps):
+    with _step("CVE Agent — fetching security vulnerabilities...", show_steps):
         t0 = time.time()
         results["cve"] = union_fetch(cve_fetch, phrasings, limit, temporal)
         results["timing"]["cve"] = round(time.time()-t0, 1)
@@ -823,19 +823,19 @@ def _agent_table(results=None, presented=None) -> str:
     placeholder twice: an idle roster first, then the real one once the run
     has finished and every status is known.
     """
-    def row(icon, name, status):
-        return f"| {icon} {name} | {status} |"
+    def row(name, status):
+        return f"| {name} | {status} |"
 
     head = ["| Agent | Status |", "|-------|--------|"]
     if results is None:
         return "\n".join(head + [
-            row("📅", "Temporal Grounder", "Rule-based"),
-            row("🏷", "Vendor & Intent", "Catalog + cues"),
-            row("🔄", "Query Rewriter", "Llama 3.1 / rule"),
-            row("💬", "Community", "Live API"),
-            row("📦", "Release Notes", "Live API"),
-            row("🔐", "Security", "Live API"),
-            row("🧾", "Answer Presenter", "LLM / rule-based"),
+            row("Temporal Grounder", "Rule-based"),
+            row("Vendor & Intent", "Catalog + cues"),
+            row("Query Rewriter", "Llama 3.1 / rule"),
+            row("Community", "Live API"),
+            row("Release Notes", "Live API"),
+            row("Security", "Live API"),
+            row("Answer Presenter", "LLM / rule-based"),
             "", "*Idle — statuses fill in after a run.*"])
 
     down = {e["agent"] for e in (results.get("errors") or [])}
@@ -878,16 +878,16 @@ def _agent_table(results=None, presented=None) -> str:
         presenter_status = "Rule-based"
 
     return "\n".join(head + [
-        row("📅", "Temporal Grounder", temporal_status),
-        row("🏷", "Vendor & Intent", vendor_status),
-        row("🔄", "Query Rewriter", rewriter_status),
-        row("💬", "Community", feed("Community", results.get("community") or [])),
-        row("📦", "Release Notes",
+        row("Temporal Grounder", temporal_status),
+        row("Vendor & Intent", vendor_status),
+        row("Query Rewriter", rewriter_status),
+        row("Community", feed("Community", results.get("community") or [])),
+        row("Release Notes",
             feed("Release Notes", [r for r in rel if vendor.is_release_record(r)], rel_extra)),
-        row("🔐", "Security",
+        row("Security",
             feed("CVE", results.get("cve") or [],
                  f" · {dropped} off-topic dropped" if dropped else "")),
-        row("🧾", "Answer Presenter", presenter_status),
+        row("Answer Presenter", presenter_status),
     ])
 
 
@@ -899,7 +899,7 @@ with st.sidebar:
     with st.expander("About", expanded=False):
         st.image("https://upload.wikimedia.org/wikipedia/en/b/bb/University_of_the_Pacific_seal.svg", width=80)
         st.markdown("**Adaptive Multi-Agent RAG Architecture** · University of the Pacific · 2026")
-        st.markdown("##### 🤖 Active Agents")
+        st.markdown("##### Active Agents")
         # Filled in again at the end of the run, once every status is a fact
         # rather than an advertisement.
         agent_status_slot = st.empty()
@@ -918,95 +918,105 @@ with st.sidebar:
         presenter_slot.caption(_presenter_caption(presenter_spec()))
     st.divider()
 
-    st.markdown("#### ⚙️ Settings")
+    st.markdown("#### Settings")
     mode = st.selectbox(
         "Answering mode",
         ["Multi-agent pipeline", "Single agent (paper baseline)",
          "Compare both side by side"],
+        # Compare by default. The pipeline on its own answers the question but
+        # says nothing about what the coordinating agents bought, which is the
+        # only claim this project makes; a visitor who does not already know to
+        # go looking for the baseline never sees it. Costs a second retrieval
+        # per ask -- the arms share no work -- and that is the price of the
+        # comparison being the default view rather than a setting.
+        index=2,
         help="The baseline is the evaluation's own `single_agent` arm: raw "
              "query to the retriever and one synthesis call, with every "
              "coordinating agent removed. Same question, so the difference on "
              "screen is the difference the paper measures.")
     single_mode = mode.startswith("Single")
     compare_mode = mode.startswith("Compare")
-    from model_select import MODELS
-    st.selectbox("Presenter model",
-                 ["Auto (cheapest reachable)"] + [m["spec"] for m in MODELS],
-                 key="presenter_pick",
-                 help="Which model writes the cited paragraph (and the baseline's "
-                      "prose). Auto probes for the cheapest reachable one; a model "
-                      "that is not reachable on this host falls back to rule-based "
-                      "prose and the caption says so. Overrides PRESENTER_MODEL "
-                      "in secrets.")
-    source_label = st.selectbox(
-        "Data source",
-        ["Retrieval agent decides", "Lake only (releasetrain.io live)",
-         "Local store only"],
-        help="Agent: fetch live, fall back to the local store per feed when an "
-             "endpoint is down, and let intent decide which kinds are citable. "
-             "Lake: live only, no fallback. Store: what earlier runs retrieved.")
-    source = {"R": "agent", "L": "lake", "Lo": "store"}["Lo" if source_label.startswith("Local")
-                                                       else source_label[0]]
-    result_limit = st.slider("Results per agent", 1, 10, 5)
-    show_details = st.toggle("Show details", value=False,
-                             help="Off: the question and a one-sentence answer. "
-                                  "On: every agent's step, the evidence tabs and "
-                                  "the cited paragraph.")
-    show_pipeline = st.toggle("Show pipeline steps", value=True,
-                              disabled=not show_details) and show_details
-    show_raw = st.toggle("Show raw API data", value=False,
-                         disabled=not show_details) and show_details
-    yesno_on = st.toggle("Yes/No consensus", value=True, disabled=single_mode,
-                         help="For questions that take a one-word answer, count how "
-                              "the retrieved thread's commenters actually answered it.")
-    unclear_as_no = st.toggle("Count non-committal comments as No", value=True,
-                              disabled=single_mode or not yesno_on,
-                              help="A commenter who neither confirms nor denies is "
-                                   "read as a no. Defensible for “did this happen to "
-                                   "you?” — someone it happened to says so — but it "
-                                   "is an inference from silence, not from the comment.")
-    survey_on = st.toggle(f"Survey-informed evaluator (n={survey.respondents()})",
-                          value=True, disabled=single_mode,
-                          help="Blend the 2024 software-update survey's user "
-                               "priorities into the quality score, and report which "
-                               "of them these results address.")
-
+    # Collapsed: nine controls standing open above the question box read as
+    # a configuration screen, and the only one a first-time visitor needs is
+    # the mode picker above. Everything here keeps its default, so the demo
+    # behaves identically whether or not this is ever opened.
+    with st.expander("Advanced settings", expanded=False):
+        from model_select import MODELS
+        st.selectbox("Presenter model",
+                     ["Auto (cheapest reachable)"] + [m["spec"] for m in MODELS],
+                     key="presenter_pick",
+                     help="Which model writes the cited paragraph (and the baseline's "
+                          "prose). Auto probes for the cheapest reachable one; a model "
+                          "that is not reachable on this host falls back to rule-based "
+                          "prose and the caption says so. Overrides PRESENTER_MODEL "
+                          "in secrets.")
+        source_label = st.selectbox(
+            "Data source",
+            ["Retrieval agent decides", "Lake only (releasetrain.io live)",
+             "Local store only"],
+            help="Agent: fetch live, fall back to the local store per feed when an "
+                 "endpoint is down, and let intent decide which kinds are citable. "
+                 "Lake: live only, no fallback. Store: what earlier runs retrieved.")
+        source = {"R": "agent", "L": "lake", "Lo": "store"}["Lo" if source_label.startswith("Local")
+                                                           else source_label[0]]
+        result_limit = st.slider("Results per agent", 1, 10, 5)
+        show_details = st.toggle("Show details", value=False,
+                                 help="Off: the question and a one-sentence answer. "
+                                      "On: every agent's step, the evidence tabs and "
+                                      "the cited paragraph.")
+        show_pipeline = st.toggle("Show pipeline steps", value=True,
+                                  disabled=not show_details) and show_details
+        show_raw = st.toggle("Show raw API data", value=False,
+                             disabled=not show_details) and show_details
+        yesno_on = st.toggle("Yes/No consensus", value=True, disabled=single_mode,
+                             help="For questions that take a one-word answer, count how "
+                                  "the retrieved thread's commenters actually answered it.")
+        unclear_as_no = st.toggle("Count non-committal comments as No", value=True,
+                                  disabled=single_mode or not yesno_on,
+                                  help="A commenter who neither confirms nor denies is "
+                                       "read as a no. Defensible for “did this happen to "
+                                       "you?” — someone it happened to says so — but it "
+                                       "is an inference from silence, not from the comment.")
+        survey_on = st.toggle(f"Survey-informed evaluator (n={survey.respondents()})",
+                              value=True, disabled=single_mode,
+                              help="Blend the 2024 software-update survey's user "
+                                   "priorities into the quality score, and report which "
+                                   "of them these results address.")
     if single_mode:
         st.caption("Baseline arm selected — the agents above it are switched "
                    "off, which is what makes it the baseline.")
 
     st.divider()
-    st.markdown("#### 🧵 Pick a Reddit question")
-    st.caption("From releasetrain.io/api/reddit/query/questions — the answer is "
-               "the thread's top-voted comment.")
+    with st.expander("Pick a Reddit question", expanded=False):
+        st.caption("From releasetrain.io/api/reddit/query/questions — the answer is "
+                   "the thread's top-voted comment.")
 
-    @st.cache_data(ttl=600, show_spinner=False)
-    def _questions(page: int):
-        return yesno.list_questions(limit=25, page=page)
+        @st.cache_data(ttl=600, show_spinner=False)
+        def _questions(page: int):
+            return yesno.list_questions(limit=25, page=page)
 
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def _catalog():
-        return vendor.load_catalog()
+        @st.cache_data(ttl=3600, show_spinner=False)
+        def _catalog():
+            return vendor.load_catalog()
 
-    q_vendor = st.selectbox("Vendor", ["All"] + _catalog(), key="poll_vendor")
-    q_page = st.number_input("Page", min_value=1, value=1, step=1)
-    q_rows = yesno.filter_questions(_questions(int(q_page)),
-                                    "" if q_vendor == "All" else q_vendor)
-    st.caption(f"{len(q_rows)} yes/no question(s)"
-               + (f" for {q_vendor}" if q_vendor != "All" else "") + " on this page")
-    q_opts = {f"r/{r.get('subreddit','')} · {r.get('title','')[:70]} "
-              f"({len(r.get('comments') or [])} comments)": r for r in q_rows}
-    picked = st.selectbox("Question", ["—"] + list(q_opts), key="reddit_pick")
-    # Applied once per pick, so the box stays editable afterwards.
-    if picked != "—" and st.session_state.get("reddit_title") != q_opts[picked].get("title"):
-        st.session_state["main_query"] = q_opts[picked].get("title", "")
-        st.session_state["reddit_title"] = q_opts[picked].get("title", "")
-        st.session_state["reddit_id"] = q_opts[picked].get("redditId")
-    elif not q_rows:
-        st.caption("Feed unreachable — type a question instead.")
-
+        q_vendor = st.selectbox("Vendor", ["All"] + _catalog(), key="poll_vendor")
+        q_page = st.number_input("Page", min_value=1, value=1, step=1)
+        q_rows = yesno.filter_questions(_questions(int(q_page)),
+                                        "" if q_vendor == "All" else q_vendor)
+        st.caption(f"{len(q_rows)} yes/no question(s)"
+                   + (f" for {q_vendor}" if q_vendor != "All" else "") + " on this page")
+        q_opts = {f"r/{r.get('subreddit','')} · {r.get('title','')[:70]} "
+                  f"({len(r.get('comments') or [])} comments)": r for r in q_rows}
+        picked = st.selectbox("Question", ["—"] + list(q_opts), key="reddit_pick")
+        # Applied once per pick, so the box stays editable afterwards.
+        if picked != "—" and st.session_state.get("reddit_title") != q_opts[picked].get("title"):
+            st.session_state["main_query"] = q_opts[picked].get("title", "")
+            st.session_state["reddit_title"] = q_opts[picked].get("title", "")
+            st.session_state["reddit_id"] = q_opts[picked].get("redditId")
+        elif not q_rows:
+            st.caption("Feed unreachable — type a question instead.")
     st.divider()
-    st.markdown("#### 💡 Example queries")
+    st.markdown("#### Example queries")
     examples = [
         "Any critical Linux updates today?",
         "Security patches released in the past 7 days",
@@ -1023,7 +1033,7 @@ with st.sidebar:
             st.session_state.pop("reddit_id", None)
 
     st.divider()
-    st.markdown("#### 🗄️ Store")
+    st.markdown("#### Store")
     _db = get_store()
     if _db is None:
         st.caption("Unavailable — the pipeline runs without it, fetching live "
@@ -1043,7 +1053,7 @@ with st.sidebar:
 
         _recent = _db.recent_runs(limit=8)
         if _recent:
-            with st.expander(f"🕘 Last {len(_recent)} question(s)"):
+            with st.expander(f"Last {len(_recent)} question(s)"):
                 for r in _recent:
                     flag = " · offline" if r.offline else ""
                     st.markdown(f"**{r.query}**")
@@ -1062,7 +1072,7 @@ if view == "Monitor":
     # Notes agent reads: latest version, freshness, history, a next-release
     # forecast, recent advisories and a risk band per watched component. The
     # watchlist lives in the URL, so a reload keeps it and the link shares it.
-    st.markdown("#### 📡 Component monitor")
+    st.markdown("#### Component monitor")
     watch_default = st.query_params.get("watch", "firefox,python,linux")
     watch_raw = st.text_input("Components to watch (comma-separated)", value=watch_default,
                               help="Names as releasetrain.io knows them, e.g. firefox, "
@@ -1196,6 +1206,15 @@ if view == "Results":
     st.stop()
 
 # Query input
+# Seeded on the first paint only. An empty box asks the visitor to invent a
+# question before the demo will show them anything, while the one thing worth
+# knowing about this app -- that it answers from live release notes and cites
+# them -- is a single Run click away once the box is not empty. `not in`
+# rather than a falsy check: Clear sets the key to "", and re-filling a box
+# the visitor just emptied would fight them.
+if "main_query" not in st.session_state:
+    st.session_state["main_query"] = examples[0]
+
 query = st.text_input(
     "Ask about any software update, security vulnerability, or release:",
     placeholder='e.g. "Any critical Linux updates today?" or "What bugs were fixed in Chrome?"',
@@ -1204,9 +1223,9 @@ query = st.text_input(
 
 col1, col2, col3 = st.columns([2, 1, 1])
 with col1:
-    run_btn = st.button("🚀 Run Single Agent" if single_mode
-                        else "⚖️ Run Both & Compare" if compare_mode
-                        else "🚀 Run Multi-Agent Pipeline",
+    run_btn = st.button("Run Single Agent" if single_mode
+                        else "Run Both & Compare" if compare_mode
+                        else "Run Multi-Agent Pipeline",
                         type="primary", use_container_width=True)
 with col2:
     # A callback, not an `if st.button(...)` body: the text box above is already
@@ -1215,7 +1234,7 @@ with col2:
     def _clear_query():
         st.session_state["main_query"] = ""
         st.session_state.pop("reddit_id", None)
-    st.button("🔁 Clear", use_container_width=True, on_click=_clear_query)
+    st.button("Clear", use_container_width=True, on_click=_clear_query)
 
 # The picked thread only applies while the box still holds its title.
 reddit_id = st.session_state.get("reddit_id")
@@ -1231,10 +1250,10 @@ if run_btn and query and single_mode:
     # them. Showing their headings with "n/a" underneath would suggest the
     # baseline attempted the work and failed at it.
     st.markdown("---")
-    with st.spinner("🤖 Single agent — retrieve, then answer..."):
+    with st.spinner("Single agent — retrieve, then answer..."):
         sa = run_single_agent(query, top_k=result_limit)
 
-    st.markdown("### 🤖 Single Agent (baseline)")
+    st.markdown("### Single Agent (baseline)")
     st.caption(f"Arm `{sa['arm']}`" + (f" · model `{sa['model']}`" if sa["model"]
                else " · no model reachable, so the deterministic template "
                     "rendering ran instead of prose synthesis")
@@ -1248,11 +1267,11 @@ if run_btn and query and single_mode:
                 "no RLAIF evaluator, no survey weighting, no yes/no tally. This is "
                 "the arm the paper compares against, run on your question.")
 
-        st.markdown("#### ✅ Answer")
+        st.markdown("#### Answer")
         st.success(sa["answer"] or "_(the baseline returned nothing)_")
 
         docs = sa.get("docs") or []
-        with st.expander(f"📄 Documents it retrieved ({len(docs)})"):
+        with st.expander(f"Documents it retrieved ({len(docs)})"):
             if not docs:
                 st.caption("None — the raw query matched nothing.")
             for d in docs:
@@ -1274,14 +1293,14 @@ elif run_btn and query and compare_mode:
     st.markdown("---")
     left, right = st.columns(2)
     with left:
-        st.markdown("### 🤖 Single agent (baseline)")
+        st.markdown("### Single agent (baseline)")
         with st.spinner("retrieve, then answer..."):
             sa = run_single_agent(query, top_k=result_limit)
         st.success(sa["answer"] if show_details else _one_line(sa["answer"]))
         st.caption(f"`{sa['arm']}` · {len(sa.get('docs') or [])} document(s) · "
                    f"{sa['elapsed']}s")
     with right:
-        st.markdown("### 🧠 Multi-agent pipeline")
+        st.markdown("### Multi-agent pipeline")
         with st.spinner("grounding, rewriting, 3 fetches, evaluating, presenting..."):
             t0 = time.time()
             results = run_pipeline(query, show_steps=False, limit=result_limit,
@@ -1307,27 +1326,27 @@ elif run_btn and query:
     # Pipeline steps display
     if show_pipeline:
         st.markdown("---")
-        st.markdown("### 🧠 Manager Agent — Think & Plan")
+        st.markdown("### Manager Agent — Think & Plan")
         step_col0, step_col1, step_col2, step_col3, step_col4 = st.columns(5)
         with step_col0:
             st.markdown("""<div class="agent-card">
-                <b>Step 0</b><br>📅 Temporal Grounder<br><small>rule-based, offline</small>
+                <b>Step 0</b><br>Temporal Grounder<br><small>rule-based, offline</small>
             </div>""", unsafe_allow_html=True)
         with step_col1:
             st.markdown("""<div class="agent-card">
-                <b>Step 1</b><br>🔄 Query Rewriter<br><small>Llama 3.1 local</small>
+                <b>Step 1</b><br>Query Rewriter<br><small>Llama 3.1 local</small>
             </div>""", unsafe_allow_html=True)
         with step_col2:
             st.markdown("""<div class="agent-card">
-                <b>Step 2</b><br>💬 Community Agent<br><small>Reddit Live API</small>
+                <b>Step 2</b><br>Community Agent<br><small>Reddit Live API</small>
             </div>""", unsafe_allow_html=True)
         with step_col3:
             st.markdown("""<div class="agent-card">
-                <b>Step 3</b><br>📦 Release Notes Agent<br><small>Releases Live API</small>
+                <b>Step 3</b><br>Release Notes Agent<br><small>Releases Live API</small>
             </div>""", unsafe_allow_html=True)
         with step_col4:
             st.markdown("""<div class="agent-card">
-                <b>Step 4</b><br>🔐 CVE Agent<br><small>Security Live API</small>
+                <b>Step 4</b><br>CVE Agent<br><small>Security Live API</small>
             </div>""", unsafe_allow_html=True)
         st.markdown("---")
 
@@ -1353,7 +1372,7 @@ elif run_btn and query:
         window_note = (a.strftime("%b %d, %Y") if a == b
                        else f'{a.strftime("%b %d, %Y")} to {b.strftime("%b %d, %Y")}')
 
-    with st.spinner("🧾 Answer Presenter Agent — writing a cited paragraph..."):
+    with st.spinner("Answer Presenter Agent — writing a cited paragraph..."):
         t0 = time.time()
         presented = present_answer(
             results["original_query"], results,
@@ -1398,7 +1417,7 @@ elif run_btn and query:
     if show_details:
         if show_pipeline:
             # ── TEMPORAL GROUNDING RESULT ─────────────────────────
-            st.markdown("### 📅 Temporal Grounder Agent")
+            st.markdown("### Temporal Grounder Agent")
             if tr is not None and tr.changed:
                 tg1, tg2 = st.columns(2)
                 with tg1:
@@ -1442,7 +1461,7 @@ elif run_btn and query:
         if show_pipeline:
             # ── VENDOR + INTENT GROUNDING RESULT ──────────────────
             if gq is not None:
-                st.markdown("### 🏷 Vendor & Intent Grounder")
+                st.markdown("### Vendor & Intent Grounder")
                 vg1, vg2 = st.columns(2)
                 with vg1:
                     if gq.vendors:
@@ -1482,7 +1501,7 @@ elif run_btn and query:
                              "search — naming a product would make it specific.")
 
             # ── QUERY REWRITING RESULT ────────────────────────────
-            st.markdown("### 🔄 Query Rewriter Agent")
+            st.markdown("### Query Rewriter Agent")
             rw_col1, rw_col2 = st.columns(2)
             with rw_col1:
                 st.info(f"**Grounded input:** {results['grounded_query']}")
@@ -1513,7 +1532,7 @@ elif run_btn and query:
         # it; the top-voted comment is that answer, shown before anything synthesised.
         yn = results.get("yesno")
         if yn is not None:
-            st.markdown("### 🗳 Poll")
+            st.markdown("### Poll")
             line = yesno.verdict_line(yn)
             (st.success if yn["answered"] else st.warning)(f"**{line}**")
             n = max(1, yn["yes"] + yn["no"] + (0 if yn.get("unclear_as_no") else yn["unclear"]))
@@ -1524,13 +1543,13 @@ elif run_btn and query:
 
         th = results.get("thread")
         if th is not None:
-            st.markdown("### 🧵 Answer from the thread")
+            st.markdown("### Answer from the thread")
             tc = results.get("top_comment")
             if tc:
                 st.success(f"**Top-voted comment — {tc.get('score', 0)} points, "
                            f"u/{tc.get('author', '')}:**\n\n{tc.get('body', '')}")
                 if tc.get("permalink"):
-                    st.caption(f"🔗 {tc['permalink']}")
+                    st.caption(f"{tc['permalink']}")
             else:
                 st.warning("No comment from anyone other than the asker or a bot — "
                            "nothing to present as an answer.")
@@ -1546,12 +1565,12 @@ elif run_btn and query:
         # Shown above the evaluator because for this shape of question it *is*
         # the answer, and a paragraph synthesised underneath it is elaboration.
         if yn is not None:
-            st.markdown("### ✅ Yes/No Consensus")
+            st.markdown("### Yes/No Consensus")
             st.caption(f"Counted off the comments of “{yn['thread']['title']}” "
                        f"(r/{yn['thread'].get('subreddit','')}) — one vote per commenter, "
                        f"the person who asked excluded.")
             if yn["thread"].get("url"):
-                st.caption(f"🔗 {yn['thread']['url']}")
+                st.caption(f"{yn['thread']['url']}")
             if yn["asker_report"]:
                 st.caption(f"The asker's own report: “{yn['asker_report'][:200]}”")
             with st.expander(f"Show the {len(yn['votes'])} comment(s) behind this count"):
@@ -1564,7 +1583,7 @@ elif run_btn and query:
 
         if show_pipeline:
             # ── RLAIF EVALUATION METRICS ──────────────────────────
-            st.markdown("### 📊 RLAIF Evaluator")
+            st.markdown("### RLAIF Evaluator")
             ev = results["evaluation"]
             sv = ev.get("survey", {})
             m1, m2, m3, m4, m5, m6 = st.columns(6)
@@ -1619,11 +1638,11 @@ elif run_btn and query:
             # records and one kernel read as "Release Notes (5)" while the answer
             # below it said one release. Both numbers were right about different
             # things; only the label was wrong.
-            f"📦 Releases ({_n_shipped(results['releases'])})"
+            f"Releases ({_n_shipped(results['releases'])})"
             + (f" + {len(results['releases']) - _n_shipped(results['releases'])} advisory"
                if len(results['releases']) > _n_shipped(results['releases']) else ""),
-            f"💬 Community Feedback ({len(results['community'])})",
-            f"🔐 Security Discussion ({len(results['cve'])})",
+            f"Community Feedback ({len(results['community'])})",
+            f"Security Discussion ({len(results['cve'])})",
         ])
 
         # Release Notes Tab
@@ -1645,7 +1664,7 @@ elif run_btn and query:
                     # None = no window asked for, or an unparseable date: shown as
                     # nothing rather than as a miss.
                     in_win = matches_window(r.get("date", ""), tr) if tr is not None else None
-                    win_badge = "" if in_win is None else (" 📅 in window" if in_win else " ⏳ outside window")
+                    win_badge = "" if in_win is None else (" in window" if in_win else " outside window")
 
                     with st.expander(f"{badge} {r['product']} v{r['version']} — {r['date']}{win_badge}"):
                         col1, col2 = st.columns([3, 1])
@@ -1683,8 +1702,8 @@ elif run_btn and query:
                         col3.metric("Date", post["date"])
 
                         tags = []
-                        if post.get("is_cve"): tags.append("🔐 CVE")
-                        if post.get("is_update"): tags.append("📦 Update")
+                        if post.get("is_cve"): tags.append("CVE")
+                        if post.get("is_update"): tags.append("Update")
                         if tags: st.markdown(" ".join(tags))
                         if post.get("url"): st.markdown(f"[View on Reddit]({post['url']})")
             else:
@@ -1695,7 +1714,7 @@ elif run_btn and query:
             st.markdown("**Security vulnerabilities from releasetrain.io CVE feed**")
             if results["cve"]:
                 for cve in results["cve"]:
-                    with st.expander(f"🔐 {cve['title'][:80]}"):
+                    with st.expander(f"{cve['title'][:80]}"):
                         col1, col2 = st.columns(2)
                         col1.metric("Subreddit", f"r/{cve['subreddit']}")
                         col2.metric("Date", cve["date"])
@@ -1706,7 +1725,7 @@ elif run_btn and query:
 
         # Raw data
         if show_raw:
-            with st.expander("🔍 Raw API response data"):
+            with st.expander("Raw API response data"):
                 # `temporal` holds a dataclass, which st.json cannot serialise;
                 # show its resolved fields instead of dropping the step from view.
                 raw = dict(results)
@@ -1740,14 +1759,14 @@ elif run_btn and query:
         # reachable it composes the same shape by rule and says so, rather than
         # dressing rule-based text up as model output.
         st.markdown("---")
-        st.markdown("### ✅ Final Answer")
+        st.markdown("### Final Answer")
 
         st.success(presented.text)
 
         st.caption(_answer_caption(presented, len(cited), present_secs))
 
         if presented.evidence:
-            with st.expander("🔎 Why these sources, and which claim rests on which"):
+            with st.expander("Why these sources, and which claim rests on which"):
                 st.markdown(_xai_panel(trace))
 
     # ── LOG THE RUN ───────────────────────────────────────
@@ -1793,7 +1812,7 @@ _last = st.session_state.get("last_answer")
 if _last:
     st.caption(f"Was this answer right? — “{_last['query']}”")
     c1, c2, _ = st.columns([2, 2, 5])
-    for col, verdict, label in ((c1, "correct", "👍 Correct"), (c2, "wrong", "👎 Wrong")):
+    for col, verdict, label in ((c1, "correct", "Correct"), (c2, "wrong", "Wrong")):
         if col.button(label, key=f"fb_{verdict}", use_container_width=True):
             results_view.record_feedback({"ts": datetime.now().isoformat(timespec="seconds"),
                                           **_last, "verdict": verdict})

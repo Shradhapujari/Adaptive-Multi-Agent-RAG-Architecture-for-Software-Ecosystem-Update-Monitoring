@@ -19,7 +19,7 @@ The paper reports **+17.2%** retrieval quality over a single-agent baseline. Re-
 
 So the project's contribution is **a negative result and its remedy**, not an improvement claim. Full chain of measurements, confounds and superseded readings: [`eval_harness/FINDINGS.md`](eval_harness/FINDINGS.md); every number maps to a run id in [`results/PROVENANCE.md`](results/PROVENANCE.md).
 
-What does hold: **zero hallucinated version numbers** across version-specific evaluation, and the whole system runs **fully locally** on Apple Silicon via Ollama, with 731 offline tests.
+What does hold: **zero hallucinated version numbers** across version-specific evaluation, and the whole system runs **fully locally** on Apple Silicon via Ollama, with 732 offline tests.
 
 ---
 
@@ -80,7 +80,7 @@ streamlit run app_1.py        # the demo, on http://localhost:8501
 ```bash
 python multiagent_rag_v3.py                # CLI, for execution traces
 python -m eval_harness.run_eval --help     # reproduce the evaluation
-pytest -q                                  # 731 offline tests, no network
+pytest -q                                  # 732 offline tests, no network
 ```
 
 Everything else — environment variables, the presenter model, the evaluation harness, the Claude Code launcher — is in [Running the System](docs/Running-the-System.md).

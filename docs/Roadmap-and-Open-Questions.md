@@ -13,8 +13,6 @@ demonstrably exploits and the baseline cannot.
 
 ## Unfinished measurement
 
-- **The 300-question run** stopped at 68 of 300. `--resume <run_id>` continues
-  it. Roughly 60 s per question across three arms.
 - **The self-reflective baseline** (Self-RAG-style critiques, CRAG-style
   correction, model held constant) is implemented with 43 tests; its run stopped
   at 8 of 100 questions and **no results are reported from it**.
@@ -36,12 +34,20 @@ demonstrably exploits and the baseline cannot.
 - [x] Temporal grounding before retrieval, with window-aware ranking
       (`temporal.py`, `fetch_union.py`)
 - [x] Cited prose answers in the demo (`answer_agent.py`)
+- [x] 300-question run completed at 300/300 (`--resume`) — retrieval parity
+      holds and the format confound is confirmed at full sample
+- [x] Own-post retrieval leak fixed — Reddit-mined questions were retrieving
+      their own source post (`exclude_own_post`, default since 2026-09-17)
+- [x] Clean, leak-free n = 500 rerun (`run_1789703506`): nDCG@3 0.30 on every
+      arm, parity exact
 
 ## Planned
 
 - [ ] Embedding-based vendor matching, replacing the static alias dictionary —
       today, phrases like *"Synology NAS unreachable after upgrade"* lose the
       vendor to preprocessing
+- [ ] Run the 1,000-question benchmark (`data/benchmark_1000.json`) — built,
+      not yet run
 - [ ] Learned reward model for the Evaluator, replacing heuristic scoring
 - [ ] Adaptive threshold selection, replacing the hand-tuned retry threshold
 - [ ] Wire Stack Overflow into the Retriever — it is in the data lake, unused
@@ -64,6 +70,9 @@ demonstrably exploits and the baseline cannot.
 - **Temporal precision is bounded by the endpoint.** Relative dates are resolved
   before retrieval, but `/api/v/` matches product names, so the window ranks
   results after the fetch rather than narrowing it.
+- **Heuristic thresholds.** θ = 0.30 for retry and the Evaluator's scoring
+  weights were tuned by hand; learned reward models and adaptive threshold
+  selection are in Planned above.
 - **Correctness is low across the board.** 0.296 / 0.367 / 0.326 — every arm is
   wrong more often than right. That is the difficulty of the domain, not a
   ranking of the systems.
