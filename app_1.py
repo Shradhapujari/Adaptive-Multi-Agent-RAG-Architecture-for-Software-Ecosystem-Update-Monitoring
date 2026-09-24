@@ -1487,16 +1487,21 @@ elif run_btn and query:
     # reader has to see. Everything else is behind "Show details".
     yn = results.get("yesno")
     if not show_details:
-        st.markdown(f"**Q:** {query}")
         # The tally is the answer only when the question *is* the thread's
         # (picked from the sidebar). For a typed question a matched thread
         # with two non-committal comments reads "No -- No (2 users)", which
         # answers something else.
         short = (yesno.verdict_line(yn) if yn is not None and yn["answered"] and reddit_id
                  else _one_line(presented.text))
-        st.success(f"**A:** {short}")
-        st.caption(_answer_caption(presented, len(cited), present_secs)
-                   + " · turn on **Show details** in the sidebar for the evidence.")
+        st.success(short)
+        # Nothing else when the model wrote it: the default view is the answer.
+        # The exception is an answer the model did NOT write -- a guardrail
+        # rejection falls back to rule-composed prose, and showing that with no
+        # marker at all reads as a model answer, which is the confusion
+        # _answer_caption exists to prevent. Details view carries it always.
+        if presented.mode != "llm":
+            st.caption(_answer_caption(presented, len(cited), present_secs)
+                       + " · turn on **Show details** in the sidebar for the evidence.")
         for e in results.get("errors") or []:
             st.error(f"**{e['agent']} feed unreachable** — {e['error']}.")
 
@@ -1882,7 +1887,7 @@ elif run_btn and query:
                        "were served from the local store, retrieved during an "
                        "earlier run. Dates on them are release dates, not "
                        "retrieval dates.")
-        if _run_id is not None:
+        if _run_id is not None and show_details:
             st.caption(f"Logged as run #{_run_id} in the local store.")
     st.session_state["last_answer"] = {"query": query, "reddit_id": reddit_id, "arm": "marag"}
 
