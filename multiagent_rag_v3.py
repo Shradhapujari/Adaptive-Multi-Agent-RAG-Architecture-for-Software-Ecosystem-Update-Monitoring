@@ -2070,6 +2070,33 @@ def _pause(prompt: str) -> str:
     except EOFError:
         return ""
 
+def show_commands():
+    print("  Commands:")
+    print("    'why'  — show why multi-agent matters (start here!)")
+    print("    'demo' — run all 3 demo queries")
+    print("    'auto' — AUTO MODE: fetch live Reddit questions and answer them")
+    print("    'help' — show this list again")
+    print("    'exit' — quit")
+    print("    or type any question")
+
+
+def dispatch(command: str):
+    """Run one command or question. Raises nothing the caller must handle."""
+    if command == "why":
+        show_why()
+    elif command == "help" or command == "?":
+        bar("─"); show_commands(); bar("─")
+    elif command == "demo":
+        for q in DEMO_QUERIES:
+            run_demo(q)
+            _pause("\n  Press Enter for next query...")
+    elif command in ("auto", "auto mode"):
+        n = _pause("  How many questions to answer? (default 5): ").strip()
+        auto_mode(limit=int(n) if n.isdigit() else 5)
+    else:
+        run_demo(command)
+
+
 def interactive():
     print()
     bar("═")
@@ -2077,12 +2104,7 @@ def interactive():
     print(f"  Dataset  : {len(DOCS)} Reddit posts about software updates")
     print(f"  LLM      : Llama 3.1 via Ollama (local, no API key)")
     bar("─")
-    print("  Commands:")
-    print("    'why'  — show why multi-agent matters (start here!)")
-    print("    'demo' — run all 3 demo queries")
-    print("    'auto' — AUTO MODE: fetch live Reddit questions and answer them")
-    print("    'exit' — quit")
-    print("    or type any question")
+    show_commands()
     bar("═")
 
     while True:
@@ -2091,28 +2113,20 @@ def interactive():
         except (KeyboardInterrupt, EOFError):
             print("\nGoodbye!"); break
         if not user_input: continue
-        if user_input.lower() in ("exit","quit"): print("Goodbye!"); break
-        elif user_input.lower() == "why":  show_why()
-        elif user_input.lower() == "demo":
-            for q in DEMO_QUERIES:
-                run_demo(q)
-                _pause("\n  Press Enter for next query...")
-        elif user_input.lower() in ("auto", "auto mode"):
-            try:
-                n = input("  How many questions to answer? (default 5): ").strip()
-                n = int(n) if n else 5
-            except:
-                n = 5
-            auto_mode(limit=n)
-        else:
-            run_demo(user_input)
+        command = user_input.lower()
+        if command in ("exit", "quit"): print("Goodbye!"); break
+        # A question takes a slow LLM round-trip and live network fetches, so
+        # Ctrl-C mid-answer and a failing source are both things a demo does in
+        # front of an audience. Neither should end the session: report it on one
+        # line and hand the prompt back.
+        try:
+            dispatch(command)
+        except KeyboardInterrupt:
+            print("\n  ⏹  Cancelled — back to the prompt.")
+        except Exception as e:
+            print(f"\n  ❌  {type(e).__name__}: {e}")
+            print("  The session is still up — try another question.")
 
-if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "demo":
-        show_why()
-        for q in DEMO_QUERIES: run_demo(q)
-    else:
-        interactive()
 # ─────────────────────────────────────────────────────────────
 # AUTO MODE — fetch live Reddit questions and answer them
 # ─────────────────────────────────────────────────────────────
@@ -2210,3 +2224,11 @@ def auto_mode(limit=5):
     print("\n" + "═"*58)
     print("  Auto mode complete.")
     print("═"*58)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "demo":
+        show_why()
+        for q in DEMO_QUERIES: run_demo(q)
+    else:
+        interactive()
