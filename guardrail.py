@@ -169,10 +169,19 @@ def _asserts(text: str, question: str = "") -> bool:
 _DECLINE_RE = re.compile(
     r"\bno\s+(?:\w+\s+){0,2}sources?\b[^.\n]{0,40}"
     r"\b(?:mention|state|say|report|cover|address|answer|list|contain|show|indicate)"
-    r"|\bnone of the (?:sources?|documents?|results?)\b"
+    r"|\bnone of the (?:\w+\s+){0,2}(?:sources?|documents?|results?|records?|"
+    r"feeds?|notes?|posts?)\b"
     r"|\bthe sources?\b[^.\n]{0,20}\b(?:do|does) not\b[^.\n]{0,30}"
     r"\b(?:mention|state|say|report|cover|address|answer|list|contain|show|indicate)"
-    r"|\bno (?:matching|relevant) (?:sources?|reports?|records?|documents?|results?)\b",
+    r"|\bno (?:matching|relevant) (?:sources?|reports?|records?|documents?|results?)\b"
+    # "There are no critical Linux updates mentioned in the provided sources."
+    # The subject sits between the "no" and the verb, so the two are six words
+    # apart and neither alternative above reaches: what marks the refusal is
+    # the verb landing on the sources, not the distance from the "no".
+    r"|\b(?:no|none|nothing)\b[^.\n]{0,70}\b(?:mention(?:ed)?|list(?:ed)?|report(?:ed)?|"
+    r"document(?:ed)?|describ(?:ed)?|record(?:ed)?|found|shown|included)\b"
+    r"[^.\n]{0,30}\b(?:sources?|documents?|results?|records?|feeds?|"
+    r"release notes?|advisor(?:y|ies)|provided \w+)\b",
     re.I)
 
 
