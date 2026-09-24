@@ -44,6 +44,26 @@ _ISO_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 # that only knows Fedora 44 is exactly the invention this module exists to
 # catch, so the pair is checked even when the number is bare.
 _NAMED_VERSION_RE = re.compile(r"\b([A-Za-z][A-Za-z0-9+#.-]{1,30})\s+v?(\d+(?:\.\d+)*)\b")
+# A deflection answers the question by pointing at the source instead of
+# reporting what it says: "The latest Django release notes are available in the
+# [Release Notes - django v6.1.1] source." It passes every check above -- it
+# invents no version, no date, no label -- and tells the reader nothing they
+# could not have worked out from the question. The prompt already forbids it
+# and llama3.1 writes it anyway, which is why it is caught here rather than
+# asked for more politely.
+#
+# The pointing verb alone is not enough: "the fix is available in Django 6.1.1"
+# is a real answer that happens to share the construction. What separates them
+# is the object -- a deflection points at a *document*, an answer points at a
+# *version* -- so both halves are required.
+_POINTER_RE = re.compile(
+    r"\b(?:is|are|was|were|can be|could be)\s+"
+    r"(?:available|found|listed|documented|described|detailed|provided)\s+"
+    r"(?:in|at|on|under)\b"
+    r"|\b(?:see|refer to)\b", re.I)
+_DOC_NOUN_RE = re.compile(
+    r"\b(?:sources?|release notes?|advisor(?:y|ies)|changelogs?|documentation"
+    r"|docs?|links?|pages?|articles?|feeds?|bulletins?)\b", re.I)
 
 
 @dataclass
@@ -126,6 +146,25 @@ def _asserts(text: str) -> bool:
                 or extract_dates(text))
 
 
+def _deflects(text: str) -> bool:
+    """Does this answer point at a document instead of reporting it?
+
+    Both halves have to land, and the document noun has to follow the pointing
+    verb: "available in the release notes" defers, "available in Django 6.1.1"
+    answers, and "no updates are *mentioned in* the release notes" is a finding
+    about the source rather than a redirection to it -- which is why the verb
+    list holds only verbs that redirect.
+    """
+    # Citations are stripped first: every label in this domain reads "Release
+    # Notes - ..." or "Security Advisory - ...", so leaving them in makes the
+    # document noun match every cited sentence -- including "the fix is
+    # available in Django 6.1.1 [Release Notes - django v6.1.1]", which points
+    # at a version and is exactly what should pass.
+    prose = _CITE_RE.sub(" ", text or "")
+    m = _POINTER_RE.search(prose)
+    return bool(m and _DOC_NOUN_RE.search(prose[m.end():]))
+
+
 def check(answer: str, evidence: Sequence) -> Verdict:
     """Check a presented answer against the evidence it was built from."""
     text = (answer or "").strip()
@@ -160,6 +199,13 @@ def check(answer: str, evidence: Sequence) -> Verdict:
     # or a label anyway is asserting, and the assertion is what gets checked.
     if not cited and not abstained:
         bad.append(Violation("uncited", f"{len(labels)} sources given, none cited"))
+    # Declining is allowed to point nowhere; answering is not allowed to point
+    # at the source it was handed. The rule-based paragraph this falls back to
+    # reports the release and quotes its note, which is the answer the model
+    # was asked for.
+    if not abstained and _deflects(text):
+        bad.append(Violation("deflected",
+                             "answer points at the sources instead of reporting them"))
 
     _known: dict = {}
     for product, v in _named_versions(_ISO_RE.sub(" ", haystack)):

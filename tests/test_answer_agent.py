@@ -209,6 +209,31 @@ def test_grounded_model_output_passes_the_guardrail(monkeypatch):
     assert out.mode == "llm" and out.note == ""
 
 
+def test_an_answer_that_points_at_the_sources_falls_back(monkeypatch):
+    # llama3.1's real output for "Latest Django release notes": it invents
+    # nothing and cites correctly, so every other check passes it, and it tells
+    # the reader only what they already asked. The fallback reports the release
+    # and quotes its note, which is the answer that was asked for.
+    _no_env(monkeypatch)
+    _patch_client(monkeypatch, _StubClient(
+        "The latest Django release notes are available in the "
+        "[Release Notes - Django v5.2.1, 2026-08-20] source."))
+    out = present_answer("q", RESULTS, model_spec="stub:model")
+    assert out.mode == "rule-based"
+    assert "deflected" in out.note
+    assert "available in" not in out.text
+
+
+def test_a_version_the_fix_ships_in_is_not_a_deflection(monkeypatch):
+    # Same construction, different object: this one points at a version, which
+    # is an answer. The deflection check must not cost it the LLM path.
+    _no_env(monkeypatch)
+    _patch_client(monkeypatch, _StubClient(
+        "The fix is available in Django 5.2.1 [Release Notes - Django v5.2.1, 2026-08-20]."))
+    out = present_answer("q", RESULTS, model_spec="stub:model")
+    assert out.mode == "llm" and out.note == ""
+
+
 def test_env_supplies_the_spec_when_caller_does_not(monkeypatch):
     monkeypatch.setenv("PRESENTER_MODEL", "stub:model")
     _patch_client(monkeypatch, _StubClient("prose [Community - r/linux, 2026-08-31]"))
