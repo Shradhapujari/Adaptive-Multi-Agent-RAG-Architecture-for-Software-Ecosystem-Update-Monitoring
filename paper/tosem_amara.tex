@@ -1637,8 +1637,9 @@ so every adjacent pair is a single-factor comparison. A1g branches from A1
 rather than continuing the chain: it adds question grounding \emph{without}
 any coordination, which is what separates understanding the question from
 coordinating agents. All rungs are now measured against a frozen corpus
-(Table~\ref{tab:ladder-results}); A4 executed but cannot trigger, for the
-structural reason given in Section~\ref{sec:retry}.}
+(Table~\ref{tab:ladder-results}); A4 executed but could not trigger as run,
+for the structural reason given in Section~\ref{sec:retry}, which also reports
+the fix that makes the rung reachable.}
 \label{tab:ladder}
 \begin{tabular}{llll}
 \toprule
@@ -2677,7 +2678,7 @@ compared against each other must execute in the same run, and the only way to
 be sure of that is to make the run frozen and reproducible and then reproduce
 it.
 
-\subsection{The Retry That Cannot Fire}\label{sec:retry}
+\subsection{The Retry That Could Not Fire}\label{sec:retry}
 
 Retrieval parity between the architectures leaves one capability of the
 decomposition unmeasured, and it is the one a single agent structurally lacks:
@@ -2726,9 +2727,13 @@ category. The loop it triggers is the Orchestrator's: the Query Rewriter is
 re-invoked with the phrasings already searched and asked for different
 vocabulary, for at most two rounds, rather than the fixed widening string the
 harness once carried. Whether those retries change retrieval or answers is not
-yet measured; the frozen one-pass comparison is queued and will be reported
-when it completes. Until then the rung is reachable but unmeasured, which is a
-different claim from the null it could have been mistaken for.
+measured here. The measurement it requires is a single frozen pass carrying the
+retry arm and its comparison arm together: the two arms must share one judged
+pool, because the demonstration in Section~\ref{sec:pool-demo} separates
+byte-identical rankings by $+0.055$ recall@5 when they do not. We report the
+rung as reachable and unmeasured, which is a different claim from the null it
+could have been mistaken for, and we decline to predict which of the two the
+measurement will return.
 
 \subsubsection{An Accidental Demonstration}\label{sec:pool-demo}
 
