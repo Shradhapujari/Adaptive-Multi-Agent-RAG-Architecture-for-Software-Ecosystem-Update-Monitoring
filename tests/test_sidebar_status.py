@@ -117,3 +117,61 @@ def test_caption_after_a_run_reports_the_model_that_answered():
 def test_caption_after_a_rule_based_run_says_why():
     c = _presenter_caption("", _Presented("rule-based", note="no presenter model configured or reachable"))
     assert "rule-based" in c and "no presenter model configured or reachable" in c
+
+
+# ── The paper view ───────────────────────────────────────
+# The same run, grouped as the paper's four agents. The risk in folding seven
+# rows into four is that a fact gets averaged away, so these check that the
+# things the detailed view reports survive the fold.
+
+
+def test_paper_view_names_the_decks_four_agents():
+    t = _agent_table(_results(), view="paper")
+    for name in ("Orchestrator", "Query Rewriter", "Retriever", "Evaluator"):
+        assert f"| {name} |" in t
+    # Outside the four, and kept: hiding who wrote the answer would mislead.
+    assert "| Answer Presenter |" in t
+    # Folded away, not deleted -- these are rows only in the detailed view.
+    assert "| Community |" not in t and "| Release Notes |" not in t
+    assert "| Temporal Grounder |" not in t
+
+
+def test_detailed_view_is_still_the_default():
+    """A caller that does not ask gets the fuller report."""
+    assert "| Community |" in _agent_table(_results())
+    assert "| Orchestrator |" not in _agent_table(_results())
+
+
+def test_the_retriever_row_counts_every_feeds_documents():
+    t = _agent_table(_results(community=[{"title": "a"}],
+                              cve=[{"title": "b"}]), view="paper")
+    assert "2 doc(s)" in t and "3/3 feeds" in t
+
+
+def test_folding_three_feeds_does_not_hide_one_being_down():
+    """The fold must not report "3 feeds" over two live ones -- that would
+    overstate the pool the answer rests on."""
+    t = _agent_table(_results(errors=[{"agent": "Release Notes",
+                                       "error": "TimeoutError: read timed out"}]),
+                     view="paper")
+    assert "2/3 feeds" in t
+    assert "Release Notes unreachable" in t
+
+
+def test_the_rewriter_row_carries_the_grounding_folded_into_it():
+    t = _agent_table(_results(rewrite=Rewrite("x", mode="llm", model="llama3.1")),
+                     view="paper")
+    assert "llama3.1" in t              # the rewrite itself
+    assert "nothing to ground" in t     # the temporal step folded in
+
+
+def test_the_evaluator_row_reports_the_score_and_the_signal():
+    t = _agent_table(_results(evaluation={"quality": 0.55, "signal": "positive"}),
+                     view="paper")
+    assert "0.55" in t and "positive" in t
+
+
+def test_paper_view_is_a_markdown_table_too():
+    t = _agent_table(_results(), view="paper")
+    assert t.splitlines()[0].startswith("| Agent")
+    assert t.splitlines()[1].startswith("|---")
