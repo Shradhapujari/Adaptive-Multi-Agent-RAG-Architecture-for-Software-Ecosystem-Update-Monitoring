@@ -136,6 +136,9 @@ def _named_versions(text: str) -> List[Tuple[str, str]]:
     return out
 
 
+_CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
+
+
 def _asserts(text: str, question: str = "") -> bool:
     """Does this text state something checkable -- a version, a date, a label?
 
@@ -154,7 +157,14 @@ def _asserts(text: str, question: str = "") -> bool:
                                                   multipart_only=True)}
     given_named = set(_named_versions(question or ""))
     given_dates = set(extract_dates(question or ""))
+    # A CVE id is neither a version nor a date, so nothing else here sees one.
+    # It matters most where a sentence declines and then names advisories:
+    # "no critical updates today, but ... CVE-2026-12556, CVE-2026-79290" reads
+    # as a refusal by shape and would ship three uncited ids if the decline
+    # pattern were allowed to excuse it.
+    given_cves = {c.upper() for c in _CVE_RE.findall(question or "")}
     return bool(_CITE_RE.search(text)
+                or ({c.upper() for c in _CVE_RE.findall(text)} - given_cves)
                 or (set(extract_versions(_ISO_RE.sub(" ", text), multipart_only=True))
                     - given_versions)
                 or (set(_named_versions(text)) - given_named)
@@ -174,6 +184,7 @@ _DECLINE_RE = re.compile(
     r"|\bthe sources?\b[^.\n]{0,20}\b(?:do|does) not\b[^.\n]{0,30}"
     r"\b(?:mention|state|say|report|cover|address|answer|list|contain|show|indicate)"
     r"|\bno (?:matching|relevant) (?:sources?|reports?|records?|documents?|results?)\b"
+<<<<<<< Updated upstream
     # "There are no critical Linux updates mentioned in the provided sources."
     # The subject sits between the "no" and the verb, so the two are six words
     # apart and neither alternative above reaches: what marks the refusal is
@@ -182,6 +193,14 @@ _DECLINE_RE = re.compile(
     r"document(?:ed)?|describ(?:ed)?|record(?:ed)?|found|shown|included)\b"
     r"[^.\n]{0,30}\b(?:sources?|documents?|results?|records?|feeds?|"
     r"release notes?|advisor(?:y|ies)|provided \w+)\b",
+=======
+    # "There is no negative community reaction to a MacOS update in the
+    # provided sources." No verb lands on the sources at all: the only verb is
+    # the copula, and the sources arrive as a bare prepositional tail.
+    r"|\bthere (?:is|are|was|were)\s+no\b[^.\n]{0,80}\bin the\b[^.\n]{0,25}"
+    r"\b(?:sources?|documents?|results?|records?|feeds?|release notes?|"
+    r"advisor(?:y|ies)|provided \w+)\b",
+>>>>>>> Stashed changes
     re.I)
 
 

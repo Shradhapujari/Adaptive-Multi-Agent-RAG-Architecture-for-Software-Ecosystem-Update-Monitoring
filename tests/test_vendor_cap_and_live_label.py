@@ -143,6 +143,7 @@ def test_a_plain_refusal_that_names_the_question_is_still_a_refusal():
     assert not guardrail.check("No source mentions Windows 11, but Chrome 199.0.1 shipped.", ev, q).ok
 
 
+<<<<<<< Updated upstream
 def test_the_subject_may_sit_between_the_no_and_the_verb():
     """llama3.1's answer to "Any critical Linux updates today?" was "There are
     no critical Linux updates mentioned in the provided sources." -- a refusal
@@ -162,3 +163,27 @@ def test_the_subject_may_sit_between_the_no_and_the_verb():
     assert not guardrail.check(
         "There are no critical updates mentioned in the sources, but Chrome 156.0.1 shipped.",
         ev, q).ok
+=======
+def test_a_copular_refusal_declines_but_a_named_cve_still_asserts():
+    """Two halves of one change. "There is no X in the provided sources" has no
+    verb on the sources at all, so it failed as uncited; and widening the
+    pattern to reach it would have excused "no updates today, but ...
+    CVE-2026-12556", which names three advisories and cites none. A CVE id now
+    counts as an assertion, so the second stays rejected. Both shapes were
+    llama3.1 output, reported by the Q&A-prep session."""
+    import guardrail
+    from answer_agent import Evidence
+    ev = [Evidence(label="Release Notes - macos v26.1, 2026-09-20",
+                   kind="release", title="macos", detail="notes")]
+    assert guardrail.check(
+        "There is no negative community reaction to a MacOS update in the provided sources.",
+        ev, "MacOS updates with negative community reaction").ok
+    assert not guardrail.check(
+        "There are no critical software updates published today, but several security "
+        "advisories were published in the past few days, including CVE-2026-12556, "
+        "CVE-2026-79290, and CVE-2026-43670.",
+        ev, "Critical software updates published today").ok
+    # A CVE the question named is a given, like a version.
+    assert guardrail.check("No source mentions CVE-2026-12556.", ev,
+                           "Is there a patch for CVE-2026-12556?").ok
+>>>>>>> Stashed changes
