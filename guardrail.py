@@ -64,6 +64,10 @@ _POINTER_RE = re.compile(
 _DOC_NOUN_RE = re.compile(
     r"\b(?:sources?|release notes?|advisor(?:y|ies)|changelogs?|documentation"
     r"|docs?|links?|pages?|articles?|feeds?|bulletins?)\b", re.I)
+# "...are available in [Release Notes - django v6.1.1]": the label itself is
+# the object. Only an article may sit between, so a version named before the
+# bracket keeps the sentence an answer.
+_CITE_AS_OBJECT_RE = re.compile(r"\s*(?:the\s+)?\[", re.I)
 
 
 @dataclass
@@ -132,6 +136,9 @@ def _named_versions(text: str) -> List[Tuple[str, str]]:
     return out
 
 
+_CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
+
+
 def _asserts(text: str, question: str = "") -> bool:
     """Does this text state something checkable -- a version, a date, a label?
 
@@ -150,7 +157,14 @@ def _asserts(text: str, question: str = "") -> bool:
                                                   multipart_only=True)}
     given_named = set(_named_versions(question or ""))
     given_dates = set(extract_dates(question or ""))
+    # A CVE id is neither a version nor a date, so nothing else here sees one.
+    # It matters most where a sentence declines and then names advisories:
+    # "no critical updates today, but ... CVE-2026-12556, CVE-2026-79290" reads
+    # as a refusal by shape and would ship three uncited ids if the decline
+    # pattern were allowed to excuse it.
+    given_cves = {c.upper() for c in _CVE_RE.findall(question or "")}
     return bool(_CITE_RE.search(text)
+                or ({c.upper() for c in _CVE_RE.findall(text)} - given_cves)
                 or (set(extract_versions(_ISO_RE.sub(" ", text), multipart_only=True))
                     - given_versions)
                 or (set(_named_versions(text)) - given_named)
@@ -165,10 +179,25 @@ def _asserts(text: str, question: str = "") -> bool:
 _DECLINE_RE = re.compile(
     r"\bno\s+(?:\w+\s+){0,2}sources?\b[^.\n]{0,40}"
     r"\b(?:mention|state|say|report|cover|address|answer|list|contain|show|indicate)"
-    r"|\bnone of the (?:sources?|documents?|results?)\b"
+    r"|\bnone of the (?:\w+\s+){0,2}(?:sources?|documents?|results?|records?|"
+    r"feeds?|notes?|posts?)\b"
     r"|\bthe sources?\b[^.\n]{0,20}\b(?:do|does) not\b[^.\n]{0,30}"
     r"\b(?:mention|state|say|report|cover|address|answer|list|contain|show|indicate)"
-    r"|\bno (?:matching|relevant) (?:sources?|reports?|records?|documents?|results?)\b",
+    r"|\bno (?:matching|relevant) (?:sources?|reports?|records?|documents?|results?)\b"
+    # "There are no critical Linux updates mentioned in the provided sources."
+    # The subject sits between the "no" and the verb, so the two are six words
+    # apart and neither alternative above reaches: what marks the refusal is
+    # the verb landing on the sources, not the distance from the "no".
+    r"|\b(?:no|none|nothing)\b[^.\n]{0,70}\b(?:mention(?:ed)?|list(?:ed)?|report(?:ed)?|"
+    r"document(?:ed)?|describ(?:ed)?|record(?:ed)?|found|shown|included)\b"
+    r"[^.\n]{0,30}\b(?:sources?|documents?|results?|records?|feeds?|"
+    r"release notes?|advisor(?:y|ies)|provided \w+)\b"
+    # "There is no negative community reaction to a MacOS update in the
+    # provided sources." No verb lands on the sources at all: the only verb is
+    # the copula, and the sources arrive as a bare prepositional tail.
+    r"|\bthere (?:is|are|was|were)\s+no\b[^.\n]{0,80}\bin the\b[^.\n]{0,25}"
+    r"\b(?:sources?|documents?|results?|records?|feeds?|release notes?|"
+    r"advisor(?:y|ies)|provided \w+)\b",
     re.I)
 
 
@@ -185,15 +214,46 @@ def _deflects(text: str) -> bool:
     answers, and "no updates are *mentioned in* the release notes" is a finding
     about the source rather than a redirection to it -- which is why the verb
     list holds only verbs that redirect.
+
+    A deflection can point in two ways, and tag expansion decides which: when
+    the citation IS the object -- "are available in [Release Notes - django
+    v6.1.1]" -- there is no document noun left once the label is stripped, so
+    the object is read in the original text instead. Stripping alone missed
+    this the moment the presenter began citing by tag.
     """
-    # Citations are stripped first: every label in this domain reads "Release
-    # Notes - ..." or "Security Advisory - ...", so leaving them in makes the
-    # document noun match every cited sentence -- including "the fix is
-    # available in Django 6.1.1 [Release Notes - django v6.1.1]", which points
-    # at a version and is exactly what should pass.
-    prose = _CITE_RE.sub(" ", text or "")
+    t = text or ""
+    # Citations are stripped for the noun search: every label in this domain
+    # reads "Release Notes - ..." or "Security Advisory - ...", so leaving them
+    # in makes the document noun match every cited sentence -- including "the
+    # fix is available in Django 6.1.1 [Release Notes - django v6.1.1]", which
+    # points at a version and is exactly what should pass.
+    prose = _CITE_RE.sub(" ", t)
     m = _POINTER_RE.search(prose)
-    return bool(m and _DOC_NOUN_RE.search(prose[m.end():]))
+    if m and _DOC_NOUN_RE.search(prose[m.end():]):
+        return True
+    # The label as the object: the pointer has to run straight into the
+    # bracket, so a version named before it ("available in Django 6.1.1 [...]")
+    # still reads as an answer.
+    m = _POINTER_RE.search(t)
+    return bool(m and _CITE_AS_OBJECT_RE.match(t[m.end():]))
+
+
+def _truncated(text: str) -> bool:
+    """Did the answer stop in the middle of a citation?
+
+    A generation cut short by the token budget ends inside the label it was
+    writing: "... and CVE-2026-90385 (dated 2026-09-17, SECURITY). [Security
+    Advisory - CVE-2026-90385 (affects linux 7.1.3" -- which every other check
+    here passes, because an unclosed "[" never parses as a citation, so the
+    dangling span is invisible rather than invalid. Shipped that way as stored
+    run #50.
+
+    The test is the last bracket, not a count of both: an unbalanced "[" inside
+    a quoted Reddit comment is followed by the real citation that closes after
+    it, and only a genuine cut leaves the final "[" with nothing after it.
+    """
+    t = text or ""
+    return "[" in t and t.rfind("[") > t.rfind("]")
 
 
 def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
@@ -217,6 +277,14 @@ def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
 
     if not text:
         return Verdict(False, [Violation("empty", "no answer text")])
+
+    # Structural, so it is checked before anything reads the content: a cut
+    # answer's remaining prose is sound and every check below passes it, which
+    # is how a half-written citation reached the page. Declining does not
+    # excuse it -- a truncated refusal is still truncated.
+    if _truncated(text):
+        return Verdict(False, [Violation(
+            "truncated", "answer ends mid-citation (unclosed '[')")])
 
     # An unambiguous refusal phrase declines outright. A weak marker --
     # "unknown", "not found", "no information" -- declines only if the text
