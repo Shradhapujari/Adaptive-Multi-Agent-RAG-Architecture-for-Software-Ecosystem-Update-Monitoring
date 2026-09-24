@@ -184,7 +184,6 @@ _DECLINE_RE = re.compile(
     r"|\bthe sources?\b[^.\n]{0,20}\b(?:do|does) not\b[^.\n]{0,30}"
     r"\b(?:mention|state|say|report|cover|address|answer|list|contain|show|indicate)"
     r"|\bno (?:matching|relevant) (?:sources?|reports?|records?|documents?|results?)\b"
-<<<<<<< Updated upstream
     # "There are no critical Linux updates mentioned in the provided sources."
     # The subject sits between the "no" and the verb, so the two are six words
     # apart and neither alternative above reaches: what marks the refusal is
@@ -192,15 +191,13 @@ _DECLINE_RE = re.compile(
     r"|\b(?:no|none|nothing)\b[^.\n]{0,70}\b(?:mention(?:ed)?|list(?:ed)?|report(?:ed)?|"
     r"document(?:ed)?|describ(?:ed)?|record(?:ed)?|found|shown|included)\b"
     r"[^.\n]{0,30}\b(?:sources?|documents?|results?|records?|feeds?|"
-    r"release notes?|advisor(?:y|ies)|provided \w+)\b",
-=======
+    r"release notes?|advisor(?:y|ies)|provided \w+)\b"
     # "There is no negative community reaction to a MacOS update in the
     # provided sources." No verb lands on the sources at all: the only verb is
     # the copula, and the sources arrive as a bare prepositional tail.
     r"|\bthere (?:is|are|was|were)\s+no\b[^.\n]{0,80}\bin the\b[^.\n]{0,25}"
     r"\b(?:sources?|documents?|results?|records?|feeds?|release notes?|"
     r"advisor(?:y|ies)|provided \w+)\b",
->>>>>>> Stashed changes
     re.I)
 
 

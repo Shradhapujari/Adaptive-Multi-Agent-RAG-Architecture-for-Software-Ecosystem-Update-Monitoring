@@ -143,7 +143,6 @@ def test_a_plain_refusal_that_names_the_question_is_still_a_refusal():
     assert not guardrail.check("No source mentions Windows 11, but Chrome 199.0.1 shipped.", ev, q).ok
 
 
-<<<<<<< Updated upstream
 def test_the_subject_may_sit_between_the_no_and_the_verb():
     """llama3.1's answer to "Any critical Linux updates today?" was "There are
     no critical Linux updates mentioned in the provided sources." -- a refusal
@@ -163,7 +162,6 @@ def test_the_subject_may_sit_between_the_no_and_the_verb():
     assert not guardrail.check(
         "There are no critical updates mentioned in the sources, but Chrome 156.0.1 shipped.",
         ev, q).ok
-=======
 def test_a_copular_refusal_declines_but_a_named_cve_still_asserts():
     """Two halves of one change. "There is no X in the provided sources" has no
     verb on the sources at all, so it failed as uncited; and widening the
@@ -186,4 +184,3 @@ def test_a_copular_refusal_declines_but_a_named_cve_still_asserts():
     # A CVE the question named is a given, like a version.
     assert guardrail.check("No source mentions CVE-2026-12556.", ev,
                            "Is there a patch for CVE-2026-12556?").ok
->>>>>>> Stashed changes
