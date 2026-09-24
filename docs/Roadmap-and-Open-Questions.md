@@ -76,3 +76,45 @@ benchmarks against other multi-agent RAG systems.
 
 **Contact:** Shradha Devendra Pujari — `s_pujari@u.pacific.edu` ·
 Dr. Solomon Berhe — `sberhe@pacific.edu`
+
+---
+
+## Checklist (moved from the README)
+
+## Known limitations
+
+We're explicit about these in the paper (§5) — they're real, and good directions to push on:
+
+- **Apple is structurally harder.** Apple doesn't publish to the same release database other vendors do. We added dedicated Apple sources (Developer RSS, CISA KEV, CIRCL CVE) and iOS/Apple synonym expansion, but full coverage requires broader vendor onboarding.
+- **Temporal queries — now handled, with a caveat.** Relative expressions are resolved to absolute dates before retrieval (`temporal.py`), and the resolved window ranks results rather than filtering them. The caveat is that the release endpoint matches `q` against *product names*, so a date in the query text cannot narrow it — the window is applied after the fetch, and an absolute-date question about a specific past day still depends on that day being inside what the endpoint returns.
+- **Vendor extraction failures** on phrases like *"Synology NAS unreachable after upgrade"* — preprocessing strips domain terms. Future fix: embedding-based vendor matching over the full registry.
+- **Community-source reliability.** Reddit is the weakest link. We require ≥10 comments, ≥3 author replies, quality ≥ 0.3, and separate verified from community sources — but a single popular wrong post can still bias an answer.
+- **Evaluation size — addressed.** The original 50-question set was small; the benchmark now runs at n = 300 across 24 ecosystems. What remains open is not sample size but *frozen*-corpus comparability at that size: the n = 300 run records a live corpus rather than replaying one.
+- **Heuristic thresholds** (θ = 0.30 for retry, the Evaluator scoring weights) were manually tuned. Learned reward models and adaptive threshold selection are in the roadmap.
+
+---
+
+## Roadmap
+
+- [x] Larger multi-ecosystem benchmark — `data/benchmark_300.json` (300 questions, 24 ecosystems, 60 per category). Built **and run in full** (`run_1788302755_7cdc5685d75a`); see the correction above and `eval_harness/FINDINGS.md` Finding 6.
+- [x] Rerank candidates against the original question rather than the rewrite — closed the retrieval defect described in the correction above.
+- [x] Union fetch — issue both phrasings and union the candidate pools. This, not reranking, is what closed the defect.
+- [x] Temporal grounding before retrieval (`temporal.py`) with window-aware ranking (`fetch_union.py`).
+- [x] Cited prose answers in the demo (`answer_agent.py`), replacing the bullet template.
+- [x] Finish the 300-question run — completed at 300/300 via `--resume`; retrieval parity holds and the format confound is confirmed at full sample.
+- [x] Fix the own-post retrieval leak (Reddit-mined questions retrieving their own source post) — `exclude_own_post`, on by default since 2026-09-17.
+- [x] Clean, leak-free n=500 rerun — `run_1789703506`: nDCG@3 0.30 on every arm, parity exact (Finding 8).
+- [ ] Run the 1,000-question benchmark (`data/benchmark_1000.json`) — built, not yet run.
+- [ ] Report the self-reflective (Self-RAG / CRAG) baseline arm — implemented, run incomplete
+- [ ] Measure self-improvement against a frozen corpus, so adaptation is separable from corpus drift
+- [ ] Independent judge (`--judge openai:gpt-4o`) to remove the judge/system model-family overlap
+- [ ] Embedding-based vendor matching (replace static alias dictionary)
+- [ ] Learned reward model for the Evaluator (replace heuristic scoring)
+- [ ] Adaptive threshold selection
+- [ ] Head-to-head comparison with Self-RAG, CRAG, MA-RAG, MAIN-RAG (requires porting them to the software-ecosystem retrieval setting)
+- [ ] Cross-post agreement analysis for community-source credibility
+- [ ] Multilingual evaluation
+- [ ] Persistent cross-session memory with decay/capping to prevent drift at scale
+
+---
+
