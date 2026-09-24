@@ -156,3 +156,18 @@ def test_the_avoided_phrasings_reach_the_prompt(monkeypatch):
     marag.QueryRewriterAgent().run("chrome update", avoid=("chrome update v1",))
     assert "chrome update v1" in seen["prompt"]
     assert "Do not reuse" in seen["prompt"]
+
+
+# ---- the signal reads the pre-floor relevance, not the floored quality ------
+
+def test_retry_signal_fires_on_off_topic_docs_even_from_a_recognised_source(monkeypatch):
+    monkeypatch.setattr(marag, "pause", lambda *a, **k: None)
+    ev = marag.EvaluatorAgent()
+    off_topic = [{"source": "vendor_releases", "title": "zzz", "detail": "qqq",
+                  "subreddit": "", "sentiment": "Neutral", "url": "u"}]
+    r = ev.run(off_topic, "ubuntu kernel wifi broken after upgrade")
+    assert r["quality"] >= 0.5          # floor still reported
+    assert r["relevance"] == 0.0        # nothing matched the question
+    assert "negative" in r["signal"]    # so the Manager retries
+    on_topic = [dict(off_topic[0], title="ubuntu kernel wifi broken after upgrade")]
+    assert "positive" in ev.run(on_topic, "ubuntu kernel wifi broken after upgrade")["signal"]

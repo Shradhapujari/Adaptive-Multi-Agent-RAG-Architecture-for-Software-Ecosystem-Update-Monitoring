@@ -751,6 +751,15 @@ SUBREDDIT_VENDOR_MAP = {
     "nginx": "nginx",
 }
 
+# How many products one question may resolve to. RetrieverAgent has always
+# looped over `vendors[:2]` and its comment has always said "max 2 vendors",
+# but extract_vendor returned `found[:1]`, so the second slot could never be
+# filled: "Which is more stable, Teams or Zoom?" put both products in `found`
+# -- both are in the catalog -- and then searched Teams only. 1 restores the
+# single-vendor behaviour every run before 2026-09-23 measured.
+MAX_VENDORS = max(1, int(os.environ.get("MARAG_MAX_VENDORS", "2")))
+
+
 def extract_vendor(query: str, _subreddit_hint: str = "") -> list:
     """
     Extract vendor/product names from a query.
@@ -863,8 +872,8 @@ def extract_vendor(query: str, _subreddit_hint: str = "") -> list:
         if sub_vendor:
             found.append(sub_vendor)
 
-        # Score each vendor by how strongly it matches the query
-    # and return only the single best match
+        # Score each vendor by how strongly it matches the query,
+    # best first, and return at most MAX_VENDORS of them.
     found = list(dict.fromkeys(found))
     if len(found) <= 1:
         return found
@@ -883,7 +892,7 @@ def extract_vendor(query: str, _subreddit_hint: str = "") -> list:
         return 2
 
     found.sort(key=vendor_score)
-    return found[:1]
+    return found[:MAX_VENDORS]
 
 def extract_date_from_query(query: str):
     """Extract a target date from a query.
@@ -1626,6 +1635,10 @@ class RetrieverAgent:
 class EvaluatorAgent:
     name = "📊  Evaluator Agent"
 
+    # Fraction of the question's terms the best retrieved document must
+    # share, before any source floor, for the Manager not to retry.
+    RETRY_THRESHOLD = float(os.environ.get("MARAG_RETRY_THRESHOLD", "0.15"))
+
     def run(self, docs: list, original_query: str) -> dict:
         print(f"\n  {self.name}")
         bar()
@@ -1648,13 +1661,14 @@ class EvaluatorAgent:
                 scores.append(hits)
             best = max(scores) if scores else 0
             quality = round(min(best / max(len(query_terms), 1), 1.0), 2)
+            relevance = quality
             # If we have verified Apple sources, minimum quality is MEDIUM
             has_apple = any(d.get("source") in ["apple_rss","cisa_kev","circl_cve"]
                            for d in docs)
             if has_apple and quality < 0.3:
                 quality = 0.3
         else:
-            quality = 0.0
+            quality = relevance = 0.0
         # If vendor-targeted releases found — that IS a quality signal
         has_vendor_releases = any(d.get("source") == "vendor_releases" for d in docs)
         has_vendor_reddit   = any(d.get("source") == "vendor_reddit"   for d in docs)
@@ -1676,7 +1690,15 @@ class EvaluatorAgent:
         elif tier1_hits and quality < 0.3:
             quality = 0.3
 
-        signal = "✅ positive" if quality >= 0.15 else "⚠️  negative — manager will retry"
+        # The retry fires on how well the documents match the *question*, not on
+        # which sources happened to answer. The source floors above lift
+        # `quality` to >= 0.30 whenever anything recognisable was fetched, so a
+        # signal read off the floored score could never fire (FINDINGS.md,
+        # Finding 12: min 0.300 over 500 questions against a 0.15 threshold).
+        # `relevance` is the term-overlap score before any floor; `quality`
+        # keeps the floors so the reported self_quality is unchanged.
+        signal = ("✅ positive" if relevance >= self.RETRY_THRESHOLD
+                  else "⚠️  negative — manager will retry")
 
         print(f"  Quality  : {quality:.2f} / 1.0")
         print(f"  RLAIF    : {signal}")
@@ -1691,9 +1713,14 @@ class EvaluatorAgent:
         # Sources that mean the answer came off a live API this run, rather than
         # out of the bundled dataset. llm_releases belongs here: it is a live
         # releasetrain.io query like 'releases' and 'cve' are.
-        LIVE_SOURCES = ['releases', 'llm_releases', 'vendor_releases',
-                        'reddit_live', 'cve']
-        has_live     = any(s in LIVE_SOURCES for s in verified_src)
+        # Everything fetch_* returns came off a live endpoint this run; only the
+        # bundled dataset (the fallback when every API returns nothing) did not.
+        # This used to be an allow-list of live sources, which silently went
+        # stale as sources were added: an answer built entirely from
+        # vendor_reddit and google_news announced itself as "From local
+        # dataset". Naming the one local case instead cannot rot that way.
+        LOCAL_SOURCES = ['local']
+        has_live     = any(s not in LOCAL_SOURCES for s in verified_src)
         confidence   = "HIGH" if quality >= 0.5 else "MEDIUM" if quality >= 0.3 else "LOW"
         verified_tag = "✅ VERIFIED from live releasetrain.io APIs" if has_live else "⚠️  From local dataset — may not reflect today's data"
 
@@ -1896,7 +1923,8 @@ Answer:"""
             lines.append("")
             src_str = ", ".join(verified_src)
             lines.append(f"  Data sourced from: {src_str} | releasetrain.io")
-        return {"quality": quality, "signal": signal, "answer": "\n".join(lines)}
+        return {"quality": quality, "relevance": relevance, "signal": signal,
+                "answer": "\n".join(lines)}
 
 # ─────────────────────────────────────────────────────────────
 # MANAGER AGENT — ORCHESTRATOR
