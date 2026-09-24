@@ -2,9 +2,9 @@
 
 > Multi-agent RAG system that answers software update questions — *"are there known Siri issues after iOS 26.4?"* — by integrating release notes, security advisories, and community discussions, with a self-improving retrieval memory that learns from its own outcomes. Runs locally on Llama 3.1 8B.
 
-**Live demo:** <https://software-update-questions.streamlit.app/> (public, no key required)
-**Paper:** *An Adaptive Multi-Agent RAG Architecture…* — AgenticSE '26 (ACM CAIS 2026), retargeted and submitted to **TOSEM** · [[PDF](https://drive.google.com/file/d/1WssnrTSiUxtYd2wWdV5QUKbIcB2-iPLH/view?usp=sharing)] · source in [`paper/`](paper/)
-**Authors:** Shradha Devendra Pujari, Dr. Solomon Berhe — University of the Pacific
+- **Live demo** — <https://software-update-questions.streamlit.app/> (public, no key required)
+- **Paper** — *An Adaptive Multi-Agent RAG Architecture…*, AgenticSE '26 (ACM CAIS 2026), retargeted and submitted to **TOSEM**. [PDF](https://drive.google.com/file/d/1WssnrTSiUxtYd2wWdV5QUKbIcB2-iPLH/view?usp=sharing) · source in [`paper/`](paper/)
+- **Authors** — Shradha Devendra Pujari, Dr. Solomon Berhe, University of the Pacific
 
 ---
 
@@ -157,6 +157,7 @@ Llama 3.1 8B (primary) and Mistral 7B, local via [Ollama](https://ollama.com) at
 Open to collaboration on larger-scale multi-ecosystem evaluation, learned reward models and adaptive thresholds, community-source credibility estimation, multilingual extensions, and head-to-head benchmarks against other multi-agent RAG systems. Open an issue or reach out.
 
 **Contact:** Shradha Devendra Pujari — `s_pujari@u.pacific.edu` · [GitHub](https://github.com/Shradhapujari) · [LinkedIn](https://linkedin.com/in/shradha-pujari-98900)
+
 **Advisor:** Dr. Solomon Berhe — `sberhe@pacific.edu`
 
 Thanks to the maintainers of public software ecosystem data sources, communities, and open APIs that made this study possible.
