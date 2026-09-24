@@ -1499,14 +1499,17 @@ modes, and which one decides what its numbers can later be re-derived from. In
 \emph{record} mode the endpoints are queried live and every response is written
 to a snapshot directory; in \emph{replay} mode the fetch is served from that
 directory, and in the \emph{strict} variant a document request the snapshot
-does not hold raises rather than quietly going live. The raise is not the
+does not hold raises rather than quietly going live. The raise was not the
 guarantee it first appears to be, and we correct our own earlier description of
-it: each source fetch in the Retriever is individually guarded, so the
-exception is caught there and that source returns no documents for that
-question. A strict run does not stop on a miss; it loses a source silently and
-reports the count at the end, which is where \texttt{frozen} in a run's
-configuration comes from. A run whose \texttt{frozen} is false has holes of
-this kind, and their number is the honest measure of how frozen it was. Either way the
+it. In the configuration every run reported here was made under, each source
+fetch in the Retriever is individually guarded, so the exception was caught
+there and that source returned no documents for that question: a strict run did
+not stop on a miss, it lost a source quietly and reported the count at the end.
+That count is where \texttt{frozen} in a run's configuration comes from, and it
+is the field to read --- a run whose \texttt{frozen} is false has holes of this
+kind, and their number is the honest measure of how frozen it was. We state the
+count wherever it is not zero rather than let the mode's name stand in for the
+property. Either way the
 arms of a single run are compared against one corpus, which is what every
 comparison in this paper rests on. Only replay makes a run reproducible
 afterwards, and the asymmetry is worth stating precisely because it is easy to
@@ -2787,11 +2790,12 @@ displaced. Adaptive retrieval as this system implements it re-rolls the dice
 rather than improving the odds, and a re-roll is what a null of this shape
 looks like: motion without direction.
 
-Two limits on the claim. The fire rate is inferred rather than recorded --- the
-harness does not persist the round count per question, so we counted the
-questions on which the retry arm spent two rewriter invocations instead of one
-(94, against the baseline's uniform one), and a run that logged the count
-directly would be better. And 74 of the 30{,}808 document reads in the second
+Two limits on the claim. The fire rate is inferred rather than recorded: the
+harness did not persist the round count per question when this run was made, so
+we counted the questions on which the retry arm spent two rewriter invocations
+instead of one (94, against the baseline's uniform one). A run that logs the
+count is the better instrument, and reconstructing it from token accounting is
+the kind of inference that should not be load-bearing twice. And 74 of the 30{,}808 document reads in the second
 pass were not in the snapshot, so the affected source returned nothing for
 those questions; at 0.24\% of reads that adds noise rather than a direction,
 but the pass is not the fully frozen article its protocol was meant to
