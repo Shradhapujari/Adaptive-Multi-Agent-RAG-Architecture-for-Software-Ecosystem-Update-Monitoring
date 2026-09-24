@@ -48,7 +48,7 @@ import monitor
 
 # ── PAGE CONFIG ──────────────────────────────────────────
 st.set_page_config(
-    page_title="Multi-Agent RAG System — Software Ecosystem Monitor",
+    page_title="Should You Update? — Multi-Agent RAG",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -1055,7 +1055,7 @@ with st.sidebar:
 
 # ── MAIN UI ───────────────────────────────────────────────
 
-st.caption("Software ecosystem monitor · releasetrain.io")
+st.caption("Should you update? Ask before you do.")
 
 if view == "Monitor":
     # releasetrain.io's component search, on top of the same feed the Release
@@ -1806,6 +1806,6 @@ st.markdown("---")
 st.markdown("""
 <div style="text-align:center; color:#888; font-size:0.85rem;">
     Multi-Agent RAG System · Adaptive Multi-Agent RAG Architecture · University of the Pacific · 2026<br>
-    Shradha Devendra Pujari · Dr. Solomon Berhe · releasetrain.io
+    Shradha Devendra Pujari · Dr. Solomon Berhe
 </div>
 """, unsafe_allow_html=True)
