@@ -13,7 +13,6 @@ The working documentation for this project, linked from the
 | [Benchmarks and Data](Benchmarks-and-Data.md) | Question sets, live sources, rebuilding, and freezing the corpus |
 | [Deployment](Deployment.md) | The Streamlit deployment and what degrades without a model |
 | [Roadmap and Open Questions](Roadmap-and-Open-Questions.md) | What is unfinished, what is unproven, and what would settle it |
-| [Q&A Prep — 2026-09-24](QA-Prep-2026-09-24.md) | Anticipated review questions and the honest answer to each, as of that date |
 
 These live in the repository rather than in the GitHub wiki so a documentation
 change is reviewable in a pull request next to the code it describes. Links
