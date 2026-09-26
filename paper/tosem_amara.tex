@@ -1499,7 +1499,17 @@ modes, and which one decides what its numbers can later be re-derived from. In
 \emph{record} mode the endpoints are queried live and every response is written
 to a snapshot directory; in \emph{replay} mode the fetch is served from that
 directory, and in the \emph{strict} variant a document request the snapshot
-does not hold aborts the run rather than quietly going live. Either way the
+does not hold raises rather than quietly going live. The raise was not the
+guarantee it first appears to be, and we correct our own earlier description of
+it. In the configuration every run reported here was made under, each source
+fetch in the Retriever is individually guarded, so the exception was caught
+there and that source returned no documents for that question: a strict run did
+not stop on a miss, it lost a source quietly and reported the count at the end.
+That count is where \texttt{frozen} in a run's configuration comes from, and it
+is the field to read --- a run whose \texttt{frozen} is false has holes of this
+kind, and their number is the honest measure of how frozen it was. We state the
+count wherever it is not zero rather than let the mode's name stand in for the
+property. Either way the
 arms of a single run are compared against one corpus, which is what every
 comparison in this paper rests on. Only replay makes a run reproducible
 afterwards, and the asymmetry is worth stating precisely because it is easy to
@@ -1637,8 +1647,9 @@ so every adjacent pair is a single-factor comparison. A1g branches from A1
 rather than continuing the chain: it adds question grounding \emph{without}
 any coordination, which is what separates understanding the question from
 coordinating agents. All rungs are now measured against a frozen corpus
-(Table~\ref{tab:ladder-results}); A4 executed but cannot trigger, for the
-structural reason given in Section~\ref{sec:retry}.}
+(Table~\ref{tab:ladder-results}); A4 executed but could not trigger as run,
+for the structural reason given in Section~\ref{sec:retry}, which also reports
+the fix that makes the rung reachable.}
 \label{tab:ladder}
 \begin{tabular}{llll}
 \toprule
@@ -2666,6 +2677,44 @@ of Section~\ref{sec:leak}, nothing has changed except the absolute level: every
 arm now retrieves at roughly 0.49 nDCG@3 rather than 0.30, and the arms remain
 indistinguishable.
 
+The parity this table reports has since been measured again at twice the scale,
+on the full 1{,}000-question benchmark, with flat ranking and an embedding
+reranker on all three arms in one pass (run \texttt{run\_1790365310}, replayed
+against a snapshot of 24{,}455 entries recorded in a preceding pass; that replay
+was lenient and recorded its own misses, so the corpus is fixed for the arms
+within the run while the run itself is not frozen). It is the same answer: nDCG@3 0.485 for both
+multi-agent arms against 0.476 for the baseline, a paired $+0.009$ with a
+confidence interval of $[-0.003, +0.021]$, and a win/tie/loss of 101/796/103 --
+as close to a dead heat as 1{,}000 questions can express. nDCG@5 is $+0.010$
+$[-0.003, +0.023]$ and recall@5 $+0.016$ $[-0.002, +0.033]$, neither surviving
+correction. Doubling the sample moves the absolute level not at all and the gap
+not at all, which is what a null looks like when it is not a power problem.
+
+That measurement is reproducible in the strongest sense this paper can offer. A
+strict replay of the same snapshot (run \texttt{run\_1790415950}), executed from
+a revision in which a document missing from the snapshot aborts the run rather
+than silently emptying a source, returned the same retrieved set for all 3{,}000
+arm-question pairs and the same metrics to five decimal places, against 51{,}245
+document reads and no miss on any document host. One qualification on what that
+demonstrates: the two runs share the accumulated relevance cache, so the metric
+agreement is partly the same judgments being reused rather than independently
+re-derived. The document-level agreement is the part that is independent, and it
+is also the stronger claim, since identical retrieved sets are what make the
+judgments reusable at all.
+
+The same run reproduces the rendering artifact at full size, and we note it here
+because scale is the usual defence against it. The template arm scores $0.165$
+higher on correctness than the baseline on the 139 questions carrying a
+reference answer ($p<0.001$), while the same retrieval rendered as prose scores
+$0.004$ \emph{lower} than the baseline and is indistinguishable from it; the
+template arm is simultaneously $0.063$ below the baseline on faithfulness
+($p<0.001$) where the prose arm is level. A judge that rewards a structured
+answer on one axis and penalizes it on another, for content it did not change,
+is measuring the rendering on both. At $n=1000$ the effect is sharper rather
+than weaker, which is the outcome Section~\ref{sec:metric-threat} predicts and
+the reason that section retires the comparison rather than seeking a larger
+sample for it.
+
 We state what this episode cost us to see, because the error is not exotic. The
 confounded comparison was not careless---each run was internally frozen, the
 judgments were pooled across arms, the statistics were paired and
@@ -2677,7 +2726,7 @@ compared against each other must execute in the same run, and the only way to
 be sure of that is to make the run frozen and reproducible and then reproduce
 it.
 
-\subsection{The Retry That Cannot Fire}\label{sec:retry}
+\subsection{The Retry That Could Not Fire}\label{sec:retry}
 
 Retrieval parity between the architectures leaves one capability of the
 decomposition unmeasured, and it is the one a single agent structurally lacks:
@@ -2725,10 +2774,70 @@ questions (8\% at a threshold of 0.10, 31\% at 0.30), spread across every
 category. The loop it triggers is the Orchestrator's: the Query Rewriter is
 re-invoked with the phrasings already searched and asked for different
 vocabulary, for at most two rounds, rather than the fixed widening string the
-harness once carried. Whether those retries change retrieval or answers is not
-yet measured; the frozen one-pass comparison is queued and will be reported
-when it completes. Until then the rung is reachable but unmeasured, which is a
-different claim from the null it could have been mistaken for.
+harness once carried. What those retries do is now measured, in the one
+design the question admits: a two-pass protocol over the 500 questions, the
+first pass recording the retry arm alone so that its second-round rewrites'
+fetches --- phrasings no earlier snapshot could contain --- are captured, the
+second pass replaying both arms against that snapshot in a single run with one
+judged pool. Replaying one arm while the other fetched live would have left the
+retry arm reading a fresher corpus than the arm it is compared against, which
+is the confound of Section~\ref{sec:tier-control} at a smaller scale; a
+recording pass made fresh puts the whole corpus on one date instead of
+documenting the asymmetry.
+
+\begin{table}[t]
+\caption{The retry measured. 500 questions, both arms in one pass with one
+judged pool, replayed against a snapshot recorded by the retry arm itself
+(run \texttt{run\_1790278467}, pass 2 of two; 30{,}734 document reads served
+from disk and 74 not in the snapshot, for which the affected source returned
+nothing). The retry fired on 94 questions and changed the top-4 on 71 of them.
+Every metric is flat.}
+\label{tab:retry}
+\begin{tabular}{lrrrl}
+\toprule
+Metric & Retry & No retry & $\Delta$ (95\% CI) & W/T/L \\
+\midrule
+nDCG@1   & 0.484 & 0.488 & $-0.004$ $[-0.016, +0.008]$ & 4/490/6 \\
+nDCG@3   & 0.532 & 0.535 & $-0.002$ $[-0.013, +0.008]$ & 8/481/11 \\
+nDCG@5   & 0.564 & 0.566 & $-0.002$ $[-0.012, +0.009]$ & 9/480/11 \\
+Recall@5 & 0.630 & 0.631 & $-0.001$ $[-0.013, +0.012]$ & 6/486/8 \\
+MRR      & 0.566 & 0.567 & $-0.001$ $[-0.012, +0.010]$ & 8/484/8 \\
+\midrule
+Faithfulness     & 0.896 & 0.894 & $+0.002$ $[-0.001, +0.007]$ & 12/479/9 \\
+Answer relevance & 0.952 & 0.951 & $+0.002$ $[-0.001, +0.006]$ & 7/486/7 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:retry} reports it. The retry fired on 94 of 500 questions, a
+rate of 18.8\% against the 13\% the offline projection gave over the older
+top-4 lists, and it was not idle when it fired: the retrieved set changed on 71
+of those 94 questions and the answer on 42 of the 500. None of it moves a
+metric. Every retrieval difference is within $0.004$ with an interval
+straddling zero and a win/loss split as close to even as the counts allow ---
+8 better and 11 worse at rank 3, 6 and 8 on recall. Faithfulness and answer
+relevance move $+0.002$, which is nothing.
+
+This is the result the rung has been unable to state in either direction since
+the conference version, and its shape matters more than its sign. The
+Orchestrator's second round is neither inert nor cosmetic here: it asks the
+Query Rewriter for vocabulary the first round did not try, fetches on it, and
+brings back a different set of documents for one question in five. Those
+documents are, on average, neither better nor worse than the ones they
+displaced. Adaptive retrieval as this system implements it re-rolls the dice
+rather than improving the odds, and a re-roll is what a null of this shape
+looks like: motion without direction.
+
+Two limits on the claim. The fire rate is inferred rather than recorded: the
+harness did not persist the round count per question when this run was made, so
+we counted the questions on which the retry arm spent two rewriter invocations
+instead of one (94, against the baseline's uniform one). A run that logs the
+count is the better instrument, and reconstructing it from token accounting is
+the kind of inference that should not be load-bearing twice. And 74 of the 30{,}808 document reads in the second
+pass were not in the snapshot, so the affected source returned nothing for
+those questions; at 0.24\% of reads that adds noise rather than a direction,
+but the pass is not the fully frozen article its protocol was meant to
+produce.
 
 \subsubsection{An Accidental Demonstration}\label{sec:pool-demo}
 
@@ -2946,7 +3055,8 @@ intermittently emitted invalid tool calls, a property of that agent under an
   All three arms in one frozen, reproducible pass over 500 questions, with the
   grading cascade on every arm, put the multi-agent architecture $+0.006$
   nDCG@3 ahead of the baseline (43 won, 47 lost) and $+0.018$ recall@5, neither
-  surviving correction (Table~\ref{tab:tier-control}). An earlier comparison
+  surviving correction (Table~\ref{tab:tier-control}); repeated on all 1{,}000
+  benchmark questions the answer is $+0.009$ nDCG@3, 101 won and 103 lost. An earlier comparison
   that put the same arms $+0.044$ apart drew them from two different runs, one
   recorded live and one replayed, which is not one corpus; we report it and its
   correction because the error produced a significant result with a plausible
