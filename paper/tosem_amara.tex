@@ -2680,15 +2680,27 @@ indistinguishable.
 The parity this table reports has since been measured again at twice the scale,
 on the full 1{,}000-question benchmark, with flat ranking and an embedding
 reranker on all three arms in one pass (run \texttt{run\_1790365310}, replayed
-against a snapshot recorded in a preceding pass; 24{,}455 entries, and the
-replay records its own misses, so the corpus is fixed for the arms within the
-run but the run is not frozen). It is the same answer: nDCG@3 0.485 for both
+against a snapshot of 24{,}455 entries recorded in a preceding pass; that replay
+was lenient and recorded its own misses, so the corpus is fixed for the arms
+within the run while the run itself is not frozen). It is the same answer: nDCG@3 0.485 for both
 multi-agent arms against 0.476 for the baseline, a paired $+0.009$ with a
 confidence interval of $[-0.003, +0.021]$, and a win/tie/loss of 101/796/103 --
 as close to a dead heat as 1{,}000 questions can express. nDCG@5 is $+0.010$
 $[-0.003, +0.023]$ and recall@5 $+0.016$ $[-0.002, +0.033]$, neither surviving
 correction. Doubling the sample moves the absolute level not at all and the gap
 not at all, which is what a null looks like when it is not a power problem.
+
+That measurement is reproducible in the strongest sense this paper can offer. A
+strict replay of the same snapshot (run \texttt{run\_1790415950}), executed from
+a revision in which a document missing from the snapshot aborts the run rather
+than silently emptying a source, returned the same retrieved set for all 3{,}000
+arm-question pairs and the same metrics to five decimal places, against 51{,}245
+document reads and no miss on any document host. One qualification on what that
+demonstrates: the two runs share the accumulated relevance cache, so the metric
+agreement is partly the same judgments being reused rather than independently
+re-derived. The document-level agreement is the part that is independent, and it
+is also the stronger claim, since identical retrieved sets are what make the
+judgments reusable at all.
 
 The same run reproduces the rendering artifact at full size, and we note it here
 because scale is the usual defence against it. The template arm scores $0.165$

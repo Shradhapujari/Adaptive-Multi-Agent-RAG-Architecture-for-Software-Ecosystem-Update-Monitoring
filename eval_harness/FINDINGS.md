@@ -560,6 +560,16 @@ sample dissolves this should read these two rows.
 Note this is `flat:embed`, not the `llm20@embed` cascade, so it is the cheap
 configuration at n=1000 rather than the best one.
 
+**Reproduced strictly.** `run_1790415950_0be41794f36e` — strict replay of the
+same snapshot from a tree with #88 (a corpus miss aborts): 51,245 hits, 0
+corpus misses, `frozen: true`, and **3000/3000 arm-question lists
+byte-identical** to the lenient run with every metric equal to 5 decimals
+(verified independently, not taken from the report). The lenient run's
+`frozen: false` stays true of *that* run — the caveat moved rather than
+vanished. Caveat on the metric half: both runs read the shared qrels cache, so
+the judgments were reused, not re-derived; the document-level identity is the
+independent part.
+
 ---
 
 ## Confounds, and what has been done about them
