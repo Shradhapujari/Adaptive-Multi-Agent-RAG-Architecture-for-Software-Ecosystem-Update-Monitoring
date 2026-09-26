@@ -2677,6 +2677,32 @@ of Section~\ref{sec:leak}, nothing has changed except the absolute level: every
 arm now retrieves at roughly 0.49 nDCG@3 rather than 0.30, and the arms remain
 indistinguishable.
 
+The parity this table reports has since been measured again at twice the scale,
+on the full 1{,}000-question benchmark, with flat ranking and an embedding
+reranker on all three arms in one pass (run \texttt{run\_1790365310}, replayed
+against a snapshot recorded in a preceding pass; 24{,}455 entries, and the
+replay records its own misses, so the corpus is fixed for the arms within the
+run but the run is not frozen). It is the same answer: nDCG@3 0.485 for both
+multi-agent arms against 0.476 for the baseline, a paired $+0.009$ with a
+confidence interval of $[-0.003, +0.021]$, and a win/tie/loss of 101/796/103 --
+as close to a dead heat as 1{,}000 questions can express. nDCG@5 is $+0.010$
+$[-0.003, +0.023]$ and recall@5 $+0.016$ $[-0.002, +0.033]$, neither surviving
+correction. Doubling the sample moves the absolute level not at all and the gap
+not at all, which is what a null looks like when it is not a power problem.
+
+The same run reproduces the rendering artifact at full size, and we note it here
+because scale is the usual defence against it. The template arm scores $0.165$
+higher on correctness than the baseline on the 139 questions carrying a
+reference answer ($p<0.001$), while the same retrieval rendered as prose scores
+$0.004$ \emph{lower} than the baseline and is indistinguishable from it; the
+template arm is simultaneously $0.063$ below the baseline on faithfulness
+($p<0.001$) where the prose arm is level. A judge that rewards a structured
+answer on one axis and penalizes it on another, for content it did not change,
+is measuring the rendering on both. At $n=1000$ the effect is sharper rather
+than weaker, which is the outcome Section~\ref{sec:metric-threat} predicts and
+the reason that section retires the comparison rather than seeking a larger
+sample for it.
+
 We state what this episode cost us to see, because the error is not exotic. The
 confounded comparison was not careless---each run was internally frozen, the
 judgments were pooled across arms, the statistics were paired and
@@ -3017,7 +3043,8 @@ intermittently emitted invalid tool calls, a property of that agent under an
   All three arms in one frozen, reproducible pass over 500 questions, with the
   grading cascade on every arm, put the multi-agent architecture $+0.006$
   nDCG@3 ahead of the baseline (43 won, 47 lost) and $+0.018$ recall@5, neither
-  surviving correction (Table~\ref{tab:tier-control}). An earlier comparison
+  surviving correction (Table~\ref{tab:tier-control}); repeated on all 1{,}000
+  benchmark questions the answer is $+0.009$ nDCG@3, 101 won and 103 lost. An earlier comparison
   that put the same arms $+0.044$ apart drew them from two different runs, one
   recorded live and one replayed, which is not one corpus; we report it and its
   correction because the error produced a significant result with a plausible

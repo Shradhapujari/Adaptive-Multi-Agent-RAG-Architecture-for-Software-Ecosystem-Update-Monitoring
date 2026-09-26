@@ -533,6 +533,35 @@ A fresh recording pass puts the whole corpus on one date.
 
 ---
 
+## Finding 14 — Parity holds at n=1000, and the format artifact sharpens
+
+`run_1790365310_0be41794f36e` — 1000 questions, flat, `embed:nomic-embed-text`
+on all three arms, one pass, replay of `corpus_snapshot_b1000_flat_0925`
+(24,455 entries; replay records its own misses, so `frozen: false`). Run by
+another session; numbers below re-derived independently from its artifacts.
+
+| metric | multi-agent | baseline | Δ (95% CI) | p_holm | W/T/L |
+|---|---:|---:|---:|---:|---:|
+| nDCG@3 | 0.485 | 0.476 | +0.009 [−0.003, +0.021] | 0.309 | 101/796/103 |
+| nDCG@5 | 0.505 | 0.495 | +0.010 [−0.003, +0.023] | 0.227 | 137/730/133 |
+| Recall@5 | 0.553 | 0.537 | +0.016 [−0.002, +0.033] | 0.147 | 111/803/86 |
+
+**Parity, doubled.** 101 won to 103 lost over 1000 questions. Doubling n moves
+neither the level nor the gap — this is not a power problem.
+
+**The format artifact is sharper at scale, not weaker.** On the 139 questions
+with a reference answer the template arm scores **+0.165** correctness over the
+baseline (p<0.001) while the same retrieval as prose scores **−0.004** and is
+indistinguishable from it. Faithfulness runs the other way: template −0.063
+(p<0.001), prose −0.005 (ns). The judge rewards the template on one axis and
+penalises it on the other for content neither changed. Anyone hoping a bigger
+sample dissolves this should read these two rows.
+
+Note this is `flat:embed`, not the `llm20@embed` cascade, so it is the cheap
+configuration at n=1000 rather than the best one.
+
+---
+
 ## Confounds, and what has been done about them
 
 | Confound | Status |
