@@ -1,0 +1,699 @@
+%% Supplementary material for "When Query Rewriting Loses the Documents".
+%% Protocol and comparability detail moved out of the main text; nothing here
+%% is new, and every number it explains is reported in the paper itself.
+\documentclass[acmsmall,anonymous,screen]{acmart}
+\settopmatter{printacmref=false}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+\pagestyle{plain}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\begin{document}
+\title{Supplementary Material: Measurement Protocol and Arm Comparability}
+\author{Anonymous Author(s)}
+\maketitle
+
+\noindent This supplement holds the protocol detail for \emph{When Query
+Rewriting Loses the Documents: An Adaptive Multi-Agent RAG Architecture for
+Software Ecosystem Update Monitoring}. Section~S1 traces one question from the
+benchmark to one number in a results table. Section~S2 states what makes two
+arms comparable. Both are referenced from the main text and neither introduces
+a measurement that is not reported there.
+
+\section*{S1\quad How a Reported Number Is Produced}
+Every retrieval number in Section~\ref{sec:results} is the mean over questions
+of a per-question, per-arm quantity computed by one harness
+(\texttt{eval\_harness/run\_eval.py}) in one pass. Because the arms differ in
+what they fetch, and because an LLM supplies the relevance labels, the order in
+which those steps happen decides what the number can be read to mean. We
+therefore trace a single question end to end rather than name the metrics and
+leave the protocol implicit.
+
+\paragraph{1. The question.} A benchmark record carries an id, the question
+text, its ecosystem and category, the endpoint and record type it was mined
+from, and---for a community-mined question---the URL of the post whose title it
+is. Every arm in the run receives the same question string.
+
+\paragraph{2. Retrieval.} Each arm retrieves through the same
+\texttt{RetrieverAgent} against the endpoints of
+Section~\ref{sec:datasources}: the baseline on the question, the multi-agent
+arm on the union of the question and its rewriting
+(Section~\ref{sec:union-fetch}). Before any ranking, the record's own source
+URL is struck from the candidate pool of \emph{every} arm
+(Section~\ref{sec:leak}). A run reads its documents in one of two corpus
+modes, and which one decides what its numbers can later be re-derived from. In
+\emph{record} mode the endpoints are queried live and every response is written
+to a snapshot directory; in \emph{replay} mode the fetch is served from that
+directory, and in the \emph{strict} variant a document request the snapshot
+does not hold raises rather than quietly going live. The raise was not the
+guarantee it first appears to be, and we correct our own earlier description of
+it. In the configuration every run reported here was made under, each source
+fetch in the Retriever is individually guarded, so the exception was caught
+there and that source returned no documents for that question: a strict run did
+not stop on a miss, it lost a source quietly and reported the count at the end.
+That count is where \texttt{frozen} in a run's configuration comes from, and it
+is the field to read --- a run whose \texttt{frozen} is false has holes of this
+kind, and their number is the honest measure of how frozen it was. We state the
+count wherever it is not zero rather than let the mode's name stand in for the
+property. Either way the
+arms of a single run are compared against one corpus, which is what every
+comparison in this paper rests on. Only replay makes a run reproducible
+afterwards, and the asymmetry is worth stating precisely because it is easy to
+assume otherwise: a snapshot holds one response body per request key, a live
+feed answers the same key differently over the hours a 500-question run takes,
+and the directory keeps the last of those answers. A record-mode run therefore
+cannot be replayed back into itself. Replaying one of ours reproduced its
+multi-agent arm's candidate pools on 1 of 12 questions, while two replays of a
+single configuration agree on 12 of 12 and are byte-identical. Record-mode
+numbers are internally valid and externally irreproducible; replay-mode numbers
+are both. Where a table's arms come from different runs we say so, and we do
+not read a difference between a live-recorded arm and a replayed one as an
+effect of the architecture.
+
+Retrieval also reads the clock, which a snapshot of HTTP responses does not
+freeze: a question carrying \emph{latest} or \emph{last week} becomes a date
+filter, so the same snapshot replayed a day later can admit a different set of
+documents. A recording now stamps its directory with the date it was made and
+a replay pins the process clock to that stamp, which removes the drift between
+two runs made on different days; an explicitly set clock overrides it, and a
+snapshot recorded before the stamp existed reports no recording date rather
+than a guessed one.
+
+\paragraph{3. Ranking and cut.} The candidate pool is ordered by the run's
+ranking function and cut to $k=4$. Two settings decide the ordering and are
+recorded per run: the scorer (BM25, embedding cosine, reciprocal-rank fusion,
+or an LLM grading cascade) and whether the verified-source tier prior is
+applied before it or not (Section~\ref{sec:rerank}). The top-$k$ list of
+document ids is what the metrics see; the documents themselves are what the
+answer is synthesized from.
+
+\paragraph{4. Judging.} The judged pool for a question is the union of what
+\emph{all} arms returned for it---optionally widened to everything they
+considered, which is what makes pool recall computable. Each
+(question,~document) pair is labelled once, by \texttt{llama3.1} at temperature
+zero, on a graded scale: 2 highly relevant, 1 related, 0 irrelevant. The label
+is keyed by a hash of the question text together with the document id and
+cached on disk, so it is computed once and reused for every arm in the run and
+for every later run that retrieves the same document for the same question. No
+arm is scored against a private set of judgments, and no arm is penalized for a
+document that only a competing arm surfaced.
+
+\paragraph{5. Metrics.} From the ranked list and those labels:
+nDCG@$k$ with gain $2^g-1$ and the standard $\log_2$ discount, its ideal
+computed from the same per-question pool; Recall@$k$ over the relevant
+documents in that pool; MRR on the first document with grade $\geq 1$. The
+denominators are therefore \emph{pool-relative}. A system cannot be charged for
+relevant documents no arm retrieved, which makes these numbers valid for the
+paired within-run comparisons this paper draws and invalid as absolute values
+to compare against published figures computed over a fixed judged corpus. We
+state the pooling protocol with every absolute number for this reason, and
+Section~\ref{sec:pool-demo} measures what ignoring it costs: two arms whose
+retrieved lists are byte-identical, scored in pools of different width, differ
+by $+0.055$ recall@5.
+
+\paragraph{6. Answer scoring.} The same judge scores each arm's answer for
+faithfulness to its own retrieved contexts and for answer relevance, each in
+$[0,1]$, and for correctness against the reference answer on the questions that
+carry one. Section~\ref{sec:metric-threat} states what an LLM judge scoring a
+template against prose measures, and why the \texttt{marag\_llm} arm exists.
+
+\paragraph{7. Cost.} The harness counts, per arm and per question, every model
+call and every prompt and completion token the arm itself spent, attributed by
+role---rewriting, ranking, synthesis---with the judge's own calls excluded, so
+an accuracy difference between arms can be read against what it cost to obtain.
+
+\paragraph{8. Statistics.} Arms are compared pairwise on the per-question
+values, never on the difference of two means: the paired difference vector
+feeds an exact two-sided Wilcoxon signed-rank test at the sample sizes where it
+is exact, a percentile bootstrap 95\% confidence interval over question-level
+differences (10{,}000 resamples, fixed seed), and a win/tie/loss count.
+Families of comparisons carry a Holm correction.
+
+\paragraph{9. What is left behind.} A run writes a directory
+\texttt{results/run\_\textless epoch\textgreater\_\textless dataset
+hash\textgreater/} holding: \texttt{config.json}, the arm configuration
+actually used---ranking function, tier mode, own-post exclusion, corpus
+snapshot statistics, agent-rules hash---read back from the objects the run
+built rather than from the environment it was launched with;
+\texttt{per\_query.jsonl}, one row per question per arm with the ranked
+document ids, every metric, latency, model calls and tokens;
+\texttt{qrels.json}, the labels used by \emph{this} run alone, so its numbers
+recompute from its own artifacts without the accumulated cache;
+\texttt{aggregate.csv} and \texttt{report.md}. Each table in
+Section~\ref{sec:results} names the run id it was computed from. Two senses of
+recovery apply to it, and they are not the same. Every metric recomputes from
+that directory alone, for any run: the ranked document ids and the judgments
+are both on disk, so a reader can re-derive the numbers, re-score them under a
+different metric, or pool them with another run's judgments without touching
+the endpoints. Re-executing the pipeline and arriving at the same ranked lists
+is the stronger sense, and it holds for runs made in replay, not for runs made
+in record mode against the live feeds.
+
+
+
+\section*{S2\quad Arm Comparability}
+
+
+Set side by side, the two arms do not hold the same capabilities. The
+multi-agent arm rewrites the query, fetches both phrasings, scores its own
+retrieval, and---in the full architecture---retries and accumulates memory; the
+baseline does none of these. A reader is entitled to ask whether the two arms
+are performing the same task at all, and if they are not, what a difference
+between them measures.
+
+The asymmetries are of two kinds, and only one of them is a defect. Query
+rewriting, union fetch, and adaptive retry \emph{are} the treatment: they are
+the independent variable, and removing them from the multi-agent arm would
+leave nothing to evaluate. What makes their comparison sound is not symmetry of
+capability but symmetry of everything else. Both arms retrieve from the same
+endpoints through the same Retriever, cut to the same $k$, synthesize through
+the same prompt with the same model, are scored by the same judge on the same
+questions, and are compared pairwise within a single run so that corpus drift
+cancels. The baseline is an ablation of the coordination layer, not a different
+system.
+
+The second kind of asymmetry is not part of the treatment and does leak into
+measurement: the bespoke retrieval score of Section~\ref{sec:two-metrics} and
+the answer rendering of Section~\ref{sec:scaled-eval}. The bespoke score is the
+Evaluator's internal control signal---the same quantity that gates the
+retry---and the baseline has no counterpart to it, so reporting it as the
+comparison metric grades the treatment with its own ruler; Section~\ref{sec:metric-threat}
+retires it for that reason. Answer rendering is neutralized rather than
+defended, by the \texttt{marag\_llm} arm. Confounds of this kind must be
+removed; treatment asymmetries must not be.
+
+Removing them one at a time is what the ablation ladder in
+Table~\ref{tab:ladder} does. Each rung differs from the one below it by exactly
+one capability, so each adjacent pair is a single-factor comparison rather than
+a comparison of two architectures. Rung A3 additionally runs the Evaluator, but
+in a prose arm the Evaluator's output is only its quality score: it changes
+neither the retrieved documents nor the answer, so A2 versus A3 isolates the
+union fetch and nothing else.
+
+
+
+The same reasoning applies to rendering, which is not a property of the
+multi-agent arm but a factor crossing it. Of the four cells of
+rendering~$\times$~retrieval, three were populated in
+Section~\ref{sec:scaled-eval}: baseline retrieval with prose
+(\texttt{single\_agent}), multi-agent retrieval with prose
+(\texttt{marag\_llm}), and multi-agent retrieval with a template
+(\texttt{marag}). The format effect reported there is therefore an inference
+across two arms rather than an estimated main effect. The fourth cell---baseline
+retrieval rendered through the Evaluator's template---closes the design; it
+requires no generation call, since the template is assembled deterministically
+from the retrieved documents, and it is available in the released harness as
+\texttt{single\_agent\_template}. With all four cells, rendering and retrieval
+become main effects with an interaction term.
+
+A2, A4, and the fourth cell are now measured, together with A1g, and
+Section~\ref{sec:ladder-results} reports them. The run satisfies the constraint
+this design imposes: because the retrieval endpoints are live, every arm
+executed against a recorded corpus snapshot in replay, so the rungs differ by
+capability and not by corpus drift. One constraint remains open. If the
+Self-Improvement Memory is ever attached as a further rung, term-weight
+learning makes each question's outcome depend on the questions preceding it;
+per-question differences then cease to be exchangeable and the paired tests
+used throughout this section no longer apply as written.
+
+
+
+\section*{S3\quad Evaluation Methodology for Retrieval-Augmented Systems}
+
+Retrieval evaluation inherits from TREC the use of pooled relevance judgments:
+candidates are collected from the runs of all participating systems and judged
+once, so no system is scored against a judgment set built around its own output.
+Pooling is nonetheless incomplete. Zobel found that TREC measured relative system
+performance reliably but overestimated recall, because many relevant documents
+had likely never been found~\cite{zobel1998reliable}, and Buckley and Voorhees
+showed that standard measures are not robust to substantially incomplete
+judgments~\cite{buckley2004incomplete}. Both concerns apply to a comparison
+between pipelines that fetch different document sets from live endpoints, and
+they are why the judgments used here are pooled across both systems and all
+ablation arms.
+
+Benchmarks supply the other half of the practice. BEIR measures zero-shot
+transfer across heterogeneous retrieval tasks~\cite{thakur2021beir}; KILT fixes a
+single Wikipedia snapshot and requires provenance~\cite{petroni2021kilt}; the
+CRAG benchmark spans five domains and eight question categories, with mock APIs
+simulating web and knowledge-graph search~\cite{yang2024}; and FreshQA targets
+questions whose answers change over time, the closest published analogue to
+software update questions~\cite{vu2024freshllms}. Reference-free scorers such as
+RAGAS~\cite{es2024ragas} and ARES~\cite{saadfalcon2024ares} estimate
+faithfulness and relevance without gold answers.
+
+Two aspects of that practice bear on the metric inversion reported here. The
+first is judge independence, and the IR literature has by now measured it
+precisely enough to be quantitative about what an LLM judge can and cannot
+support. The encouraging result is at the level of system \emph{ordering}:
+UMBRELA, an open-source reproduction of Bing's assessor, induces rankings that
+agree with NIST qrels on the TREC Deep Learning tracks at Kendall's $\tau$ of
+0.873 to 0.944~\cite{upadhyay2024umbrela}, and Thomas et al.\ report run-level
+$\tau$ of 0.77 to 0.86 over 110 TREC-Robust runs~\cite{thomas2024preferences}.
+The discouraging result is at the level of individual \emph{labels}, which is
+what a qrel file actually contains: UMBRELA's per-item Cohen's
+$\kappa$~\cite{cohen1960coefficient} against
+human assessors is only 0.31 to 0.37 on the four-point
+scale~\cite{upadhyay2024umbrela}, and Faggioli et al.\ measure $\kappa=0.26$ on
+the TREC-DL 2021 pool against $\kappa=0.52$ between two groups of human
+assessors~\cite{faggioli2023perspectives}. Agreement is also asymmetric:
+LLM judges over-label relevance, so a machine ``not relevant'' label is
+considerably more trustworthy than a machine ``relevant'' one, and they can be
+induced to grade a passage of randomly sampled words as perfectly relevant
+simply by injecting the query string into
+it~\cite{alaofi2024fooled}. Faggioli et al.\ accordingly place practice on a
+spectrum from human judgment through AI assistance and human verification to
+full automation, and decline to endorse the fully automated
+endpoint~\cite{faggioli2023perspectives}; Soboroff argues the stronger position
+that whatever generates the qrels also defines the ceiling, so a system better
+than the judge cannot be measured as
+such~\cite{soboroff2025dontuse}. He also names the condition under which that
+objection lapses, and it is the one pooling supplies: judgments gathered from
+many systems carry more relevance information than any single system, so ``we
+can measure any individual systems with less information about relevance than
+the collective pool''~\cite{soboroff2025dontuse}. The concession is guarded ---
+he requires the privilege to be explicit, a judge fine-tuned on manual
+judgments for the evaluation topics being his example, and warns against
+assuming it from training data one cannot inspect --- but pooling across
+systems is the form of it obtainable without human assessors, which is why
+every judgment reported here is pooled rather than collected per system.
+
+Circularity is the specific form of this problem that a multi-agent pipeline
+invites, and its cost has been simulated. Clarke and Dietz re-ranked all 75 runs
+of the TREC 2024 RAG track with UMBRELA and then scored them with UMBRELA:
+agreement with human judgments fell from $\tau \approx 0.84$ to 0.38 at rank~10
+and to $-0.40$ at rank~5, twelve systems exceeded nDCG 0.95 where manual
+assessment placed them at 0.68 to 0.72, and a deliberately constructed run rose
+from 28th under human assessment to 5th under automatic
+assessment~\cite{clarke2024cannot}. The same effect is documented at the level
+of preference: judges recognize and favor text they themselves
+generated~\cite{panickssery2024self}, and LLM-as-judge studies report position,
+verbosity, and self-enhancement biases~\cite{zheng2023judge}. A judge that is
+also the pipeline's generator, or that is prompted with the pipeline's own
+notion of relevance, is not independently measuring it. There is one direction
+in which this literature works in favour of a finding rather than against it:
+because LLM judges are documented to penalize lexically grounded retrieval
+relative to LLM-mediated retrieval~\cite{faggioli2023perspectives}, a result in
+which the plainer, non-rewriting system \emph{wins} is not the result this bias
+would manufacture. The second
+is abstention. The CRAG benchmark scores an accurate answer $1$, a missing answer
+$0$, and an incorrect answer $-1$, explicitly preferring an admission of
+ignorance to a confident
+error~\cite{yang2024}; unanswerable-question benchmarks draw the same
+distinction on the reading-comprehension side~\cite{rajpurkar2018squad2}. A
+keyword-overlap score registers neither distinction: it rewards the presence of
+question terms in the retrieved text whether or not that text answers the
+question, and assigns no cost to a fluent answer assembled from documents that do
+not support one.
+
+The general caution is not new. Armstrong et al.\ analysed a decade of reported
+ad-hoc retrieval improvements and found little evidence of cumulative progress,
+because baselines were generally weak --- often below the median original TREC
+system --- and questioned the value of a statistically significant gain over such
+a baseline~\cite{armstrong2009improvements}; Lipton and Steinhardt catalogue the
+reporting patterns that let such results stand~\cite{lipton2019trends}. A
+retrieval-quality score defined by the authors of the system it evaluates is the
+limiting case, having neither external calibration nor a cross-system pool. What
+this paper adds is a worked instance in which such a score and a standard one
+disagree by roughly a factor of five in opposite directions over the same runs,
+with the document-level audit that establishes which was right.
+
+
+
+\section*{S4\quad The Multi-Ecosystem Benchmark}
+
+The evaluation in the conference version used 50 questions drawn from a single
+community source, which is too few to separate an architectural effect from
+noise and too narrow to say anything about ecosystems other than the ones those
+questions happened to mention. We therefore constructed a larger benchmark, and
+we describe its construction here in enough detail to expose its biases, because
+a benchmark assembled by the authors of the system it evaluates warrants that
+scrutiny.
+
+\subsubsection{Construction}
+
+The benchmark contains 500 questions arranged as a $24 \times 5$ grid of
+software ecosystem by question category, filled to 20 or 21 questions per
+ecosystem and exactly 100 per category. It was built in two stages from one
+cache and one seed --- 300 questions first, then 500 --- and the selection is
+greedy over deterministically ordered pools, so the 300 are a strict subset of
+the 500; where a measurement below is reported at $n=300$, it is on that
+subset. The 24 ecosystems span mobile and desktop
+platforms (Apple iOS, Apple macOS, Android, Windows), four Linux distributions
+(Ubuntu, Debian, Fedora, Arch) and the kernel itself, browsers (Firefox,
+Chrome), container infrastructure (Docker, Kubernetes), language package
+ecosystems (npm/Node, pip/Python, cargo/Rust), self-hosted and home applications
+(Home Assistant, NAS/self-hosted, WordPress), databases (PostgreSQL, MySQL,
+NoSQL), developer tooling, and LLM/AI model releases. The five categories are
+releases, bugs, security, community, and general.
+
+Every question is mined from live data rather than authored: 249 are verbatim
+titles of real community posts, and 51 are generated from real release or
+advisory records. No question is a template with a hand-written stem. The
+builder draws from a pool of 9,923 community posts and the release and advisory
+endpoints described in Section~\ref{sec:datasources}, and it is deterministic:
+a fixed seed, an on-disk response cache, and an \texttt{--offline} mode that
+replays the cache, so two runs of the builder produce byte-identical output.
+Each record carries the endpoint and record type it came from, so mined and
+generated questions remain distinguishable in any analysis.
+
+\subsubsection{Two Upstream Data Defects}
+
+Two properties of the upstream feeds would have injected false questions into
+the benchmark had they been consumed naively. We report them because they are
+properties of the public data sources rather than of our pipeline, and anyone
+building on the same feeds will encounter them.
+
+This is not an isolated quirk of one feed. Vulnerability-database metadata is
+known to be noisy: affected-version and severity records in the NVD contain
+substantial inaccuracy~\cite{croft2023dataquality,croft2022severity,anwar2022nvd},
+and inconsistencies between advisory text and structured metadata have been
+documented at scale~\cite{dong2019inconsistencies}. Downstream models trained on
+such labels inherit the noise~\cite{chakraborty2022vulndetection}. What follows is
+the form the problem takes in the feeds used here.
+
+First, on advisory records the product field names the \emph{index token} under
+which the advisory was filed, not the affected product. An advisory for ``Mocha
+Telnet Lite for iOS 4.2'' is stored with product \texttt{iOS} and version
+\texttt{4.2.0}; advisories concerning Velero are stored under
+\texttt{Kubernetes}. Templating those fields directly yields questions such as
+\emph{``Is iOS v4.2.0 vulnerable?''}, which assert a falsehood in the question
+itself and would be scored against a system for failing to confirm it. The
+builder instead parses the affected product and version out of the advisory
+text, keeps a record only when the parsed product belongs to a tracked
+ecosystem, and discards the rest: of 3,113 advisory rows, 548 parsed and 268
+could be confidently attributed.
+
+Second, a minority of records carry malformed dates (for example
+\texttt{23.30.13102017} and \texttt{2025[29]0213}). Since date agreement is one
+of the two decisive facts in this domain, these records are dropped rather than
+normalized by guessing.
+
+We also stopped trusting the feed's own topical flags. Its CVE-relatedness flag
+fires on posts such as \emph{``Best budget AI subscription / API tokens?''}, so
+it is used only to break ties within the security category rather than to assign
+one.
+
+\subsubsection{Ground Truth and Its Limits}
+
+Of the 500 questions, 72 carry a reference answer (51 of the first 300), and
+only those generated from release or advisory records do --- a community post
+title states a question but does not come with an authoritative answer.
+Ground-truth coverage is therefore concentrated in the releases and security
+categories, and any correctness or hallucination measurement over this
+benchmark is computed on that subset rather than on all 500 questions.
+
+A community post title comes with something else: the URL of the post it was
+taken from, which the live community feed the system retrieves from will return
+as a document. Section~\ref{sec:leak} reports what that did to every retrieval
+measurement and how the harness now excludes it; the benchmark file carries the
+URL on every record so that the exclusion, and the post-hoc correction of runs
+made without it, are reproducible.
+
+This has a consequence for sampling that we did not anticipate and that a
+reader reusing the benchmark should know. A subset selected to balance ecosystem
+and category, without regard to ground truth, can leave almost none: our first
+100-question stratified selection carried a reference answer on 2 questions. A
+selection that prefers ground-truth records within each grid cell retains 28.
+Reported retrieval metrics are unaffected --- they rest on pooled relevance
+judgments, not reference answers --- but any answer-correctness figure requires
+the second kind of selection, and we report retrieval and answer-faithfulness
+results rather than correctness for this reason.
+
+\subsubsection{Coverage Gaps}
+
+One of the 120 grid cells (Arch $\times$ security) had no live candidate
+available at build time. Rather than synthesize one, the builder logs the gap
+and fills the category quota from other ecosystems, so the category totals hold
+exactly while that single cell is empty. Nineteen product-name lookups returned
+404 because the product is not in the vendor catalogue (npm, pip, cargo,
+Synology, Home Assistant, NixOS, GitLab among them); this is a catalogue
+coverage limitation rather than an endpoint failure, and the affected ecosystems
+are represented through their community and release records instead.
+
+
+\section*{S5\quad Software Ecosystem Data Sources}
+
+The system retrieves information from software ecosystem documents
+obtained through multiple API endpoints.
+
+\textbf{Verified Sources}
+\begin{itemize}
+\item \texttt{/\{vendor\}}: vendor registry (6,578 entries)
+\item \texttt{/v/}: software release notes (31,958 entries)
+\item \texttt{/cve}: vulnerability advisories (24,139 entries)
+\end{itemize}
+
+\textbf{Community Sources}
+\begin{itemize}
+\item \texttt{/reddit}: community discussions (208,466 posts)
+\item \texttt{/positive}: software update risk discussions (2,637 posts)
+\item \texttt{/by-subreddit?q=\{vendor\}}: vendor-specific discussions
+\item \texttt{/questions}: software-related user questions
+\end{itemize}
+
+To support vendor-aware retrieval, a registry of software vendors and
+associated subreddits is loaded at startup and cached locally.
+
+The entry counts above are those measured when the conference version was
+written. They are not re-measurable: the endpoints return query results
+without a collection total, so a reader cannot check them against the live
+service. The one count that can be checked has moved substantially ---
+\texttt{/api/c/names}, the product vocabulary the vendor matcher is built
+from, returned 14,223 names then and returns 1,348 today (2026-09-23, full
+response, not paginated). We report the original figures rather than silently
+restate them, and note that any absolute corpus size in this section should be
+read as a measurement of the service at that time rather than a stable
+property of it. Retrieval results in this paper are unaffected: every run
+either records its own corpus snapshot or is replayed from one
+(Section~\ref{sec:tier-control}).
+
+
+
+\section*{S6--S9\quad Superseded Measurements at $n=100$}
+
+These tables report the 100-question measurements the paper's later runs at
+$n=500$ and $n=1{,}000$ supersede. They are retained because the main text
+cites them when tracing how each conclusion was reached.
+
+\begin{table}[t]
+\caption{Ranking ablation repeated on the repaired pipeline, $n=100$, against a
+frozen corpus snapshot replayed identically for all three arms
+(\texttt{corpus\_misses}~$=0$, \texttt{frozen}~$=$~true). Unlike
+Table~\ref{tab:ranking-ablation} these rows are strictly paired. With the union
+fetch in place, stronger ranking now moves nDCG@3 and MRR \emph{together} ---
+the divergence that localized the defect is absent, which is what the diagnosis
+predicts. Levels in this table are inflated by the own-post leak of
+Section~\ref{sec:leak} (72--73\% of top-$k$ lists on this frozen corpus); the
+within-table contrasts, which compare arms that leak at the same rate, are what
+it is cited for.}
+\label{tab:scaled-ablation}
+\begin{tabular}{llrrrr}
+\toprule
+Ranking function & System & nDCG@3 & nDCG@5 & MRR & Recall@5 \\
+\midrule
+None            & multi-agent  & 0.486 & 0.473 & 0.618 & 0.341 \\
+                & single-agent & 0.507 & 0.493 & 0.646 & 0.371 \\
+Okapi BM25      & multi-agent  & 0.627 & 0.596 & 0.793 & 0.387 \\
+                & single-agent & 0.631 & 0.606 & 0.806 & 0.396 \\
+Embedding cosine & multi-agent  & \textbf{0.656} & \textbf{0.615} & \textbf{0.817} & 0.387 \\
+                 & single-agent & 0.646 & 0.612 & 0.808 & 0.388 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\caption{Answer quality and cost ($n=100$), LLM-judged, mean $\pm$ 95\% CI.
+\texttt{marag} and \texttt{marag\_llm} share a retrieval pipeline and differ
+only in how the answer is produced. Quality is measured on the frozen-corpus
+replay; latency is the per-question median from the live recording pass that
+produced that snapshot, since a replay reads its documents from cache and its
+timings measure nothing.}
+\label{tab:scaled-answer}
+\begin{tabular}{lrrr}
+\toprule
+System & Faithfulness & Answer relevance & Latency (s) \\
+\midrule
+marag (template answer)   & 0.748 $\pm$ 0.036 & 0.995 $\pm$ 0.004 & 18.8 \\
+marag\_llm (prose answer) & 0.919 $\pm$ 0.035 & 0.968 $\pm$ 0.027 & 24.7 \\
+single\_agent             & 0.929 $\pm$ 0.032 & 0.973 $\pm$ 0.021 & 8.4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\caption{The same three systems on a second 100-question selection, one that
+retains 28 reference answers, under the same frozen-corpus protocol (6{,}227
+snapshot hits, no miss on a document host). Values are mean $\pm$ 95\% CI;
+correctness is computed only where a reference answer exists, with $n$ given
+per arm; latency is the median from the live recording pass. The nominal
+ordering on retrieval is the reverse of Table~\ref{tab:scaled-retrieval}, and
+remains so after the repair --- which is the point of reporting this sample.
+Retrieval levels carry the own-post leak (72--73\% of top-$k$ lists; leak-free
+nDCG@3 0.330 / 0.330 / 0.333).}
+\label{tab:gt-run}
+\begin{tabular}{lrrrr}
+\toprule
+System & nDCG@3 & Faithfulness & Correctness & Latency (s) \\
+\midrule
+marag         & 0.795 $\pm$ 0.071 & 0.735 $\pm$ 0.037 & 0.324 $\pm$ 0.109 ($n=27$) & 16.2 \\
+marag\_llm    & 0.795 $\pm$ 0.071 & 0.939 $\pm$ 0.030 & 0.392 $\pm$ 0.160 ($n=25$) & 16.5 \\
+single\_agent & 0.773 $\pm$ 0.075 & 0.932 $\pm$ 0.031 & 0.363 $\pm$ 0.134 ($n=27$) & 8.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\caption{Paired per-question differences, Wilcoxon signed-rank. ``Better'' and
+``worse'' count the questions on which the second arm beat or lost to the
+first; the remainder tie. Rows marked $\dagger$ report a $p$ below the smallest
+value the test can attain at that number of non-zero pairs (0.0625 at five
+pairs, 0.25 at three): they are null, not significant.}
+\label{tab:ladder-paired}
+\begin{tabular}{llrrrl}
+\toprule
+Comparison & Metric & Mean $\Delta$ & Better & Worse & $p$ \\
+\midrule
+A1 $\to$ A1g  & nDCG@3   & $+0.049$ & 14 & 5  & \textbf{0.0070} \\
+A1 $\to$ A1g  & Recall@3 & $+0.051$ & 12 & 4  & \textbf{0.0035} \\
+A1 $\to$ A1g  & nDCG@5   & $+0.042$ & 15 & 9  & \textbf{0.0268} \\
+A1 $\to$ A1g  & Recall@5 & $+0.037$ & 13 & 9  & 0.0534 \\
+A1 $\to$ A1g  & MRR      & $+0.023$ & 5  & 0  & 0.0431$^\dagger$ \\
+A1 $\to$ A1g  & nDCG@1   & $+0.027$ & 3  & 0  & 0.1088$^\dagger$ \\
+\midrule
+A1 $\to$ A3   & nDCG@5   & $+0.018$ & 9  & 10 & 0.8721 \\
+A1 $\to$ A3   & Recall@5 & $+0.007$ & 6  & 8  & 1.0000 \\
+A1 $\to$ A3   & MRR      & $+0.016$ & 4  & 4  & 0.4838 \\
+\midrule
+A1g vs.\ A3   & nDCG@5   & $-0.024$ & 12 & 20 & 0.2172 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section*{S10\quad Multi-Agent RAG Frameworks, Reproducibility Toolkits, and the Self-Reflective Arm}
+
+Multi-agent RAG systems distribute retrieval and reasoning across
+specialized agents. MA-RAG employs planner, extraction, and question
+answering agents~\cite{nguyen2025marag}. MAIN-RAG separates document
+selection and answer generation through dedicated predictor and judge
+agents~\cite{wang2024mainrag}. More generally, frameworks such as
+AutoGen~\cite{wu2023autogen} and smolagents~\cite{huggingface2024agents}
+provide infrastructure for agent orchestration and tool use.
+
+Four recent systems are close enough to the pipeline studied here to warrant
+individual comparison. MA-RAG chains Planner, Step Definer, Extractor, and QA
+agents that hand chain-of-thought state to one another, and reports that
+LLaMA3-8B under this arrangement outperforms larger standalone models on
+multi-hop benchmarks~\cite{nguyen2025marag}; it shares our staged specialists
+and 8B-class local model but is evaluated on Wikipedia-derived corpora with no
+memory across questions. RAGentA feeds hybrid sparse--dense retrieval into a
+draft-answer agent, a triplet filter, a citing answer agent, and a completeness
+checker that reformulates the query when evidence is
+lacking~\cite{besrour2025ragenta}; its filter-and-cite stages correspond to our
+reranker and source-traced answers, but its reformulation runs \emph{after} a
+first retrieval over the original wording, so the original query is always
+searched --- the property whose absence produced the defect reported in
+Section~\ref{sec:rewrite-roles}. Amber maintains an agent-updated memory that steers
+an adaptive information collector and a multi-granular filter across retrieval
+iterations~\cite{qin2025amber}; it is the nearest analogue to our
+self-improvement memory, though Amber's memory lives inside a single question's
+loop whereas ours persists across successive queries and is updated from their
+outcomes. Shaikh ablates decomposition, adaptive routing, loop depth, and
+cross-encoder reranking on a local Qwen2.5-7B and finds fixed hybrid retrieval
+beating adaptive routing, with decomposition and reranking contributing only
+modest gains~\cite{shaikh2026dissecting} --- a design-space result that agrees
+with our own finding that decomposition per se did not produce the originally
+reported improvement, though our result arrived as a defect diagnosis rather
+than an ablation. Finally, Mishra et al.\ systematise agentic RAG as a
+partially observable decision process along planning, retrieval orchestration,
+memory, and tool-use axes, and catalogue retrieval misalignment and memory
+poisoning as systemic risks~\cite{mishra2026sok}; the replacing rewriter
+described in this paper is a concrete instance of the former.
+
+Most prior evaluations focus on general question-answering benchmarks, whereas
+this work evaluates a multi-agent architecture for software update question
+answering over a live, heterogeneous corpus.
+
+\subsection{Multi-Agent RAG and Reproducibility Infrastructure}
+
+The self-correcting designs reviewed above --- Self-RAG's reflection
+tokens~\cite{asai2024selfrag}, CRAG's lightweight retrieval
+evaluator~\cite{yan2024crag}, Adaptive-RAG's complexity-based
+routing~\cite{jeong2024adaptiverag}, and FLARE's confidence-triggered retrieval
+during generation~\cite{jiang2023flare} --- decide \emph{whether} and \emph{how
+often} to retrieve, and how to filter what returns. None of them, as published,
+checks whether the text handed to the retriever preserves the user's own
+phrasing.
+
+Two toolkits now make much of this work runnable. FlashRAG is an MIT-licensed
+Python toolkit that reimplements RAG algorithms under one interface --- 16
+methods over 38 datasets as published~\cite{jin2025flashrag}, 23 algorithms over
+36 in the current release, including Self-RAG, Adaptive-RAG, and FLARE
+pipelines~\cite{flashrag2025repo}. RAGLAB reproduces six algorithms across ten
+benchmark datasets~\cite{zhang2024raglab} and publishes fine-tuned
+\texttt{selfrag\_llama3-8B} checkpoints with VLLM-based and quantized generation
+configurations~\cite{raglab2024repo}.
+
+We did not run a head-to-head comparison against these baselines, for a reason
+that is a property of our setting rather than a criticism of the toolkits: each
+assumes a static corpus embedded and indexed in advance. Self-RAG's released
+retrieval component is Contriever~\cite{izacard2022contriever} over the DPR
+Wikipedia passage split~\cite{karpukhin2020dpr} with precomputed embeddings; its
+authors note that retrieval over full English Wikipedia requires large memory
+and multiple GPUs, and report testing their on-demand retrieval script on a
+configuration with 100\,GB of RAM, while observing that less should
+suffice~\cite{selfrag2023repo}. RAGLAB's ColBERT retrieval server is documented
+as requiring at least 60\,GB of RAM~\cite{raglab2024repo}. CRAG's retrieval
+evaluator is a fine-tuned T5-large model, and its confidence thresholds are set
+separately for each evaluation dataset --- $(0.59, -0.99)$ for PopQA and
+$(0.95, -0.91)$ for biography generation, among others~\cite{yan2024crag} --- so
+transferring the method to a new domain requires re-tuning against labelled data
+for that domain. The system studied here retrieves from live release, advisory,
+and community APIs whose contents change between runs and for which no pre-built
+index exists: there is no static split to embed, and per-dataset thresholds have
+no analogue. The comparison we can make is against a single-agent baseline
+issuing the same calls to the same endpoints in the same time window, which
+isolates the architectural variable at the cost of not situating either system
+against published leaderboard numbers. We record this as a limitation rather than
+resolving it.
+
+One partial step toward resolving it is released with the harness. Since the
+obstacle is the retrieval stack rather than the methods, we reimplemented the
+inference-time mechanisms both papers introduce --- Self-RAG's per-passage
+relevance and support critiques, and CRAG's three-way corrective control flow
+--- over our own retrieval layer, with the synthesis model held constant and
+CRAG's web-search branch replaced by declining, since no web fallback exists in
+a fixed-corpus comparison. It is available as an arm of the evaluation harness
+(\texttt{--generators selfreflective}). We report no results for it: its
+evaluation was not complete at submission, and reporting a partial run of a
+baseline would be worse than reporting none. What the arm establishes now is
+only that the mechanisms can be evaluated in this setting once the retrieval
+obstacle is set aside, and that a future comparison need not port a Wikipedia
+index to make it. It is a reimplementation and not a reproduction: neither
+published checkpoint is involved, so it can never settle how those systems
+perform, only how their mechanisms behave over these sources.
+
+Completing that evaluation carries a condition worth stating in advance. In the
+configuration released here the arm's critiques run the same model that judges
+answers for scoring, and the critique loop decides both which documents the
+answer is drafted from and whether to answer at all. A judge scoring answers it
+helped shape is the self-preference case documented for LLM
+evaluators~\cite{panickssery2024self,zheng2023judge}, so the arm's
+\emph{answer-quality} numbers under such a judge would not be independent of it.
+Whoever finishes the run should score it with a model independent of the critic.
+
+The arm's \emph{retrieval} metrics are not exposed to this, by a deliberate
+choice in the harness worth recording because the opposite is the natural
+implementation: the arm reports the full retrieved list rather than the
+critique-filtered one, so nDCG and recall are computed over what it retrieved
+and not over what its critic approved. Scoring only the kept documents would
+flatter precision by hiding the discards, and would additionally make the
+retrieval numbers circular in the sense Clarke and Dietz
+measure~\cite{clarke2024cannot}. The harness records each critique decision, so
+the number of documents the critic withheld from drafting is recoverable per
+query; because a hedged or negated critique keeps the document
+(\texttt{SelfReflectiveRAG.is\_relevant} discards only on a non-negated
+\textsc{irrelevant} verdict, via \texttt{find\_verdict}), that count is a lower
+bound on the critic's filtering.
+
+
+\end{document}
