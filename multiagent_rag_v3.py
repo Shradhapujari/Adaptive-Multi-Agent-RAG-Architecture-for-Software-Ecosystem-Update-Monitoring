@@ -126,6 +126,36 @@ def expand_terms(query):
             if t in syns or t==base: expanded.update(syns)
     return expanded
 
+def release_row(v: dict) -> dict:
+    """The demo app's release-row shape, read off a raw `/api/v/` record.
+
+    Carried on the ranked document as `release_row` rather than flattened into
+    it, because this pipeline's own document shape is load-bearing: `notes` and
+    `is_cve` at the top level would change what `vendor.classify_record` — and
+    so `doc_kind`, and so an eval arm's `citable_kinds` filter — decides about
+    a Linux kernel advisory. A nested key nothing else reads cannot do that.
+
+    The app's release panel reads product/version/notes/security/breaking; a
+    document ranked into its release pool has to carry them, and only the
+    fetcher still has the raw record to read them from.
+    """
+    notes = v.get("versionReleaseNotes", "")
+    if isinstance(notes, list):
+        notes = " ".join(str(n) for n in notes)
+    cls = v.get("classification", {}) or {}
+    return {
+        "product":  v.get("versionProductName", ""),
+        "version":  v.get("versionNumber", ""),
+        "date":     str(v.get("versionReleaseDate", ""))[:8],
+        "notes":    str(notes)[:200],
+        "channel":  v.get("versionReleaseChannel", ""),
+        "url":      v.get("versionUrl", ""),
+        "security": cls.get("securityType", []),
+        "breaking": cls.get("breakingType", []),
+        "is_cve":   v.get("isCve", False),
+    }
+
+
 def fetch_live_releases(query, limit=5, min_overlap=2):
     try:
         import requests as req
@@ -153,6 +183,7 @@ def fetch_live_releases(query, limit=5, min_overlap=2):
                     "source": "releases",
                     "url": v.get("versionUrl",""),
                     "date": v.get("versionReleaseDate",""),
+                    "release_row": release_row(v),
                 }))
         scored.sort(key=lambda x:x[0], reverse=True)
         return [d for _,d in scored[:limit]]
@@ -298,6 +329,7 @@ def fetch_llm_releases(query, limit=4, min_overlap=1, gate=True, max_terms=4):
                     "date": v.get("versionReleaseDate", ""),
                     "verified": True,
                     "tier": 1,
+                    "release_row": release_row(v),
                 }))
         scored.sort(key=lambda x: x[0], reverse=True)
         return [d for _, d in scored[:limit]]
@@ -1124,6 +1156,7 @@ def fetch_vendor_releases(vendor: str, limit: int = 10, target_date: str = None)
                 "verified":  True,
                 "tier":      1,
                 "vendor":    vendor,
+                "release_row": release_row(v),
             })
         return results
     except Exception as e:
@@ -1515,6 +1548,96 @@ def _norm_url(u) -> str:
     return u.rstrip("/")
 
 
+def gather_sources(rewritten_query: str, original_query: str = "",
+                   vendors=(), union: bool = True, log=None) -> dict:
+    """Fetch every live source, returned in named buckets.
+
+    Lifted out of `RetrieverAgent.run` verbatim so the demo app can retrieve
+    from the same sources the terminal does. It used to have three fetchers of
+    its own against releasetrain.io while this had twelve, so a question whose
+    answer lived in Google News or the CISA catalogue was unanswerable in the
+    app and answered in the terminal -- and no amount of reranking fixes a
+    document that was never fetched. Two callers, one source list, so they
+    cannot drift apart again.
+
+    Buckets rather than tiers: the caller decides how to tier and rank them.
+    `log` takes the progress lines (the CLI passes `print`); None is silent.
+    """
+    if log is None:
+        log = lambda *_a, **_k: None  # noqa: E731
+
+    # ── STEP 2: Targeted vendor queries (if vendor found) ──
+    vendor_releases = []
+    vendor_reddit   = []
+    # Extract date from query if present
+    target_date = extract_date_from_query(rewritten_query)
+    if target_date:
+        log(f"  Date     : Detected → {target_date}")
+
+    if vendors:
+        # Expand vendor to related subreddits for better coverage
+        rel_calls, red_calls = [], []
+        for v in vendors[:2]:  # max 2 vendors
+            log(f"  Fetching : releasetrain.io/api/c/name/{v} ...")
+            rel_calls.append(lambda v=v: fetch_vendor_releases(v, limit=8, target_date=target_date))
+            # Search all related subreddits for this vendor
+            subs_to_search = VENDOR_SUBREDDITS.get(v, [v])
+            for sub in subs_to_search[:3]:
+                log(f"  Fetching : releasetrain.io/api/reddit/by-subreddit?q={sub} ...")
+                # Same rewrite-augments-search rule as the general sources
+                # below: the subreddit filter is keyed on the vendor, but
+                # the ranking within it is keyed on the query wording, so
+                # both phrasings have to be asked for.
+                red_calls.append(lambda sub=sub: fetch_vendor_reddit(sub, query=rewritten_query, limit=8))
+                if union and original_query and original_query.strip().lower() != rewritten_query.strip().lower():
+                    red_calls.append(lambda sub=sub: fetch_vendor_reddit(sub, query=original_query, limit=8))
+        for r in _gather(rel_calls): vendor_releases += r
+        for r in _gather(red_calls): vendor_reddit += r
+
+    # ── STEP 3: General sources, fetched for BOTH phrasings ──
+    # Measured on the 10-question ground-truth set: 22 of the 23 relevant
+    # documents the single-agent baseline retrieved were never fetched by
+    # this pipeline at all, because the rewrite *replaced* the user's
+    # wording at fetch time. Reranking cannot recover a document that was
+    # never in the pool, so the rewrite must augment the search rather than
+    # substitute for it. Both phrasings are searched and the pools unioned.
+    search_queries = [rewritten_query]
+    if union and original_query and original_query.strip().lower() != rewritten_query.strip().lower():
+        search_queries.append(original_query)
+
+    gen_releases, gen_apple, gen_cisa, gen_circl = [], [], [], []
+    gen_cve, gen_llm, gen_reddit, gen_news = [], [], [], []
+
+    # Gate on the question before spending a round trip per search term.
+    # Check the original wording too: a rewrite can drop the model name.
+    _wants_llm = query_mentions_llm(f"{original_query or ''} {rewritten_query}")
+    _sinks = {"releases": gen_releases, "apple": gen_apple, "cisa": gen_cisa,
+              "circl": gen_circl, "cve": gen_cve, "llm": gen_llm,
+              "reddit": gen_reddit, "news": gen_news}
+    _calls = []   # (sink, thunk), in the order the sequential loop appended
+    for qi, q in enumerate(search_queries):
+        tag = "rewritten" if qi == 0 else "original"
+        log(f"  Fetching : general sources for {tag} query ...")
+        if not vendor_releases:
+            _calls.append(("releases", lambda q=q: fetch_live_releases(q, limit=4)))
+        _calls.append(("apple", lambda q=q: fetch_apple_rss(q, limit=3)))
+        _calls.append(("cisa",  lambda q=q: fetch_cisa_kev(q, limit=2)))
+        _calls.append(("circl", lambda q=q: fetch_circl_apple(q, limit=2)))
+        _calls.append(("cve",   lambda q=q: fetch_live_cve(q, limit=2)))
+        if _wants_llm:
+            _calls.append(("llm", lambda q=q: fetch_llm_releases(q, limit=3, gate=False)))
+        if not vendor_reddit:
+            _calls.append(("reddit", lambda q=q: fetch_live_reddit(q, limit=3)))
+        _calls.append(("news",  lambda q=q: fetch_google_news(q, limit=2)))
+    for (sink, _), r in zip(_calls, _gather([c for _, c in _calls])):
+        _sinks[sink] += r
+
+    return {"vendor_releases": vendor_releases, "vendor_reddit": vendor_reddit,
+            "gen_releases": gen_releases, "gen_apple": gen_apple,
+            "gen_cisa": gen_cisa, "gen_circl": gen_circl, "gen_cve": gen_cve,
+            "gen_llm": gen_llm, "gen_reddit": gen_reddit, "gen_news": gen_news}
+
+
 class RetrieverAgent:
     name = "📚  Retriever Agent"
 
@@ -1561,77 +1684,18 @@ class RetrieverAgent:
         else:
             print(f"  Vendor   : None detected — using general search")
 
-        # ── STEP 2: Targeted vendor queries (if vendor found) ──
-        vendor_releases = []
-        vendor_reddit   = []
-        # Extract date from query if present
-        target_date = extract_date_from_query(rewritten_query)
-        if target_date:
-            print(f"  Date     : Detected → {target_date}")
-
-        if vendors:
-            # Expand vendor to related subreddits for better coverage
-            rel_calls, red_calls = [], []
-            for v in vendors[:2]:  # max 2 vendors
-                print(f"  Fetching : releasetrain.io/api/c/name/{v} ...")
-                rel_calls.append(lambda v=v: fetch_vendor_releases(v, limit=8, target_date=target_date))
-                # Search all related subreddits for this vendor
-                subs_to_search = VENDOR_SUBREDDITS.get(v, [v])
-                for sub in subs_to_search[:3]:
-                    print(f"  Fetching : releasetrain.io/api/reddit/by-subreddit?q={sub} ...")
-                    # Same rewrite-augments-search rule as the general sources
-                    # below: the subreddit filter is keyed on the vendor, but
-                    # the ranking within it is keyed on the query wording, so
-                    # both phrasings have to be asked for.
-                    red_calls.append(lambda sub=sub: fetch_vendor_reddit(sub, query=rewritten_query, limit=8))
-                    if union and original_query and original_query.strip().lower() != rewritten_query.strip().lower():
-                        red_calls.append(lambda sub=sub: fetch_vendor_reddit(sub, query=original_query, limit=8))
-            for r in _gather(rel_calls): vendor_releases += r
-            for r in _gather(red_calls): vendor_reddit += r
-
-        # ── STEP 3: General sources, fetched for BOTH phrasings ──
-        # Measured on the 10-question ground-truth set: 22 of the 23 relevant
-        # documents the single-agent baseline retrieved were never fetched by
-        # this pipeline at all, because the rewrite *replaced* the user's
-        # wording at fetch time. Reranking cannot recover a document that was
-        # never in the pool, so the rewrite must augment the search rather than
-        # substitute for it. Both phrasings are searched and the pools unioned.
-        search_queries = [rewritten_query]
-        if union and original_query and original_query.strip().lower() != rewritten_query.strip().lower():
-            search_queries.append(original_query)
-
-        gen_releases, gen_apple, gen_cisa, gen_circl = [], [], [], []
-        gen_cve, gen_llm, gen_reddit, gen_news = [], [], [], []
-
-        # Gate on the question before spending a round trip per search term.
-        # Check the original wording too: a rewrite can drop the model name.
-        _wants_llm = query_mentions_llm(f"{original_query or ''} {rewritten_query}")
-        _sinks = {"releases": gen_releases, "apple": gen_apple, "cisa": gen_cisa,
-                  "circl": gen_circl, "cve": gen_cve, "llm": gen_llm,
-                  "reddit": gen_reddit, "news": gen_news}
-        _calls = []   # (sink, thunk), in the order the sequential loop appended
-        for qi, q in enumerate(search_queries):
-            tag = "rewritten" if qi == 0 else "original"
-            print(f"  Fetching : general sources for {tag} query ...")
-            if not vendor_releases:
-                _calls.append(("releases", lambda q=q: fetch_live_releases(q, limit=4)))
-            _calls.append(("apple", lambda q=q: fetch_apple_rss(q, limit=3)))
-            _calls.append(("cisa",  lambda q=q: fetch_cisa_kev(q, limit=2)))
-            _calls.append(("circl", lambda q=q: fetch_circl_apple(q, limit=2)))
-            _calls.append(("cve",   lambda q=q: fetch_live_cve(q, limit=2)))
-            if _wants_llm:
-                _calls.append(("llm", lambda q=q: fetch_llm_releases(q, limit=3, gate=False)))
-            if not vendor_reddit:
-                _calls.append(("reddit", lambda q=q: fetch_live_reddit(q, limit=3)))
-            _calls.append(("news",  lambda q=q: fetch_google_news(q, limit=2)))
-        for (sink, _), r in zip(_calls, _gather([c for _, c in _calls])):
-            _sinks[sink] += r
+        # STEPS 2 and 3 -- every live source, in named buckets. Shared with the
+        # demo app so the two cannot retrieve from different source lists.
+        src = gather_sources(rewritten_query, original_query=original_query,
+                             vendors=vendors, union=union, log=print)
 
         # ── Tier 1: vendor-specific first, then general verified ──
-        tier1 = dedupe_docs(vendor_releases + gen_releases + gen_apple
-                            + gen_cisa + gen_circl + gen_cve + gen_llm)
+        tier1 = dedupe_docs(src["vendor_releases"] + src["gen_releases"]
+                            + src["gen_apple"] + src["gen_cisa"]
+                            + src["gen_circl"] + src["gen_cve"] + src["gen_llm"])
         # ── Tier 2: vendor reddit first, then general community ──
-        tier2 = dedupe_docs(vendor_reddit + gen_reddit + gen_news, seen=doc_keys(tier1))
+        tier2 = dedupe_docs(src["vendor_reddit"] + src["gen_reddit"]
+                            + src["gen_news"], seen=doc_keys(tier1))
 
         # ── Screen the pool: a fetched row is data, never instruction ──
         # `union_fetch` screens the demo app's pool, but this class is what the

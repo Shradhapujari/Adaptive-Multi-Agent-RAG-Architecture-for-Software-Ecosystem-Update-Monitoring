@@ -373,6 +373,14 @@ def fetch_release_notes(query: str, limit: int = 5) -> list:
         releases = [v for v in versions if not v.get("isCve")]
         versions = releases[:limit] + advisories[:limit]
         return [{
+            # `rerank.doc_text()` reads title/detail/text, not `notes`, so a row
+            # without a title is an empty document to the ranker and every
+            # release scored 0 -- the pool came back in fetch order however it
+            # was ranked. Same title shape the CLI gives its release rows; the
+            # renderer builds its own label from product/version/date and never
+            # reads this.
+            "title":     f"{v.get('versionProductName')} v{v.get('versionNumber')}"
+                         f" — {v.get('versionReleaseNotes', '')[:80]}",
             "product":   v.get("versionProductName", ""),
             "version":   v.get("versionNumber", ""),
             "date":      v.get("versionReleaseDate", ""),
@@ -456,36 +464,93 @@ def _step(label: str, show: bool):
     return st.spinner(label) if show else nullcontext()
 
 
-def vendor_subreddit_posts(query: str, already: list, per_sub: int = 8):
-    """The vendor's own subreddits, as the terminal trace searches them.
+def terminal_sources(query: str, rewritten: str, already: list):
+    """Every source the terminal retrieves from, in this app's pools.
 
-    The community agent reads `/api/reddit/query/positive`, which ranks the
-    whole feed by text. The terminal's RetrieverAgent also asks
-    `/api/reddit/by-subreddit` for the detected vendor's subreddits, and that is
-    where a thread like "KB5101650 breaks printing" lives: on the demo question
-    the app returned no printing document at all while the terminal named the
-    KB. Same detector and same fetch as the terminal, so both views see it.
+    This app had three fetchers, all against releasetrain.io; the terminal has
+    twelve, including Google News, the CISA KEV catalogue and CIRCL. On "What
+    broke printing in the latest Windows update?" the two documents that
+    answered it were Google News articles, so the app could not answer a
+    question the terminal answered well -- and ranking cannot recover a
+    document that was never fetched. `marag.gather_sources` is the terminal's
+    own fetch, shared rather than copied, so the two source lists cannot drift
+    apart again.
 
-    Returns `(kept, dropped)`; the caller adds the drops to the run's screen log.
+    The terminal normalises every source to one document shape
+    (title/subreddit/sentiment/score/date/url), which is the shape this app's
+    community and security panels already render. Its release documents carry
+    the extra fields this app's release panel needs -- product, version, notes,
+    channel, security, breaking -- under `release_row`, because flattening them
+    into the terminal's own document would change what `vendor.classify_record`
+    decides about a kernel advisory there. `_release_rows` unpacks them.
+
+    `gen_apple` is the one bucket left out: the Apple RSS feed carries a title
+    and a date and no version at all, so there is no release row to build. Its
+    items are announcements, and this app has no panel that is about them.
+
+    Returns `({"community": [...], "releases": [...], "cve": [...]}, dropped)`;
+    the caller adds the drops to the run's screen log.
     """
     import multiagent_rag_v3 as marag
     from guardrail import screened as _screen
 
     have = {(d.get("url") or "").rstrip("/").lower() for d in (already or ())}
-    out = []
-    for v in marag.extract_vendor(query)[:2]:
-        for sub in marag.VENDOR_SUBREDDITS.get(v, [v])[:3]:
-            try:
-                posts = marag.fetch_vendor_reddit(sub, query=query, limit=per_sub)
-            except Exception:  # noqa: BLE001 -- one dead subreddit is not an outage
-                continue
+    try:
+        # Same detector as the terminal: `extract_vendor` on the original
+        # wording, not the grounder's product names, which are catalogue
+        # entries and do not always match the subreddit map's keys.
+        src = marag.gather_sources(rewritten or query, original_query=query,
+                                   vendors=marag.extract_vendor(query))
+    except Exception as e:  # noqa: BLE001 -- a dead source list is not a dead run
+        # Recorded, not swallowed: returning empty silently is indistinguishable
+        # from "these sources had nothing", which is how a broken source list
+        # would go on looking like a thin news day.
+        _record_fetch_error("Shared sources", e)
+        return {"community": [], "releases": [], "cve": []}, []
+
+    pools, dropped = {}, []
+    for pool, buckets in (("community", ("vendor_reddit", "gen_reddit", "gen_news")),
+                          ("releases", ("vendor_releases", "gen_releases", "gen_llm")),
+                          ("cve", ("gen_cve", "gen_cisa", "gen_circl"))):
+        out = []
+        for bucket in buckets:
+            posts = src.get(bucket) or []
             for p in posts:
                 u = (p.get("url") or "").rstrip("/").lower()
                 if u and u not in have:
                     have.add(u)
                     out.append(p)
-    kept, dropped = _screen(out)
-    return kept, [{"doc": d, "pattern": pat} for d, pat in dropped]
+        # Screened per pool, but into one log: a row carrying an instruction is
+        # dropped before it can reach the ranker, the evidence list or the
+        # prompt, the same as `union_fetch` does for this app's own fetches.
+        pools[pool], drops = _screen(out)
+        dropped += [{"doc": d, "pattern": pat} for d, pat in drops]
+    # Screened as terminal documents (that is where the text is), rendered as
+    # release rows.
+    pools["releases"] = _release_rows(pools["releases"])
+    return pools, dropped
+
+
+def _release_rows(docs: list) -> list:
+    """Terminal release documents in this app's release-row shape.
+
+    A document with no `release_row` is dropped rather than rendered with
+    blank fields: the panel states a product and a version, and a row that
+    cannot say which release it is has nothing to say here. The `title` is
+    rebuilt in this app's own shape so ranking sees the same text for a shared
+    release as for one of this app's own.
+    """
+    out = []
+    for d in docs:
+        row = d.get("release_row")
+        if not row or not row.get("version"):
+            continue
+        row = dict(row)
+        row["title"] = (f"{row['product']} v{row['version']}"
+                        f" — {row['notes'][:80]}")
+        row["source"] = d.get("source", "")
+        out.append(row)
+    return out
 
 
 def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
@@ -611,10 +676,14 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         t0 = time.time()
         results["community"] = union_fetch(community_fetch, phrasings,
                                            pool_limit, temporal)
-        # Vendor subreddits, unless the run is pinned to the local store.
+        # The terminal's twelve sources, unless the run is pinned to the local
+        # store. One network burst for both pools: the security sources come
+        # back in the same call and are added to the CVE pool in step 4.
+        shared = {"community": [], "releases": [], "cve": []}
         if source != "store":
-            extra, dropped = vendor_subreddit_posts(query, results["community"])
-            results["community"] += extra
+            shared, dropped = terminal_sources(query, rewritten,
+                                               results["community"])
+            results["community"] += shared["community"]
             results["screened"].extend(dropped)
         results["timing"]["community"] = round(time.time()-t0, 1)
 
@@ -623,12 +692,27 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         t0 = time.time()
         results["releases"] = union_fetch(release_fetch, release_phrasings,
                                           pool_limit, temporal)
+        # Already fetched and screened in step 2. `/api/c/name/<vendor>` is the
+        # vendor catalogue, which this app never asked: it searched
+        # `/api/v/?q=` and took whatever came back under the query string.
+        # Dedupe on url, but an *empty* url is not an identity: this app's own
+        # release rows often have none, and treating "" as one seen key would
+        # drop every shared release behind the first of them.
+        _have = {u for u in ((r.get("url") or "").rstrip("/").lower()
+                             for r in results["releases"]) if u}
+        results["releases"] += [
+            r for r in shared["releases"]
+            if (r.get("url") or "").rstrip("/").lower() not in _have]
         results["timing"]["releases"] = round(time.time()-t0, 1)
 
     # Step 4 — CVE Agent
     with _step("CVE Agent — fetching security vulnerabilities...", show_steps):
         t0 = time.time()
         results["cve"] = union_fetch(cve_fetch, phrasings, limit, temporal)
+        # Already fetched and screened in step 2. The app's own CVE feed is
+        # Reddit; these are the advisory catalogues (CISA KEV, CIRCL) the
+        # terminal reads and this app had no fetcher for.
+        results["cve"] += shared["cve"]
         results["timing"]["cve"] = round(time.time()-t0, 1)
 
     # Step 4b — Vendor and record-type filter
@@ -671,11 +755,42 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     else:
         results["advisories_excluded"] = 0
 
-    # Only now cut to what the user asked to see. Everything above ranked and
-    # filtered over the deep pool.
-    results["community"] = results["community"][:limit]
-    results["releases"] = results["releases"][:limit]
-    results["cve"] = results["cve"][:limit]
+    # Rank, then cut to what the user asked to see. Nothing above this line
+    # ranks: `union_fetch` orders by window membership and the filters only
+    # drop. So the demo used to show the feed's own order -- newest-first from
+    # releasetrain, vote order from Reddit -- while the terminal showed
+    # `rerank.py`'s order over the same pool, which is the difference the
+    # evaluation measures. Same reranker, same `MARAG_RERANK` spec and the
+    # same rank-on-the-original-question choice the CLI defaults to.
+    import rerank as _rerank
+    _reranker = _rerank.get_reranker()
+    results["rerank"] = {"spec": _reranker.spec,
+                         "degraded": bool(_reranker.degraded),
+                         "reason": getattr(_reranker, "reason", "")}
+
+    def _safe_rank(docs):
+        """Rank, but never let ranking take the run down.
+
+        `EmbeddingReranker.rank()` does live HTTP and can raise *after*
+        `available()` succeeded -- a timeout, a reset, or an empty embedding
+        for an empty document. Retrieval in this app was incapable of raising;
+        keep it that way by degrading to BM25, which needs no network, and
+        finally to the fetch order. Same ladder as the CLI's `_safe_rank`.
+        """
+        if not docs:
+            return []
+        try:
+            return _reranker.rank(query, docs, top_k=limit)
+        except Exception as e:  # noqa: BLE001 -- a dead ranker is not a dead demo
+            results["rerank"]["degraded"] = True
+            results["rerank"]["reason"] = f"{type(e).__name__}: {e}"
+            try:
+                return _rerank.BM25Reranker().rank(query, docs, top_k=limit)
+            except Exception:  # noqa: BLE001
+                return list(docs)[:limit]
+
+    for _pool in ("community", "releases", "cve"):
+        results[_pool] = _safe_rank(results[_pool])
     results["timing"]["filter"] = round(time.time() - t0, 2)
 
     # Step 4b — Yes/No consensus
