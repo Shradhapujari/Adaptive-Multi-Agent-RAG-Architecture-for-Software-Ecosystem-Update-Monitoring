@@ -81,13 +81,25 @@ from typing import Dict, Optional
 ENV_VAR = "MARAG_CORPUS"
 
 
-class CorpusMiss(RuntimeError):
+class CorpusMiss(BaseException):
     """
     A `strict` replay needed a document the snapshot does not hold.
 
     Raised only for corpus hosts. `replay` keeps its lenient behaviour; this is
     for the runs whose numbers have to be re-derivable later, where a document
     fetched live is a silent difference between arms rather than a convenience.
+
+    Deliberately NOT an `Exception`. Every fetch in `multiagent_rag_v3` ends in
+    `except Exception: return []`, which is right for a flaky endpoint and
+    exactly wrong for this: the miss was caught there, the source contributed
+    nothing for that question, and the run carried on and exited 0. A 500
+    question pass took 74 misses that way and still called itself strict.
+    Inheriting from BaseException means a miss passes through the fetch-level
+    handlers to `run_eval`, which catches it by name and stops the run, without
+    asking every present and future `except Exception` to remember this one
+    case. `Snapshot.stats()` still reports `frozen`, which is what tells you
+    whether a finished run was clean; this is what stops an unclean one
+    finishing.
     """
 
 

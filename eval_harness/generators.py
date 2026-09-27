@@ -309,6 +309,12 @@ class MultiAgentRAGGenerator(Generator):
             "rerank_spec": getattr(self.retriever, "last_rerank_spec", ""),
             "rerank_degraded": getattr(self.retriever, "last_rerank_degraded", False),
             "retried": retried,
+            # How many retrieve-then-evaluate rounds this question took. The
+            # fire rate had to be reconstructed from per-role call counts the
+            # first time it was measured, which works only while the roles
+            # happen to be distinguishable; one integer per row is what makes
+            # it a reading.
+            "rounds": run["rounds"],
         }
         if self.synth is not None:
             # The published template answer, kept for audit: the synthesised

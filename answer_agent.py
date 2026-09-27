@@ -232,12 +232,12 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
     thread = results.get("thread") or {}
     votes = int(tc.get("score") or 0)
     if (tc.get("body") or "").strip() and votes >= TOP_COMMENT_FLOOR:
-        sub = thread.get("subreddit", "")
+        sub = vendor.attribution(thread)
         ev.append(Evidence(
             # "1 upvotes" is what a model silently corrects to "1 upvote",
             # and the guardrail matches the label verbatim -- so the answer
             # came back uncited over a plural.
-            label=("Top comment" + (f" - r/{sub}" if sub else "")
+            label=("Top comment" + (f" - {sub}" if sub else "")
                    + f", {votes} upvote" + ("" if votes == 1 else "s")),
             kind="answer",
             title=_clean(thread.get("title", ""), 120) or "Reddit thread",
@@ -269,21 +269,24 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
         # endpoint returns unfiltered community posts. They are cited as what
         # they are, and counted apart from real advisories.
         date = _iso(c.get("date"))
-        sub = c.get("subreddit", "")
-        label = "Security Discussion" + (f" - r/{sub}" if sub else "") + (f", {date}" if date else "")
+        sub = vendor.attribution(c)
+        label = "Security Discussion" + (f" - {sub}" if sub else "") + (f", {date}" if date else "")
         ev.append(Evidence(
             label=label, kind="cve", title=_clean(c.get("title", ""), 160),
             url=c.get("url", ""), date=date, security=True,
         ))
 
-    # Upvotes are the community's ranking of its own posts; the feed's order
-    # is not. Highest first, so `per_kind` keeps the posts people agreed with.
-    community = sorted(results.get("community") or [],
-                       key=lambda p: int(p.get("score") or 0), reverse=True)
+    # Upvote order was the community's ranking of its own posts, back when
+    # every row here was a Reddit post and the pool reached this function
+    # unranked. Neither holds now: the pool arrives ranked for relevance, and
+    # a press article or an advisory carries score 0 by construction, so
+    # sorting on upvotes moved every non-Reddit source to the back and cut it
+    # at `per_kind`. The ranked order is the order.
+    community = list(results.get("community") or [])
     for p in community[:per_kind]:
         date = _iso(p.get("date"))
-        sub = p.get("subreddit", "")
-        label = "Community" + (f" - r/{sub}" if sub else "") + (f", {date}" if date else "")
+        sub = vendor.attribution(p)
+        label = "Community" + (f" - {sub}" if sub else "") + (f", {date}" if date else "")
         ev.append(Evidence(
             label=label, kind="community", title=_clean(p.get("title", ""), 160),
             url=p.get("url", ""), date=date, sentiment=p.get("sentiment", ""),

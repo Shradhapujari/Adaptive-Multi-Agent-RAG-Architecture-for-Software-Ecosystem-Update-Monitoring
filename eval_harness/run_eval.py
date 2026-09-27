@@ -451,6 +451,10 @@ def run(cfg: EvalConfig) -> str:
                 # Ollama-reported prompt/completion tokens by role (rewrite,
                 # rerank, synth), plus embedding calls. The judge is excluded.
                 "tokens": out.get("tokens"),
+                # Rounds the Manager's loop ran for this question: 1 is no
+                # retry, >1 means the Evaluator scored the first pool negative.
+                # Only the retry arm can exceed 1; the others report 1.
+                "rounds": out.get("rounds", 1),
                 "self_quality": out.get("self_quality"),
                 "answer": out["answer"],
                 # Only set by the synthesising multi-agent arm: which model wrote
