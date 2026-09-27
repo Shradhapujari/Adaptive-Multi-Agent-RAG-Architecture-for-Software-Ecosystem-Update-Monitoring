@@ -356,7 +356,8 @@ def top_comment(thread: dict) -> Optional[dict]:
     return max(pool, key=lambda c: (c.get("score") or 0, -(c.get("created_utc_ts") or 0)))
 
 
-def find_thread(question: str, pool: int = 100, timeout: int = 20) -> Optional[dict]:
+def find_thread(question: str, pool: int = 100, timeout: int = 20,
+                scope=None, must_mention=()) -> Optional[dict]:
     """The lake's question thread that best matches `question`, comments and all.
 
     The questions feed is where yes/no questions live and it returns each
@@ -364,6 +365,26 @@ def find_thread(question: str, pool: int = 100, timeout: int = 20) -> Optional[d
     parameter does not narrow the feed much, so the pool is ranked here --
     with the same BM25 reranker the pipeline uses elsewhere, rather than a
     second scoring rule that could disagree with it.
+
+    `scope` narrows the feed to the rows that are about the question's subject
+    before anything is ranked, and returning nothing is a valid answer. Ranking
+    alone cannot decide this: BM25 always has a best row, and on "What broke
+    printing in the latest Windows update?" that row was an r/openclaw thread
+    about gateway auth, scoring 7.2 on the words "update" and "after" while the
+    feed held nothing about printing at all. It was then presented as the
+    thread this question was answered from. A relevance floor cannot separate
+    those either -- a real match on this feed scores 32 and that 7.2 is not far
+    enough below it to draw a line through. Whether a row is about the subject
+    is a different question from how well it scores, and it is the one being
+    asked here.
+
+    `must_mention` is the same question asked of the winner: the product filter
+    `scope` usually is keeps rows that name the right product, which on a
+    Windows question still admits "Windows 11 kiosk PC: can Chrome updates be
+    scheduled for weekends?". The winner has to carry one of the question's
+    own subject words in its title or its body -- the body matters, because
+    "fedora update" is a bare title whose question ("delete", "kernel",
+    "grub") lives in `author_description`. No subject word, no thread.
     """
     import requests
     try:
@@ -375,13 +396,24 @@ def find_thread(question: str, pool: int = 100, timeout: int = 20) -> Optional[d
         return None
     if not rows:
         return None
+    if scope is not None:
+        rows = list(scope(rows))
+        if not rows:
+            return None
     from rerank import BM25Reranker
     # `detail` is what the reranker reads alongside the title; on this feed the
     # body of the post lives in author_description.
     for row in rows:
         row.setdefault("detail", row.get("author_description", ""))
     best = BM25Reranker().rank(question, rows, top_k=1)
-    return best[0] if best else None
+    if not best:
+        return None
+    if must_mention:
+        text = (str(best[0].get("title", "")) + " "
+                + str(best[0].get("author_description") or "")).lower()
+        if not any(str(w).lower() in text for w in must_mention):
+            return None
+    return best[0]
 
 
 def _demo() -> None:

@@ -54,6 +54,7 @@ __all__ = [
     "classify_record",
     "is_release_record",
     "advisory_id",
+    "attribution",
     "describe_record",
     "doc_kind",
     "filter_by_vendor",
@@ -362,6 +363,27 @@ def doc_kind(row: Dict) -> str:
     if row.get("version") or row.get("versionNumber"):
         return "release"
     return "community"
+
+
+def attribution(row: Dict) -> str:
+    """How a document's origin should be named to a reader.
+
+    The `subreddit` field is overloaded: the retriever reuses it to carry a
+    news article's publisher, a release's brand and an advisory catalogue's
+    name, because every source is normalised to one document shape. Rendering
+    it as `r/<subreddit>` unconditionally is how a Wccftech article came to be
+    cited as "Community - r/Wccftech", which tells the reader a press report is
+    a Reddit thread -- a claim about provenance, made in the one place the
+    reader looks to judge it.
+
+    Only a Reddit row gets the `r/` prefix. A row with no `source` is one of
+    this app's own Reddit feeds, which is why the default is Reddit.
+    """
+    name = str(row.get("subreddit") or "").strip()
+    if not name:
+        return ""
+    source = str(row.get("source") or "").lower()
+    return f"r/{name}" if (not source or "reddit" in source) else name
 
 
 _CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}", re.I)
