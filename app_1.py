@@ -2005,7 +2005,7 @@ elif run_btn and query:
 
         # Community Feedback Tab
         with tab2:
-            st.markdown("**Live Reddit community feedback from releasetrain.io**")
+            st.markdown("**Live community feedback — Reddit, vendor subreddits and press**")
             if results["community"]:
                 # "Most relevant" is the default and it is the pool's own
                 # order: the rank decides which documents survive the cut, so
@@ -2028,9 +2028,14 @@ elif run_btn and query:
 
                     with st.expander(f"{icon} {post['title'][:80]}"):
                         col1, col2, col3 = st.columns(3)
-                        col1.metric("Source", vendor.attribution(post) or "—")
-                        col2.metric("Score", post["score"])
-                        col3.metric("Date", post["date"])
+                        # Markdown, not `st.metric`: a metric renders its value
+                        # as one big non-wrapping line, which was fine for a
+                        # subreddit and truncates a publisher -- "Tom's
+                        # Hardware" showed as "Tom's H…", so the panel named
+                        # the source by a prefix of its name.
+                        col1.markdown(f"Source  \n**{vendor.attribution(post) or '—'}**")
+                        col2.markdown(f"Score  \n**{post['score']}**")
+                        col3.markdown(f"Date  \n**{post['date'] or '—'}**")
 
                         tags = []
                         if post.get("is_cve"): tags.append("CVE")
@@ -2045,13 +2050,13 @@ elif run_btn and query:
 
         # CVE Tab
         with tab3:
-            st.markdown("**Security vulnerabilities from releasetrain.io CVE feed**")
+            st.markdown("**Security findings — the CVE feed and the advisory catalogues**")
             if results["cve"]:
                 for cve in results["cve"]:
                     with st.expander(f"{cve['title'][:80]}"):
                         col1, col2 = st.columns(2)
-                        col1.metric("Source", vendor.attribution(cve) or "—")
-                        col2.metric("Date", cve["date"])
+                        col1.markdown(f"Source  \n**{vendor.attribution(cve) or '—'}**")
+                        col2.markdown(f"Date  \n**{cve['date'] or '—'}**")
                         if cve.get("tags"): st.markdown(f"**Tags:** {', '.join(cve['tags'])}")
                         if cve.get("url"): st.markdown(f"[View post]({cve['url']})")
             else:
