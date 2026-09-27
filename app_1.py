@@ -531,6 +531,25 @@ def terminal_sources(query: str, rewritten: str, already: list):
     return pools, dropped
 
 
+def _subject_terms(g) -> list:
+    """The question's content words, minus the ones that carry no subject.
+
+    A product name is already enforced by the product filter, and asking for
+    it twice is what let "Windows 11 kiosk PC: can Chrome updates be scheduled
+    for weekends?" pass as the thread for a question about printing: `windows`
+    is in the detected products *and* in the question's terms, so the subject
+    test was satisfied by the word that had already satisfied the product
+    test. `LLM_GENERIC_TERMS` is the release vocabulary -- update, latest,
+    version, patch -- which every thread on an update feed carries.
+    """
+    import multiagent_rag_v3 as marag
+
+    names = {v.name.lower() for v in (g.vendors or ())}
+    return [t for t in (g.terms or ())
+            if len(t) > 3 and t.lower() not in names
+            and t.lower() not in marag.LLM_GENERIC_TERMS]
+
+
 def _release_rows(docs: list) -> list:
     """Terminal release documents in this app's release-row shape.
 
@@ -815,7 +834,16 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # what the presenter now leads the answer with. The tally below stays
     # gated -- counting stances only makes sense on a yes/no question.
     if thread is None:
-        thread = yesno.find_thread(query)
+        # Scoped by the same subject filter the community pool gets, and for
+        # the reason its docstring gives: a product match says the row is about
+        # the right product, not the right subject. The thread is quoted at the
+        # top of the answer, so an off-subject one is the most visible wrong
+        # citation the app can make.
+        thread = yesno.find_thread(
+            query,
+            scope=lambda rows: vendor.filter_community(rows, g.vendors,
+                                                       terms=g.terms),
+            must_mention=_subject_terms(g))
     if thread is not None:
         results["thread"] = thread
         results["top_comment"] = yesno.top_comment(thread)
@@ -1979,19 +2007,28 @@ elif run_btn and query:
         with tab2:
             st.markdown("**Live Reddit community feedback from releasetrain.io**")
             if results["community"]:
-                order = st.selectbox("Sort", ["Newest first", "Oldest first", "Highest score"],
+                # "Most relevant" is the default and it is the pool's own
+                # order: the rank decides which documents survive the cut, so
+                # showing them by date meant the panel never displayed the
+                # ordering the answer was actually built from. The other two
+                # stay as ways to re-read the same five rows.
+                order = st.selectbox("Sort", ["Most relevant", "Newest first",
+                                              "Oldest first", "Highest score"],
                                      key="community_sort", label_visibility="collapsed")
-                posts = sorted(results["community"],
-                               key=(lambda p: p["score"] or 0) if order == "Highest score"
-                               else (lambda p: p["date"]),
-                               reverse=order != "Oldest first")
+                if order == "Most relevant":
+                    posts = list(results["community"])
+                else:
+                    posts = sorted(results["community"],
+                                   key=(lambda p: p["score"] or 0) if order == "Highest score"
+                                   else (lambda p: p["date"]),
+                                   reverse=order != "Oldest first")
                 for post in posts:
                     sentiment_class = "positive" if post["sentiment"]=="Positive" else "negative" if post["sentiment"]=="Negative" else "neutral"
                     icon = "🟢" if post["sentiment"]=="Positive" else "🔴" if post["sentiment"]=="Negative" else "🟡"
 
                     with st.expander(f"{icon} {post['title'][:80]}"):
                         col1, col2, col3 = st.columns(3)
-                        col1.metric("Subreddit", f"r/{post['subreddit']}")
+                        col1.metric("Source", vendor.attribution(post) or "—")
                         col2.metric("Score", post["score"])
                         col3.metric("Date", post["date"])
 
@@ -1999,7 +2036,10 @@ elif run_btn and query:
                         if post.get("is_cve"): tags.append("CVE")
                         if post.get("is_update"): tags.append("Update")
                         if tags: st.markdown(" ".join(tags))
-                        if post.get("url"): st.markdown(f"[View on Reddit]({post['url']})")
+                        # Not "View on Reddit": the community pool carries
+                        # press articles and vendor posts now, and the link
+                        # goes wherever the document came from.
+                        if post.get("url"): st.markdown(f"[View source]({post['url']})")
             else:
                 st.info("No community feedback found for this query.")
 
@@ -2010,7 +2050,7 @@ elif run_btn and query:
                 for cve in results["cve"]:
                     with st.expander(f"{cve['title'][:80]}"):
                         col1, col2 = st.columns(2)
-                        col1.metric("Subreddit", f"r/{cve['subreddit']}")
+                        col1.metric("Source", vendor.attribution(cve) or "—")
                         col2.metric("Date", cve["date"])
                         if cve.get("tags"): st.markdown(f"**Tags:** {', '.join(cve['tags'])}")
                         if cve.get("url"): st.markdown(f"[View post]({cve['url']})")
