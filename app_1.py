@@ -1315,7 +1315,7 @@ with st.sidebar:
                 _ask_thread(_pick)
             else:
                 st.caption("No question matched — try All vendors.")
-        q_opts = {f"r/{r.get('subreddit','')} · {r.get('title','')[:70]} "
+        q_opts = {f"{vendor.attribution(r) or '—'} · {r.get('title','')[:70]} "
                   f"({len(r.get('comments') or [])} comments)": r for r in q_rows}
         picked = st.selectbox("Question", ["—"] + list(q_opts), key="reddit_pick")
         # Applied once per pick, so the box stays editable afterwards.
@@ -1876,8 +1876,14 @@ elif run_btn and query:
                 st.warning("No comment from anyone other than the asker or a bot — "
                            "nothing to present as an answer.")
             others = [c for c in th.get("comments") or [] if c is not tc]
-            with st.expander(f"“{th.get('title', '')}” (r/{th.get('subreddit', '')}) — "
-                             f"{len(others)} other comment(s), by score"):
+            # `vendor.attribution`, not a bare `r/` prefix: the questions feed
+            # is Reddit today, so this reads the same -- but a row with no
+            # subreddit rendered as a bare "(r/)", and the rule for naming a
+            # document's origin lives in one place now rather than being
+            # restated at each render site.
+            _from = vendor.attribution(th)
+            with st.expander(f"“{th.get('title', '')}”" + (f" ({_from})" if _from else "")
+                             + f" — {len(others)} other comment(s), by score"):
                 for c in sorted(others, key=lambda c: -(c.get("score") or 0)):
                     who = "asker" if c.get("is_submitter") else f"u/{c.get('author', '')}"
                     st.markdown(f"**{c.get('score', 0)}** · {who} — {c.get('body', '')[:300]}")
@@ -1888,9 +1894,11 @@ elif run_btn and query:
         # the answer, and a paragraph synthesised underneath it is elaboration.
         if yn is not None:
             st.markdown("### Yes/No Consensus")
-            st.caption(f"Counted off the comments of “{yn['thread']['title']}” "
-                       f"(r/{yn['thread'].get('subreddit','')}) — one vote per commenter, "
-                       f"the person who asked excluded.")
+            _from = vendor.attribution(yn["thread"])
+            st.caption(f"Counted off the comments of “{yn['thread']['title']}”"
+                       + (f" ({_from})" if _from else "")
+                       + " — one vote per commenter, the person who asked "
+                         "excluded.")
             if yn["thread"].get("url"):
                 st.caption(f"{yn['thread']['url']}")
             if yn["asker_report"]:
