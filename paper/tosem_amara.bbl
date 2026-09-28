@@ -2,7 +2,7 @@
 %%% Do NOT edit. File created by BibTeX with style
 %%% ACM-Reference-Format-Journals [18-Jan-2012].
 
-\begin{thebibliography}{123}
+\begin{thebibliography}{101}
 
 %%% ====================================================================
 %%% NOTE TO THE USER: you can override these defaults by providing
@@ -94,46 +94,6 @@
 \href{https://doi.org/10.1007/978-3-540-24752-4_10}{doi:\nolinkurl{10.1007/978-3-540-24752-4_10}}
 
 
-\bibitem[Anwar et~al\mbox{.}(2022)]%
-        {anwar2022nvd}
-\bibfield{author}{\bibinfo{person}{A. Anwar}, \bibinfo{person}{A. Abusnaina},
-  \bibinfo{person}{S. Chen}, \bibinfo{person}{F. Li}, {and} \bibinfo{person}{D.
-  Mohaisen}.} \bibinfo{year}{2022}\natexlab{}.
-\newblock \showarticletitle{Cleaning the {NVD}: Comprehensive Quality
-  Assessment, Improvements, and Analyses}.
-\newblock \bibinfo{journal}{\emph{{IEEE} Transactions on Dependable and Secure
-  Computing}} \bibinfo{volume}{19}, \bibinfo{number}{6} (\bibinfo{year}{2022}),
-  \bibinfo{pages}{4255--4269}.
-\newblock
-\href{https://doi.org/10.1109/TDSC.2021.3125270}{doi:\nolinkurl{10.1109/TDSC.2021.3125270}}
-
-
-\bibitem[Armstrong et~al\mbox{.}(2009)]%
-        {armstrong2009improvements}
-\bibfield{author}{\bibinfo{person}{T.~G. Armstrong}, \bibinfo{person}{A.
-  Moffat}, \bibinfo{person}{W. Webber}, {and} \bibinfo{person}{J. Zobel}.}
-  \bibinfo{year}{2009}\natexlab{}.
-\newblock \showarticletitle{Improvements that Don't Add Up: Ad-Hoc Retrieval
-  Results since 1998}. In \bibinfo{booktitle}{\emph{Proceedings of the 18th
-  {ACM} Conference on Information and Knowledge Management ({CIKM})}}.
-  \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
-  \bibinfo{pages}{601--610}.
-\newblock
-\href{https://doi.org/10.1145/1645953.1646031}{doi:\nolinkurl{10.1145/1645953.1646031}}
-
-
-\bibitem[Asai et~al\mbox{.}(2023)]%
-        {selfrag2023repo}
-\bibfield{author}{\bibinfo{person}{A. Asai} {et~al\mbox{.}}}
-  \bibinfo{year}{2023}\natexlab{}.
-\newblock \bibinfo{title}{{Self-RAG}: Reference Implementation}.
-\newblock
-\urldef\tempurl%
-\url{https://github.com/AkariAsai/self-rag}
-\showURL{%
-Retrieved August 2026 from \tempurl}
-
-
 \bibitem[Asai et~al\mbox{.}(2024)]%
         {asai2024selfrag}
 \bibfield{author}{\bibinfo{person}{A. Asai}, \bibinfo{person}{Z. Wu},
@@ -212,6 +172,17 @@ Retrieved August 2026 from \tempurl}
 \href{https://doi.org/10.1109/ICSE55347.2025.00100}{doi:\nolinkurl{10.1109/ICSE55347.2025.00100}}
 
 
+\bibitem[Besrour et~al\mbox{.}(2025)]%
+        {besrour2025ragenta}
+\bibfield{author}{\bibinfo{person}{Ines Besrour}, \bibinfo{person}{Jingbo He},
+  \bibinfo{person}{Tobias Schreieder}, {and} \bibinfo{person}{Michael
+  F{\"a}rber}.} \bibinfo{year}{2025}\natexlab{}.
+\newblock \bibinfo{title}{{RAGentA}: Multi-Agent Retrieval-Augmented Generation
+  for Attributed Question Answering}.
+\newblock
+\showeprint[arxiv]{2506.16988}
+
+
 \bibitem[Bi et~al\mbox{.}(2022)]%
         {bi2022releasenotes}
 \bibfield{author}{\bibinfo{person}{T. Bi}, \bibinfo{person}{X. Xia},
@@ -224,19 +195,6 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{pages}{1834--1852}.
 \newblock
 \href{https://doi.org/10.1109/TSE.2020.3038881}{doi:\nolinkurl{10.1109/TSE.2020.3038881}}
-
-
-\bibitem[Buckley and Voorhees(2004)]%
-        {buckley2004incomplete}
-\bibfield{author}{\bibinfo{person}{C. Buckley} {and} \bibinfo{person}{E.~M.
-  Voorhees}.} \bibinfo{year}{2004}\natexlab{}.
-\newblock \showarticletitle{Retrieval Evaluation with Incomplete Information}.
-  In \bibinfo{booktitle}{\emph{Proceedings of the 27th Annual International
-  {ACM} {SIGIR} Conference on Research and Development in Information
-  Retrieval}}. \bibinfo{publisher}{ACM}, \bibinfo{address}{New York, NY, USA},
-  \bibinfo{pages}{25--32}.
-\newblock
-\href{https://doi.org/10.1145/1008992.1009000}{doi:\nolinkurl{10.1145/1008992.1009000}}
 
 
 \bibitem[Carpineto and Romano(2012)]%
@@ -264,20 +222,6 @@ Retrieved August 2026 from \tempurl}
 \href{https://doi.org/10.1145/3786161.3788460}{doi:\nolinkurl{10.1145/3786161.3788460}}
 
 
-\bibitem[Chakraborty et~al\mbox{.}(2022)]%
-        {chakraborty2022vulndetection}
-\bibfield{author}{\bibinfo{person}{S. Chakraborty}, \bibinfo{person}{R.
-  Krishna}, \bibinfo{person}{Y. Ding}, {and} \bibinfo{person}{B. Ray}.}
-  \bibinfo{year}{2022}\natexlab{}.
-\newblock \showarticletitle{Deep Learning Based Vulnerability Detection: Are We
-  There Yet?}
-\newblock \bibinfo{journal}{\emph{{IEEE} Transactions on Software Engineering}}
-  \bibinfo{volume}{48}, \bibinfo{number}{9} (\bibinfo{year}{2022}),
-  \bibinfo{pages}{3280--3296}.
-\newblock
-\href{https://doi.org/10.1109/TSE.2021.3087402}{doi:\nolinkurl{10.1109/TSE.2021.3087402}}
-
-
 \bibitem[Chang et~al\mbox{.}(2025)]%
         {wang2024mainrag}
 \bibfield{author}{\bibinfo{person}{C.-Y. Chang}, \bibinfo{person}{Z. Jiang},
@@ -294,42 +238,6 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{pages}{2607--2622}.
 \newblock
 \href{https://doi.org/10.18653/v1/2025.acl-long.131}{doi:\nolinkurl{10.18653/v1/2025.acl-long.131}}
-
-
-\bibitem[Clarke and Dietz(2024)]%
-        {clarke2024cannot}
-\bibfield{author}{\bibinfo{person}{C.~L.~A. Clarke} {and} \bibinfo{person}{L.
-  Dietz}.} \bibinfo{year}{2024}\natexlab{}.
-\newblock \bibinfo{title}{{LLM}-Based Relevance Assessment Still Can't Replace
-  Human Relevance Assessment}.
-\newblock
-\showeprint[arxiv]{2412.17156}
-\urldef\tempurl%
-\url{https://arxiv.org/abs/2412.17156}
-\showURL{%
-\tempurl}
-
-
-\bibitem[Cohen(1960)]%
-        {cohen1960coefficient}
-\bibfield{author}{\bibinfo{person}{J. Cohen}.} \bibinfo{year}{1960}\natexlab{}.
-\newblock \showarticletitle{A Coefficient of Agreement for Nominal Scales}.
-\newblock \bibinfo{journal}{\emph{Educational and Psychological Measurement}}
-  \bibinfo{volume}{20}, \bibinfo{number}{1} (\bibinfo{year}{1960}),
-  \bibinfo{pages}{37--46}.
-\newblock
-\href{https://doi.org/10.1177/001316446002000104}{doi:\nolinkurl{10.1177/001316446002000104}}
-
-
-\bibitem[Cohen(1988)]%
-        {cohen1988power}
-\bibfield{author}{\bibinfo{person}{J. Cohen}.} \bibinfo{year}{1988}\natexlab{}.
-\newblock \bibinfo{booktitle}{\emph{Statistical Power Analysis for the
-  Behavioral Sciences} (\bibinfo{edition}{2nd} ed.)}.
-\newblock \bibinfo{publisher}{Lawrence Erlbaum Associates},
-  \bibinfo{address}{Hillsdale, NJ, USA}.
-\newblock
-\href{https://doi.org/10.4324/9780203771587}{doi:\nolinkurl{10.4324/9780203771587}}
 
 
 \bibitem[Collins-Thompson(2009)]%
@@ -374,32 +282,6 @@ Retrieved August 2026 from \tempurl}
 \href{https://doi.org/10.1145/1571941.1572114}{doi:\nolinkurl{10.1145/1571941.1572114}}
 
 
-\bibitem[Croft et~al\mbox{.}(2023)]%
-        {croft2023dataquality}
-\bibfield{author}{\bibinfo{person}{R. Croft}, \bibinfo{person}{M.~A. Babar},
-  {and} \bibinfo{person}{M.~M. Kholoosi}.} \bibinfo{year}{2023}\natexlab{}.
-\newblock \showarticletitle{Data Quality for Software Vulnerability Datasets}.
-  In \bibinfo{booktitle}{\emph{Proceedings of the 45th {IEEE/ACM} International
-  Conference on Software Engineering ({ICSE})}}. \bibinfo{publisher}{IEEE},
-  \bibinfo{address}{Piscataway, NJ, USA}, \bibinfo{pages}{121--133}.
-\newblock
-\href{https://doi.org/10.1109/ICSE48619.2023.00022}{doi:\nolinkurl{10.1109/ICSE48619.2023.00022}}
-
-
-\bibitem[Croft et~al\mbox{.}(2022)]%
-        {croft2022severity}
-\bibfield{author}{\bibinfo{person}{R. Croft}, \bibinfo{person}{M.~A. Babar},
-  {and} \bibinfo{person}{L. Li}.} \bibinfo{year}{2022}\natexlab{}.
-\newblock \showarticletitle{An Investigation into Inconsistency of Software
-  Vulnerability Severity across Data Sources}. In
-  \bibinfo{booktitle}{\emph{Proceedings of the 29th {IEEE} International
-  Conference on Software Analysis, Evolution and Reengineering ({SANER})}}.
-  \bibinfo{publisher}{IEEE}, \bibinfo{address}{Piscataway, NJ, USA},
-  \bibinfo{pages}{338--348}.
-\newblock
-\href{https://doi.org/10.1109/SANER53432.2022.00050}{doi:\nolinkurl{10.1109/SANER53432.2022.00050}}
-
-
 \bibitem[Crupi et~al\mbox{.}(2025)]%
         {crupi2025judge}
 \bibfield{author}{\bibinfo{person}{G. Crupi}, \bibinfo{person}{R. Tufano},
@@ -413,34 +295,6 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{pages}{2329--2345}.
 \newblock
 \href{https://doi.org/10.1109/TSE.2025.3586082}{doi:\nolinkurl{10.1109/TSE.2025.3586082}}
-
-
-\bibitem[Dong et~al\mbox{.}(2019)]%
-        {dong2019inconsistencies}
-\bibfield{author}{\bibinfo{person}{Y. Dong}, \bibinfo{person}{W. Guo},
-  \bibinfo{person}{Y. Chen}, \bibinfo{person}{X. Xing}, \bibinfo{person}{Y.
-  Zhang}, {and} \bibinfo{person}{G. Wang}.} \bibinfo{year}{2019}\natexlab{}.
-\newblock \showarticletitle{Towards the Detection of Inconsistencies in Public
-  Security Vulnerability Reports}. In \bibinfo{booktitle}{\emph{Proceedings of
-  the 28th {USENIX} Security Symposium}}. \bibinfo{publisher}{USENIX
-  Association}, \bibinfo{address}{Berkeley, CA, USA},
-  \bibinfo{pages}{869--885}.
-\newblock
-
-
-\bibitem[Es et~al\mbox{.}(2024)]%
-        {es2024ragas}
-\bibfield{author}{\bibinfo{person}{S. Es}, \bibinfo{person}{J. James},
-  \bibinfo{person}{L. Espinosa-Anke}, {and} \bibinfo{person}{S. Schockaert}.}
-  \bibinfo{year}{2024}\natexlab{}.
-\newblock \showarticletitle{{RAGAs}: Automated Evaluation of Retrieval
-  Augmented Generation}. In \bibinfo{booktitle}{\emph{Proceedings of the 18th
-  Conference of the European Chapter of the Association for Computational
-  Linguistics: System Demonstrations}}. \bibinfo{publisher}{Association for
-  Computational Linguistics}, \bibinfo{address}{Stroudsburg, PA, USA},
-  \bibinfo{pages}{150--158}.
-\newblock
-\href{https://doi.org/10.18653/v1/2024.eacl-demo.16}{doi:\nolinkurl{10.18653/v1/2024.eacl-demo.16}}
 
 
 \bibitem[Faggioli et~al\mbox{.}(2023)]%
@@ -649,18 +503,6 @@ Retrieved August 2026 from \tempurl}
 \href{https://doi.org/10.1145/3695988}{doi:\nolinkurl{10.1145/3695988}}
 
 
-\bibitem[{HuggingFace}(2024)]%
-        {huggingface2024agents}
-\bibfield{author}{\bibinfo{person}{{HuggingFace}}.}
-  \bibinfo{year}{2024}\natexlab{}.
-\newblock \bibinfo{title}{Agents Course, Unit 1: What are Agents?}
-\newblock
-\urldef\tempurl%
-\url{https://huggingface.co/learn/agents-course}
-\showURL{%
-\tempurl}
-
-
 \bibitem[Inozemtseva and Holmes(2014)]%
         {inozemtseva2014coverage}
 \bibfield{author}{\bibinfo{person}{L. Inozemtseva} {and} \bibinfo{person}{R.
@@ -672,19 +514,6 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{pages}{435--445}.
 \newblock
 \href{https://doi.org/10.1145/2568225.2568271}{doi:\nolinkurl{10.1145/2568225.2568271}}
-
-
-\bibitem[Izacard et~al\mbox{.}(2022)]%
-        {izacard2022contriever}
-\bibfield{author}{\bibinfo{person}{G. Izacard}, \bibinfo{person}{M. Caron},
-  \bibinfo{person}{L. Hosseini}, \bibinfo{person}{S. Riedel},
-  \bibinfo{person}{P. Bojanowski}, \bibinfo{person}{A. Joulin}, {and}
-  \bibinfo{person}{E. Grave}.} \bibinfo{year}{2022}\natexlab{}.
-\newblock \showarticletitle{Unsupervised Dense Information Retrieval with
-  Contrastive Learning}.
-\newblock \bibinfo{journal}{\emph{Transactions on Machine Learning Research}}
-  (\bibinfo{year}{2022}).
-\newblock
 
 
 \bibitem[Jagerman et~al\mbox{.}(2023)]%
@@ -802,21 +631,6 @@ Retrieved August 2026 from \tempurl}
 \href{https://doi.org/10.1145/3613904.3642596}{doi:\nolinkurl{10.1145/3613904.3642596}}
 
 
-\bibitem[Karpukhin et~al\mbox{.}(2020)]%
-        {karpukhin2020dpr}
-\bibfield{author}{\bibinfo{person}{V. Karpukhin}, \bibinfo{person}{B.
-  O{\u{g}}uz}, \bibinfo{person}{S. Min}, \bibinfo{person}{P. Lewis},
-  \bibinfo{person}{L. Wu}, \bibinfo{person}{S. Edunov}, \bibinfo{person}{D.
-  Chen}, {and} \bibinfo{person}{W. Yih}.} \bibinfo{year}{2020}\natexlab{}.
-\newblock \showarticletitle{Dense Passage Retrieval for Open-Domain Question
-  Answering}. In \bibinfo{booktitle}{\emph{Proceedings of the 2020 Conference
-  on Empirical Methods in Natural Language Processing ({EMNLP})}}.
-  \bibinfo{publisher}{Association for Computational Linguistics},
-  \bibinfo{address}{Stroudsburg, PA, USA}, \bibinfo{pages}{6769--6781}.
-\newblock
-\href{https://doi.org/10.18653/v1/2020.emnlp-main.550}{doi:\nolinkurl{10.18653/v1/2020.emnlp-main.550}}
-
-
 \bibitem[Khattab and Zaharia(2020)]%
         {khattab2020colbert}
 \bibfield{author}{\bibinfo{person}{O. Khattab} {and} \bibinfo{person}{M.
@@ -919,17 +733,6 @@ Retrieved August 2026 from \tempurl}
 \newblock
 
 
-\bibitem[Lipton and Steinhardt(2019)]%
-        {lipton2019trends}
-\bibfield{author}{\bibinfo{person}{Z.~C. Lipton} {and} \bibinfo{person}{J.
-  Steinhardt}.} \bibinfo{year}{2019}\natexlab{}.
-\newblock \showarticletitle{Troubling Trends in Machine Learning Scholarship}.
-\newblock \bibinfo{journal}{\emph{{ACM} Queue}} \bibinfo{volume}{17},
-  \bibinfo{number}{1} (\bibinfo{year}{2019}), \bibinfo{pages}{45--77}.
-\newblock
-\href{https://doi.org/10.1145/3317287.3328534}{doi:\nolinkurl{10.1145/3317287.3328534}}
-
-
 \bibitem[Liu et~al\mbox{.}(2021)]%
         {liu2021reproducibility}
 \bibfield{author}{\bibinfo{person}{C. Liu}, \bibinfo{person}{C. Gao},
@@ -1013,6 +816,18 @@ Retrieved August 2026 from \tempurl}
 \href{https://doi.org/10.1007/s10664-016-9472-2}{doi:\nolinkurl{10.1007/s10664-016-9472-2}}
 
 
+\bibitem[Mishra et~al\mbox{.}(2026)]%
+        {mishra2026sok}
+\bibfield{author}{\bibinfo{person}{Saroj Mishra}, \bibinfo{person}{Suman
+  Niroula}, \bibinfo{person}{Umesh Yadav}, \bibinfo{person}{Dilip Thakur},
+  \bibinfo{person}{Srijan Gyawali}, {and} \bibinfo{person}{Shiva Gaire}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \bibinfo{title}{{SoK}: Agentic Retrieval-Augmented Generation:
+  Taxonomy, Architectures, Evaluation, and Research Directions}.
+\newblock
+\showeprint[arxiv]{2603.07379}
+
+
 \bibitem[Mitra et~al\mbox{.}(1998)]%
         {mitra1998expansion}
 \bibfield{author}{\bibinfo{person}{M. Mitra}, \bibinfo{person}{A. Singhal},
@@ -1091,19 +906,6 @@ Retrieved August 2026 from \tempurl}
 \href{https://doi.org/10.18653/v1/2020.findings-emnlp.63}{doi:\nolinkurl{10.18653/v1/2020.findings-emnlp.63}}
 
 
-\bibitem[Panickssery et~al\mbox{.}(2024)]%
-        {panickssery2024self}
-\bibfield{author}{\bibinfo{person}{A. Panickssery}, \bibinfo{person}{S.~R.
-  Bowman}, {and} \bibinfo{person}{S. Feng}.} \bibinfo{year}{2024}\natexlab{}.
-\newblock \showarticletitle{{LLM} Evaluators Recognize and Favor Their Own
-  Generations}.
-\newblock \bibinfo{journal}{\emph{Advances in Neural Information Processing
-  Systems}}  \bibinfo{volume}{37} (\bibinfo{year}{2024}),
-  \bibinfo{pages}{68772--68802}.
-\newblock
-\href{https://doi.org/10.52202/079017-2197}{doi:\nolinkurl{10.52202/079017-2197}}
-
-
 \bibitem[Papadakis et~al\mbox{.}(2018)]%
         {papadakis2018mutation}
 \bibfield{author}{\bibinfo{person}{M. Papadakis}, \bibinfo{person}{D. Shin},
@@ -1117,25 +919,6 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{pages}{537--548}.
 \newblock
 \href{https://doi.org/10.1145/3180155.3180183}{doi:\nolinkurl{10.1145/3180155.3180183}}
-
-
-\bibitem[Petroni et~al\mbox{.}(2021)]%
-        {petroni2021kilt}
-\bibfield{author}{\bibinfo{person}{F. Petroni}, \bibinfo{person}{A. Piktus},
-  \bibinfo{person}{A. Fan}, \bibinfo{person}{P. Lewis}, \bibinfo{person}{M.
-  Yazdani}, \bibinfo{person}{N. De~Cao}, \bibinfo{person}{J. Thorne},
-  \bibinfo{person}{Y. Jernite}, \bibinfo{person}{V. Karpukhin},
-  \bibinfo{person}{J. Maillard}, \bibinfo{person}{V. Plachouras},
-  \bibinfo{person}{T. Rockt{\"a}schel}, {and} \bibinfo{person}{S. Riedel}.}
-  \bibinfo{year}{2021}\natexlab{}.
-\newblock \showarticletitle{{KILT}: A Benchmark for Knowledge Intensive
-  Language Tasks}. In \bibinfo{booktitle}{\emph{Proceedings of the 2021
-  Conference of the North American Chapter of the Association for Computational
-  Linguistics}}. \bibinfo{publisher}{Association for Computational
-  Linguistics}, \bibinfo{address}{Stroudsburg, PA, USA},
-  \bibinfo{pages}{2523--2544}.
-\newblock
-\href{https://doi.org/10.18653/v1/2021.naacl-main.200}{doi:\nolinkurl{10.18653/v1/2021.naacl-main.200}}
 
 
 \bibitem[Qian et~al\mbox{.}(2024)]%
@@ -1155,17 +938,19 @@ Retrieved August 2026 from \tempurl}
 \href{https://doi.org/10.18653/v1/2024.acl-long.810}{doi:\nolinkurl{10.18653/v1/2024.acl-long.810}}
 
 
-\bibitem[Rajpurkar et~al\mbox{.}(2018)]%
-        {rajpurkar2018squad2}
-\bibfield{author}{\bibinfo{person}{P. Rajpurkar}, \bibinfo{person}{R. Jia},
-  {and} \bibinfo{person}{P. Liang}.} \bibinfo{year}{2018}\natexlab{}.
-\newblock \showarticletitle{Know What You Don't Know: Unanswerable Questions
-  for {SQuAD}}. In \bibinfo{booktitle}{\emph{Proceedings of the 56th Annual
-  Meeting of the Association for Computational Linguistics (Volume 2: Short
-  Papers)}}. \bibinfo{publisher}{Association for Computational Linguistics},
-  \bibinfo{address}{Stroudsburg, PA, USA}, \bibinfo{pages}{784--789}.
+\bibitem[Qin et~al\mbox{.}(2025)]%
+        {qin2025amber}
+\bibfield{author}{\bibinfo{person}{Qitao Qin}, \bibinfo{person}{Yucong Luo},
+  \bibinfo{person}{Yihang Lu}, \bibinfo{person}{Zhibo Chu},
+  \bibinfo{person}{Xiaoman Liu}, {and} \bibinfo{person}{Xianwei Meng}.}
+  \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{Towards Adaptive Memory-Based Optimization for
+  Enhanced Retrieval-Augmented Generation}. In
+  \bibinfo{booktitle}{\emph{Findings of the Association for Computational
+  Linguistics: ACL 2025}}.
 \newblock
-\href{https://doi.org/10.18653/v1/P18-2124}{doi:\nolinkurl{10.18653/v1/P18-2124}}
+\newblock
+\shownote{arXiv:2504.05312}.
 
 
 \bibitem[Ralph and Tempero(2018)]%
@@ -1264,19 +1049,14 @@ Retrieved August 2026 from \tempurl}
 Retrieved August 2026 from \tempurl}
 
 
-\bibitem[Saad-Falcon et~al\mbox{.}(2024)]%
-        {saadfalcon2024ares}
-\bibfield{author}{\bibinfo{person}{J. Saad-Falcon}, \bibinfo{person}{O.
-  Khattab}, \bibinfo{person}{C. Potts}, {and} \bibinfo{person}{M. Zaharia}.}
-  \bibinfo{year}{2024}\natexlab{}.
-\newblock \showarticletitle{{ARES}: An Automated Evaluation Framework for
-  Retrieval-Augmented Generation Systems}. In
-  \bibinfo{booktitle}{\emph{Proceedings of the 2024 Conference of the North
-  American Chapter of the Association for Computational Linguistics}}.
-  \bibinfo{publisher}{Association for Computational Linguistics},
-  \bibinfo{address}{Stroudsburg, PA, USA}, \bibinfo{pages}{338--354}.
+\bibitem[Shaikh(2026)]%
+        {shaikh2026dissecting}
+\bibfield{author}{\bibinfo{person}{Sheroz Shaikh}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \bibinfo{title}{Dissecting Agentic {RAG}: A Component Ablation for
+  Multi-Hop {QA} with a Local {7B} Model}.
 \newblock
-\href{https://doi.org/10.18653/v1/2024.naacl-long.20}{doi:\nolinkurl{10.18653/v1/2024.naacl-long.20}}
+\showeprint[arxiv]{2606.21553}
 
 
 \bibitem[Shinn et~al\mbox{.}(2023)]%
@@ -1317,18 +1097,6 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{address}{Piscataway, NJ, USA}, \bibinfo{pages}{358--378}.
 \newblock
 \href{https://doi.org/10.1109/FOSE.2007.30}{doi:\nolinkurl{10.1109/FOSE.2007.30}}
-
-
-\bibitem[Soboroff(2025)]%
-        {soboroff2025dontuse}
-\bibfield{author}{\bibinfo{person}{I. Soboroff}.}
-  \bibinfo{year}{2025}\natexlab{}.
-\newblock \showarticletitle{Don't Use {LLMs} to Make Relevance Judgments}.
-\newblock \bibinfo{journal}{\emph{Information Retrieval Research}}
-  \bibinfo{volume}{1}, \bibinfo{number}{1} (\bibinfo{year}{2025}),
-  \bibinfo{pages}{29--46}.
-\newblock
-\href{https://doi.org/10.54195/irrj.19625}{doi:\nolinkurl{10.54195/irrj.19625}}
 
 
 \bibitem[Stolee et~al\mbox{.}(2025)]%
@@ -1373,20 +1141,6 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{pages}{14918--14937}.
 \newblock
 \href{https://doi.org/10.18653/v1/2023.emnlp-main.923}{doi:\nolinkurl{10.18653/v1/2023.emnlp-main.923}}
-
-
-\bibitem[Thakur et~al\mbox{.}(2021)]%
-        {thakur2021beir}
-\bibfield{author}{\bibinfo{person}{N. Thakur}, \bibinfo{person}{N. Reimers},
-  \bibinfo{person}{A. R{\"u}ckl{\'e}}, \bibinfo{person}{A. Srivastava}, {and}
-  \bibinfo{person}{I. Gurevych}.} \bibinfo{year}{2021}\natexlab{}.
-\newblock \showarticletitle{{BEIR}: A Heterogeneous Benchmark for Zero-shot
-  Evaluation of Information Retrieval Models}. In
-  \bibinfo{booktitle}{\emph{Proceedings of the 35th Conference on Neural
-  Information Processing Systems, Datasets and Benchmarks Track}}.
-  \bibinfo{publisher}{Curran Associates, Inc.}, \bibinfo{address}{Red Hook, NY,
-  USA}.
-\newblock
 
 
 \bibitem[Thomas et~al\mbox{.}(2024)]%
@@ -1443,23 +1197,6 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{volume}{164} (\bibinfo{year}{2023}), \bibinfo{pages}{107329}.
 \newblock
 \href{https://doi.org/10.1016/j.infsof.2023.107329}{doi:\nolinkurl{10.1016/j.infsof.2023.107329}}
-
-
-\bibitem[Vu et~al\mbox{.}(2024)]%
-        {vu2024freshllms}
-\bibfield{author}{\bibinfo{person}{T. Vu}, \bibinfo{person}{M. Iyyer},
-  \bibinfo{person}{X. Wang}, \bibinfo{person}{N. Constant}, \bibinfo{person}{J.
-  Wei}, \bibinfo{person}{J. Wei}, \bibinfo{person}{C. Tar},
-  \bibinfo{person}{Y.-H. Sung}, \bibinfo{person}{D. Zhou},
-  \bibinfo{person}{Q.~V. Le}, {and} \bibinfo{person}{T. Luong}.}
-  \bibinfo{year}{2024}\natexlab{}.
-\newblock \showarticletitle{{FreshLLMs}: Refreshing Large Language Models with
-  Search Engine Augmentation}. In \bibinfo{booktitle}{\emph{Findings of the
-  Association for Computational Linguistics: {ACL} 2024}}.
-  \bibinfo{publisher}{Association for Computational Linguistics},
-  \bibinfo{address}{Stroudsburg, PA, USA}, \bibinfo{pages}{13697--13720}.
-\newblock
-\href{https://doi.org/10.18653/v1/2024.findings-acl.813}{doi:\nolinkurl{10.18653/v1/2024.findings-acl.813}}
 
 
 \bibitem[Wang et~al\mbox{.}(2023)]%
@@ -1529,25 +1266,6 @@ Retrieved August 2026 from \tempurl}
 \newblock \bibinfo{publisher}{Springer}, \bibinfo{address}{Berlin, Heidelberg}.
 \newblock
 \href{https://doi.org/10.1007/978-3-642-29044-2}{doi:\nolinkurl{10.1007/978-3-642-29044-2}}
-
-
-\bibitem[Wu et~al\mbox{.}(2023)]%
-        {wu2023autogen}
-\bibfield{author}{\bibinfo{person}{Q. Wu}, \bibinfo{person}{G. Bansal},
-  \bibinfo{person}{J. Zhang}, \bibinfo{person}{Y. Wu}, \bibinfo{person}{B. Li},
-  \bibinfo{person}{E. Zhu}, \bibinfo{person}{L. Jiang}, \bibinfo{person}{X.
-  Zhang}, \bibinfo{person}{S. Zhang}, \bibinfo{person}{J. Liu},
-  \bibinfo{person}{A.~H. Awadallah}, \bibinfo{person}{R.~W. White},
-  \bibinfo{person}{D. Burger}, {and} \bibinfo{person}{C. Wang}.}
-  \bibinfo{year}{2023}\natexlab{}.
-\newblock \bibinfo{title}{{AutoGen}: Enabling Next-Gen {LLM} Applications via
-  Multi-Agent Conversation}.
-\newblock
-\showeprint[arxiv]{2308.08155}
-\urldef\tempurl%
-\url{https://arxiv.org/abs/2308.08155}
-\showURL{%
-\tempurl}
 
 
 \bibitem[Xia et~al\mbox{.}(2025)]%
@@ -1715,23 +1433,6 @@ Retrieved August 2026 from \tempurl}
 \href{https://doi.org/10.1145/3650212.3680384}{doi:\nolinkurl{10.1145/3650212.3680384}}
 
 
-\bibitem[Zheng et~al\mbox{.}(2023)]%
-        {zheng2023judge}
-\bibfield{author}{\bibinfo{person}{L. Zheng}, \bibinfo{person}{W.-L. Chiang},
-  \bibinfo{person}{Y. Sheng}, \bibinfo{person}{S. Zhuang}, \bibinfo{person}{Z.
-  Wu}, \bibinfo{person}{Y. Zhuang}, \bibinfo{person}{Z. Lin},
-  \bibinfo{person}{Z. Li}, \bibinfo{person}{D. Li}, \bibinfo{person}{E.~P.
-  Xing}, \bibinfo{person}{H. Zhang}, \bibinfo{person}{J.~E. Gonzalez}, {and}
-  \bibinfo{person}{I. Stoica}.} \bibinfo{year}{2023}\natexlab{}.
-\newblock \showarticletitle{Judging {LLM}-as-a-Judge with {MT-Bench} and
-  Chatbot Arena}.
-\newblock \bibinfo{journal}{\emph{Advances in Neural Information Processing
-  Systems}}  \bibinfo{volume}{36} (\bibinfo{year}{2023}),
-  \bibinfo{pages}{46595--46623}.
-\newblock
-\href{https://doi.org/10.52202/075280-2020}{doi:\nolinkurl{10.52202/075280-2020}}
-
-
 \bibitem[Zheng et~al\mbox{.}(2026)]%
         {zheng2026}
 \bibfield{author}{\bibinfo{person}{Y. Zheng}, \bibinfo{person}{Z. Zhang},
@@ -1792,18 +1493,6 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{pages}{825--826}.
 \newblock
 \href{https://doi.org/10.1145/1390334.1390524}{doi:\nolinkurl{10.1145/1390334.1390524}}
-
-
-\bibitem[Zobel(1998)]%
-        {zobel1998reliable}
-\bibfield{author}{\bibinfo{person}{J. Zobel}.} \bibinfo{year}{1998}\natexlab{}.
-\newblock \showarticletitle{How Reliable are the Results of Large-Scale
-  Information Retrieval Experiments?}. In \bibinfo{booktitle}{\emph{Proceedings
-  of the 21st Annual International {ACM} {SIGIR} Conference on Research and
-  Development in Information Retrieval}}. \bibinfo{publisher}{ACM},
-  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{307--314}.
-\newblock
-\href{https://doi.org/10.1145/290941.291014}{doi:\nolinkurl{10.1145/290941.291014}}
 
 
 \end{thebibliography}

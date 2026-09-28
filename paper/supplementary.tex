@@ -5,6 +5,10 @@
 \settopmatter{printacmref=false}
 \renewcommand\footnotetextcopyrightpermission[1]{}
 \pagestyle{plain}
+% Cross-references into the main paper. Needs tosem_amara.aux, so build the
+% paper first; see README. Without it every \ref below typesets as ??.
+\usepackage{xr}
+\externaldocument{tosem_amara}
 \usepackage{booktabs}
 \usepackage{amsmath}
 \begin{document}
@@ -695,5 +699,8 @@ query; because a hedged or negated critique keeps the document
 \textsc{irrelevant} verdict, via \texttt{find\_verdict}), that count is a lower
 bound on the critic's filtering.
 
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references}
 
 \end{document}
