@@ -172,7 +172,15 @@ Self-Improving Agents, RLAIF}
 
 Modern software ecosystems produce a diverse collection of documents, including release notes, security advisories, version control records, and online community discussions. These documents contain information about software updates, vulnerabilities, compatibility issues, and deployment considerations. Answering software update--related questions often requires integrating information from multiple sources.
 
-Each of these artefacts has been studied in its own right. Release notes are known to be produced inconsistently and to omit information their readers need, which has motivated work on summarising and generating them automatically~\cite{abebe2016releasenotes,moreno2017arena,bi2022releasenotes} and on the discipline of version identifiers themselves~\cite{guo2025verlog}. Developers routinely turn to community platforms and web search when documentation is insufficient~\cite{xia2017websearch,zhang2018apimisuse}, and the reliability of what they find there is an active question~\cite{kabir2024stackoverflow,stolee2025codesearch}. The task studied here sits across these sources rather than within any one of them.
+Each of these artefacts has been studied in its own right. Release notes are known to be produced inconsistently and to omit information their readers need, which has motivated work on summarising and generating them automatically~\cite{abebe2016releasenotes,moreno2017arena,bi2022releasenotes} and on the discipline of version identifiers themselves~\cite{guo2025verlog}.
+Their structure, writing style, and the artefacts practitioners say they want
+from them have been characterised empirically~\cite{wu2023releasenotes,nath2022releasenotes}.
+The update side of the same ecosystem is studied as its own problem: which
+update strategy a dependent adopts and how package characteristics predict
+it~\cite{javanjafari2023strategies}, how quickly updates are taken up across a
+registry~\cite{berretta2025maven}, how unsafe updates propagate along an
+ecosystem's long tail~\cite{wattanakriengkrai2023longtail}, and how breaking
+changes are comprehended and detected~\cite{kong2025breaking}. Developers routinely turn to community platforms and web search when documentation is insufficient~\cite{xia2017websearch,zhang2018apimisuse}, and the reliability of what they find there is an active question~\cite{kabir2024stackoverflow,stolee2025codesearch}. The task studied here sits across these sources rather than within any one of them.
 
 Software update information is frequently accessed through natural language questions. Developers, system administrators, and users commonly ask colleagues about software updates or seek information through online community platforms. Answering such questions often requires locating relevant documents, reviewing information from multiple sources, and evaluating the consistency of available documents. Systems that generate accurate source-grounded answers can reduce the effort required to retrieve, read, and synthesize information from software ecosystem documents.
 
@@ -385,7 +393,13 @@ Rewrite-Retrieve-Read trains a small rewriter to adapt the query to a frozen
 retriever and reader~\cite{ma2023rewrite}, DMQR-RAG issues several rewrites of
 differing strategies and merges their results~\cite{gao2024dmqr}, and RaFe
 trains a rewriter from reranker feedback rather than from generation-side
-signals~\cite{ma2023rafe}.
+signals~\cite{ma2023rafe}. Several systems issue more than one phrasing rather
+than one: Kostric and Balog rewrite a conversational query several ways and pool
+the runs~\cite{kostric2024multiquery}, Ran et al.\ generate query variants with a
+language model and combine them~\cite{ran2025variants}, and MAAQR coordinates
+rewriting agents adaptively in a production search
+system~\cite{zheng2025maaqr}. Others condition the rewrite on inferred intent
+rather than on the query terms alone~\cite{guo2026intent}.
 
 Framed this way, rewriting reads as a monotone improvement. The classical
 literature says otherwise. Mitra et al.\ named the failure ``query drift'':
@@ -402,7 +416,12 @@ datasets and report ``a strong negative correlation between retriever
 performance and gains from expansion: expansion improves scores for weaker
 models, but generally harms stronger models,'' attributing the harm to noise
 that expansions add alongside their recall
-benefit~\cite{weller2024expansions}.
+benefit~\cite{weller2024expansions}. Whether the reported gains hold is still
+being audited: Liang et al.\ ask whether users actually benefit from
+pseudo-relevance feedback~\cite{liang2026drift}, Scells et al.\ measured what
+query refinement does to systematic-review literature
+search~\cite{scells2022refinement}, and Bigdeli et al.\ report a reproducibility
+study of language-model-based reformulation~\cite{bigdeli2026reproducibility}.
 
 This body of work is the closest prior art to the finding reported here, and the
 finding should be read against it. That expansion can degrade retrieval is
@@ -463,7 +482,9 @@ stage returned. Systems built on it therefore pair recall-oriented query handlin
 precision-oriented reranker, and combine evidence from several query formulations
 \emph{before} ranking. Reciprocal rank fusion is the standard cheap
 combiner~\cite{cormack2009rrf}; DMQR-RAG's merge over multiple rewrites is the
-same move inside a RAG pipeline~\cite{gao2024dmqr}.
+same move inside a RAG pipeline~\cite{gao2024dmqr}, as is pooling the runs of
+several conversational rewrites~\cite{kostric2024multiquery} or of
+model-generated query variants~\cite{ran2025variants}.
 
 The remedy reported in Section~\ref{sec:results} is an instance of this pattern,
 not a new technique: issue both the original and the rewritten phrasing, union
@@ -500,7 +521,10 @@ the retrieval corpus is live rather than fixed.
 Retrieval augmentation is applied across software engineering: retrieving
 demonstrations for code-related generation~\cite{nashid2023retrieval}, and
 retrieval-augmented approaches to code intelligence more
-broadly~\cite{yang2025ragcode}. Recent work applies agentic retrieval to bug
+broadly~\cite{yang2025ragcode}. Multi-agent RAG designs in particular are now
+applied to code migration~\cite{lu2026comra}, to onboarding assistance over a
+project's own documents~\cite{ionescu2025onboarding}, and to validating
+configuration dependencies~\cite{simon2025configdep}. Recent work applies agentic retrieval to bug
 localisation~\cite{mamun2026blagent} and to reformulating developer queries for
 retrieval~\cite{caumartin2026reformulate}. Query reformulation for software search
 predates the language-model literature: Haiduc et al. showed that automatically
@@ -565,6 +589,17 @@ rewrite sits astride, and the use of a language model as a judge together with
 what that costs in independence --- is established work rather than a
 contribution here. Section~S3 of the supplementary material reviews it and
 names the conventions each number in Section~\ref{sec:results} follows.
+Four recent strands bear on it directly. Wallat et al.\ separate correctness
+from faithfulness in RAG attributions~\cite{wallat2025correctness}, which is why
+Section~\ref{sec:results} reports the two as separate metrics rather than one.
+Hosseini et al.\ attribute query failure across retrieval, judgment, and
+generation~\cite{hosseini2026failing} --- the same localisation this paper
+performs by counting pool membership. Pooling bias remains an active concern in
+production retrieval settings, not only in test
+collections~\cite{wang2024poolingbias}. And because the corpus here is live
+rather than fixed, evaluating across time is itself a methodological
+problem~\cite{keller2025continuous}; temporal retrieval and its interaction with
+RAG is the subject of a recent tutorial~\cite{piryani2026temporal}.
 
 \subsection{Negative and Mixed Results}
 

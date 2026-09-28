@@ -2,7 +2,7 @@
 %%% Do NOT edit. File created by BibTeX with style
 %%% ACM-Reference-Format-Journals [18-Jan-2012].
 
-\begin{thebibliography}{101}
+\begin{thebibliography}{122}
 
 %%% ====================================================================
 %%% NOTE TO THE USER: you can override these defaults by providing
@@ -172,6 +172,20 @@
 \href{https://doi.org/10.1109/ICSE55347.2025.00100}{doi:\nolinkurl{10.1109/ICSE55347.2025.00100}}
 
 
+\bibitem[Berretta et~al\mbox{.}(2025)]%
+        {berretta2025maven}
+\bibfield{author}{\bibinfo{person}{Baltasar Berretta},
+  \bibinfo{person}{Augustus Thomas}, {and} \bibinfo{person}{Heather Guarnera}.}
+  \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{Dependency Update Adoption Patterns in the Maven
+  Software Ecosystem}. In \bibinfo{booktitle}{\emph{2025 IEEE/ACM 22nd
+  International Conference on Mining Software Repositories (MSR)}}.
+  \bibinfo{publisher}{IEEE}, \bibinfo{address}{Piscataway, NJ, USA},
+  \bibinfo{pages}{295--299}.
+\newblock
+\href{https://doi.org/10.1109/msr66628.2025.00053}{doi:\nolinkurl{10.1109/msr66628.2025.00053}}
+
+
 \bibitem[Besrour et~al\mbox{.}(2025)]%
         {besrour2025ragenta}
 \bibfield{author}{\bibinfo{person}{Ines Besrour}, \bibinfo{person}{Jingbo He},
@@ -195,6 +209,21 @@
   \bibinfo{pages}{1834--1852}.
 \newblock
 \href{https://doi.org/10.1109/TSE.2020.3038881}{doi:\nolinkurl{10.1109/TSE.2020.3038881}}
+
+
+\bibitem[Bigdeli et~al\mbox{.}(2026)]%
+        {bigdeli2026reproducibility}
+\bibfield{author}{\bibinfo{person}{Amin Bigdeli}, \bibinfo{person}{Radin
+  Hamidi~Rad}, \bibinfo{person}{Hai~Son Le}, \bibinfo{person}{Mert Incesu},
+  \bibinfo{person}{Negar Arabzadeh}, \bibinfo{person}{Charles L.~A. Clarke},
+  {and} \bibinfo{person}{Ebrahim Bagheri}.} \bibinfo{year}{2026}\natexlab{}.
+\newblock \showarticletitle{A Reproducibility Study of LLM-Based Query
+  Reformulation}. In \bibinfo{booktitle}{\emph{Proceedings of the 49th
+  International ACM SIGIR Conference on Research and Development in Information
+  Retrieval}}. \bibinfo{publisher}{Association for Computing Machinery},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{2824--2834}.
+\newblock
+\href{https://doi.org/10.1145/3805712.3808560}{doi:\nolinkurl{10.1145/3805712.3808560}}
 
 
 \bibitem[Carpineto and Romano(2012)]%
@@ -416,6 +445,22 @@
 \href{https://doi.org/10.1145/3728961}{doi:\nolinkurl{10.1145/3728961}}
 
 
+\bibitem[Guo et~al\mbox{.}(2026)]%
+        {guo2026intent}
+\bibfield{author}{\bibinfo{person}{Yuanzhao Guo}, \bibinfo{person}{Shuai
+  Zhang}, \bibinfo{person}{Anqi Li}, \bibinfo{person}{Jiaming Zhang},
+  \bibinfo{person}{Wei Li}, \bibinfo{person}{Shihao Liu},
+  \bibinfo{person}{Daiting Shi}, {and} \bibinfo{person}{Yuan Tian}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \showarticletitle{Population-Guided Intent-Aware Query Rewriting for
+  Web Search}. In \bibinfo{booktitle}{\emph{Proceedings of the 49th
+  International ACM SIGIR Conference on Research and Development in Information
+  Retrieval}}. \bibinfo{publisher}{Association for Computing Machinery},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{4622--4626}.
+\newblock
+\href{https://doi.org/10.1145/3805712.3808487}{doi:\nolinkurl{10.1145/3805712.3808487}}
+
+
 \bibitem[Haiduc et~al\mbox{.}(2013)]%
         {haiduc2013reformulation}
 \bibfield{author}{\bibinfo{person}{S. Haiduc}, \bibinfo{person}{G. Bavota},
@@ -487,6 +532,23 @@
 \newblock
 
 
+\bibitem[Hosseini et~al\mbox{.}(2026)]%
+        {hosseini2026failing}
+\bibfield{author}{\bibinfo{person}{Seyed~Mohammad Hosseini},
+  \bibinfo{person}{Negar Arabzadeh}, \bibinfo{person}{Mohammad~Hossein
+  Saliminabi}, \bibinfo{person}{Dimitrios Androutsos}, \bibinfo{person}{Morteza
+  Zihayat}, {and} \bibinfo{person}{Ebrahim Bagheri}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \showarticletitle{Failing Forward: Understanding Query Failure in
+  Retrieval, Judgment, and Generation}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 49th International ACM SIGIR
+  Conference on Research and Development in Information Retrieval}}.
+  \bibinfo{publisher}{Association for Computing Machinery},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{3787--3792}.
+\newblock
+\href{https://doi.org/10.1145/3805712.3809859}{doi:\nolinkurl{10.1145/3805712.3809859}}
+
+
 \bibitem[Hou et~al\mbox{.}(2024)]%
         {hou2024llm4se}
 \bibfield{author}{\bibinfo{person}{X. Hou}, \bibinfo{person}{Y. Zhao},
@@ -516,6 +578,21 @@
 \href{https://doi.org/10.1145/2568225.2568271}{doi:\nolinkurl{10.1145/2568225.2568271}}
 
 
+\bibitem[Ionescu et~al\mbox{.}(2025)]%
+        {ionescu2025onboarding}
+\bibfield{author}{\bibinfo{person}{Andrei~Cristian Ionescu},
+  \bibinfo{person}{Sergey Titov}, {and} \bibinfo{person}{Maliheh Izadi}.}
+  \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{A Multi-agent Onboarding Assistant based on Large
+  Language Models, Retrieval Augmented Generation, and Chain-of-Thought}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 33rd ACM International
+  Conference on the Foundations of Software Engineering}}.
+  \bibinfo{publisher}{Association for Computing Machinery},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{1208--1212}.
+\newblock
+\href{https://doi.org/10.1145/3696630.3728611}{doi:\nolinkurl{10.1145/3696630.3728611}}
+
+
 \bibitem[Jagerman et~al\mbox{.}(2023)]%
         {jagerman2023expansion}
 \bibfield{author}{\bibinfo{person}{R. Jagerman}, \bibinfo{person}{H. Zhuang},
@@ -528,6 +605,20 @@
 \url{https://arxiv.org/abs/2305.03653}
 \showURL{%
 \tempurl}
+
+
+\bibitem[Javan~Jafari et~al\mbox{.}(2023)]%
+        {javanjafari2023strategies}
+\bibfield{author}{\bibinfo{person}{Abbas Javan~Jafari},
+  \bibinfo{person}{Diego~Elias Costa}, \bibinfo{person}{Emad Shihab}, {and}
+  \bibinfo{person}{Rabe Abdalkareem}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Dependency Update Strategies and Package
+  Characteristics}.
+\newblock \bibinfo{journal}{\emph{ACM Transactions on Software Engineering and
+  Methodology}} \bibinfo{volume}{32}, \bibinfo{number}{6}
+  (\bibinfo{year}{2023}), \bibinfo{pages}{1--29}.
+\newblock
+\href{https://doi.org/10.1145/3603110}{doi:\nolinkurl{10.1145/3603110}}
 
 
 \bibitem[Jeong et~al\mbox{.}(2024)]%
@@ -631,6 +722,20 @@
 \href{https://doi.org/10.1145/3613904.3642596}{doi:\nolinkurl{10.1145/3613904.3642596}}
 
 
+\bibitem[Keller(2025)]%
+        {keller2025continuous}
+\bibfield{author}{\bibinfo{person}{Jüri Keller}.}
+  \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{Continuous Evaluation in Information Retrieval
+  Across Methods and Time}. In \bibinfo{booktitle}{\emph{Proceedings of the
+  48th International ACM SIGIR Conference on Research and Development in
+  Information Retrieval}}. \bibinfo{publisher}{Association for Computing
+  Machinery}, \bibinfo{address}{New York, NY, USA},
+  \bibinfo{pages}{4205--4205}.
+\newblock
+\href{https://doi.org/10.1145/3726302.3730124}{doi:\nolinkurl{10.1145/3726302.3730124}}
+
+
 \bibitem[Khattab and Zaharia(2020)]%
         {khattab2020colbert}
 \bibfield{author}{\bibinfo{person}{O. Khattab} {and} \bibinfo{person}{M.
@@ -658,6 +763,34 @@
   \bibinfo{pages}{721--734}.
 \newblock
 \href{https://doi.org/10.1109/TSE.2002.1027796}{doi:\nolinkurl{10.1109/TSE.2002.1027796}}
+
+
+\bibitem[Kong et~al\mbox{.}(2025)]%
+        {kong2025breaking}
+\bibfield{author}{\bibinfo{person}{Dezhen Kong}, \bibinfo{person}{Jiakun Liu},
+  \bibinfo{person}{Lingfeng Bao}, {and} \bibinfo{person}{David Lo}.}
+  \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{Toward Better Comprehension of Breaking Changes in
+  the {NPM} Ecosystem}.
+\newblock \bibinfo{journal}{\emph{ACM Transactions on Software Engineering and
+  Methodology}} \bibinfo{volume}{34}, \bibinfo{number}{4}
+  (\bibinfo{year}{2025}), \bibinfo{pages}{1--23}.
+\newblock
+\href{https://doi.org/10.1145/3702991}{doi:\nolinkurl{10.1145/3702991}}
+
+
+\bibitem[Kostric and Balog(2024)]%
+        {kostric2024multiquery}
+\bibfield{author}{\bibinfo{person}{Ivica Kostric} {and}
+  \bibinfo{person}{Krisztian Balog}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{A Surprisingly Simple yet Effective Multi-Query
+  Rewriting Method for Conversational Passage Retrieval}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 47th International ACM SIGIR
+  Conference on Research and Development in Information Retrieval}}.
+  \bibinfo{publisher}{Association for Computing Machinery},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{2271--2275}.
+\newblock
+\href{https://doi.org/10.1145/3626772.3657933}{doi:\nolinkurl{10.1145/3626772.3657933}}
 
 
 \bibitem[Lago et~al\mbox{.}(2024)]%
@@ -721,6 +854,21 @@
 \href{https://doi.org/10.1145/3597503.3608128}{doi:\nolinkurl{10.1145/3597503.3608128}}
 
 
+\bibitem[Liang et~al\mbox{.}(2026)]%
+        {liang2026drift}
+\bibfield{author}{\bibinfo{person}{Zeyan Liang}, \bibinfo{person}{Graham
+  McDonald}, {and} \bibinfo{person}{Iadh Ounis}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \showarticletitle{Auditing Query Drift: Do Users Actually Benefit
+  from Pseudo-Relevance Feedback?}. In \bibinfo{booktitle}{\emph{Proceedings of
+  the 49th International ACM SIGIR Conference on Research and Development in
+  Information Retrieval}}. \bibinfo{publisher}{Association for Computing
+  Machinery}, \bibinfo{address}{New York, NY, USA},
+  \bibinfo{pages}{3952--3957}.
+\newblock
+\href{https://doi.org/10.1145/3805712.3809916}{doi:\nolinkurl{10.1145/3805712.3809916}}
+
+
 \bibitem[Lin et~al\mbox{.}(2021)]%
         {lin2021pretrained}
 \bibfield{author}{\bibinfo{person}{J. Lin}, \bibinfo{person}{R. Nogueira},
@@ -759,6 +907,21 @@
   and Methodology}} (\bibinfo{year}{2026}).
 \newblock
 \href{https://doi.org/10.1145/3796507}{doi:\nolinkurl{10.1145/3796507}}
+
+
+\bibitem[Lu et~al\mbox{.}(2026)]%
+        {lu2026comra}
+\bibfield{author}{\bibinfo{person}{Bin Lu}, \bibinfo{person}{Wanxiang Yu},
+  \bibinfo{person}{Haolin Wang}, \bibinfo{person}{Jiayi Zhao},
+  \bibinfo{person}{Yuzhi Zhang}, {and} \bibinfo{person}{Rui Chen}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \showarticletitle{{CoMRA}: A Framework for Automated Code Migration
+  via Retrieval-Augmented Generation and Multi-Agent Collaboration}. In
+  \bibinfo{booktitle}{\emph{2026 IEEE International Conference on Software
+  Analysis, Evolution and Reengineering (SANER)}}. \bibinfo{publisher}{IEEE},
+  \bibinfo{address}{Piscataway, NJ, USA}, \bibinfo{pages}{114--124}.
+\newblock
+\href{https://doi.org/10.1109/saner67736.2026.00022}{doi:\nolinkurl{10.1109/saner67736.2026.00022}}
 
 
 \bibitem[Ma et~al\mbox{.}(2023)]%
@@ -869,6 +1032,19 @@
 \href{https://doi.org/10.1109/ICSE48619.2023.00205}{doi:\nolinkurl{10.1109/ICSE48619.2023.00205}}
 
 
+\bibitem[Nath and Roy(2022)]%
+        {nath2022releasenotes}
+\bibfield{author}{\bibinfo{person}{Sristy~Sumana Nath} {and}
+  \bibinfo{person}{Banani Roy}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{Exploring Relevant Artifacts of Release Notes: The
+  Practitioners' Perspective}. In \bibinfo{booktitle}{\emph{2022 IEEE
+  International Conference on Software Analysis, Evolution and Reengineering
+  (SANER)}}. \bibinfo{publisher}{IEEE}, \bibinfo{address}{Piscataway, NJ, USA},
+  \bibinfo{pages}{1270--1277}.
+\newblock
+\href{https://doi.org/10.1109/saner53432.2022.00152}{doi:\nolinkurl{10.1109/saner53432.2022.00152}}
+
+
 \bibitem[Nguyen et~al\mbox{.}(2025)]%
         {nguyen2025marag}
 \bibfield{author}{\bibinfo{person}{T. Nguyen}, \bibinfo{person}{P. Chin}, {and}
@@ -921,6 +1097,20 @@
 \href{https://doi.org/10.1145/3180155.3180183}{doi:\nolinkurl{10.1145/3180155.3180183}}
 
 
+\bibitem[Piryani et~al\mbox{.}(2026)]%
+        {piryani2026temporal}
+\bibfield{author}{\bibinfo{person}{Bhawna Piryani}, \bibinfo{person}{Avishek
+  Anand}, \bibinfo{person}{Omar Alonso}, {and} \bibinfo{person}{Adam Jatowt}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \showarticletitle{Temporal Information Retrieval and Extraction: From
+  Foundations to {RAG}}. In \bibinfo{booktitle}{\emph{Proceedings of the 49th
+  International ACM SIGIR Conference on Research and Development in Information
+  Retrieval}}. \bibinfo{publisher}{Association for Computing Machinery},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{5350--5353}.
+\newblock
+\href{https://doi.org/10.1145/3805712.3808638}{doi:\nolinkurl{10.1145/3805712.3808638}}
+
+
 \bibitem[Qian et~al\mbox{.}(2024)]%
         {qian2024chatdev}
 \bibfield{author}{\bibinfo{person}{C. Qian}, \bibinfo{person}{W. Liu},
@@ -964,6 +1154,21 @@
   \bibinfo{pages}{13--23}.
 \newblock
 \href{https://doi.org/10.1145/3210459.3210461}{doi:\nolinkurl{10.1145/3210459.3210461}}
+
+
+\bibitem[Ran et~al\mbox{.}(2025)]%
+        {ran2025variants}
+\bibfield{author}{\bibinfo{person}{Kun Ran}, \bibinfo{person}{Marwah Alaofi},
+  \bibinfo{person}{Mark Sanderson}, {and} \bibinfo{person}{Damiano Spina}.}
+  \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{Two Heads Are Better Than One: Improving Search
+  Effectiveness Through {LLM}-Generated Query Variants}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 2025 ACM SIGIR Conference on
+  Human Information Interaction and Retrieval}}.
+  \bibinfo{publisher}{Association for Computing Machinery},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{333--341}.
+\newblock
+\href{https://doi.org/10.1145/3698204.3716468}{doi:\nolinkurl{10.1145/3698204.3716468}}
 
 
 \bibitem[Ranaldi et~al\mbox{.}(2026)]%
@@ -1049,6 +1254,20 @@
 Retrieved August 2026 from \tempurl}
 
 
+\bibitem[Scells et~al\mbox{.}(2022)]%
+        {scells2022refinement}
+\bibfield{author}{\bibinfo{person}{Harrisen Scells}, \bibinfo{person}{Connor
+  Forbes}, \bibinfo{person}{Justin Clark}, \bibinfo{person}{Bevan Koopman},
+  {and} \bibinfo{person}{Guido Zuccon}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{The Impact of Query Refinement on Systematic Review
+  Literature Search}. In \bibinfo{booktitle}{\emph{Proceedings of the 2022 ACM
+  SIGIR International Conference on Theory of Information Retrieval}}.
+  \bibinfo{publisher}{Association for Computing Machinery},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{34--42}.
+\newblock
+\href{https://doi.org/10.1145/3539813.3545143}{doi:\nolinkurl{10.1145/3539813.3545143}}
+
+
 \bibitem[Shaikh(2026)]%
         {shaikh2026dissecting}
 \bibfield{author}{\bibinfo{person}{Sheroz Shaikh}.}
@@ -1084,6 +1303,20 @@ Retrieved August 2026 from \tempurl}
   USA}, \bibinfo{pages}{9--19}.
 \newblock
 \href{https://doi.org/10.1109/ICSE.2015.24}{doi:\nolinkurl{10.1109/ICSE.2015.24}}
+
+
+\bibitem[Simon et~al\mbox{.}(2025)]%
+        {simon2025configdep}
+\bibfield{author}{\bibinfo{person}{Sebastian Simon}, \bibinfo{person}{Alina
+  Mailach}, \bibinfo{person}{Johannes Dorn}, {and} \bibinfo{person}{Norbert
+  Siegmund}.} \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{On Automating Configuration Dependency Validation
+  via Retrieval-Augmented Generation}. In \bibinfo{booktitle}{\emph{2025 40th
+  IEEE/ACM International Conference on Automated Software Engineering (ASE)}}.
+  \bibinfo{publisher}{IEEE}, \bibinfo{address}{Piscataway, NJ, USA},
+  \bibinfo{pages}{2516--2528}.
+\newblock
+\href{https://doi.org/10.1109/ase63991.2025.00207}{doi:\nolinkurl{10.1109/ase63991.2025.00207}}
 
 
 \bibitem[Sj{\o}berg et~al\mbox{.}(2007)]%
@@ -1199,6 +1432,21 @@ Retrieved August 2026 from \tempurl}
 \href{https://doi.org/10.1016/j.infsof.2023.107329}{doi:\nolinkurl{10.1016/j.infsof.2023.107329}}
 
 
+\bibitem[Wallat et~al\mbox{.}(2025)]%
+        {wallat2025correctness}
+\bibfield{author}{\bibinfo{person}{Jonas Wallat}, \bibinfo{person}{Maria
+  Heuss}, \bibinfo{person}{Maarten~de Rijke}, {and} \bibinfo{person}{Avishek
+  Anand}.} \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{Correctness is not Faithfulness in Retrieval
+  Augmented Generation Attributions}. In \bibinfo{booktitle}{\emph{Proceedings
+  of the 2025 International ACM SIGIR Conference on Innovative Concepts and
+  Theories in Information Retrieval (ICTIR)}}. \bibinfo{publisher}{Association
+  for Computing Machinery}, \bibinfo{address}{New York, NY, USA},
+  \bibinfo{pages}{22--32}.
+\newblock
+\href{https://doi.org/10.1145/3731120.3744592}{doi:\nolinkurl{10.1145/3731120.3744592}}
+
+
 \bibitem[Wang et~al\mbox{.}(2023)]%
         {wang2023query2doc}
 \bibfield{author}{\bibinfo{person}{L. Wang}, \bibinfo{person}{N. Yang}, {and}
@@ -1226,11 +1474,11 @@ Retrieved August 2026 from \tempurl}
 \href{https://doi.org/10.1145/3728963}{doi:\nolinkurl{10.1145/3728963}}
 
 
-\bibitem[Wang et~al\mbox{.}(2024)]%
+\bibitem[Wang et~al\mbox{.}(2024a)]%
         {wang2024rocks}
 \bibfield{author}{\bibinfo{person}{W. Wang}, \bibinfo{person}{H. Ning},
   \bibinfo{person}{G. Zhang}, \bibinfo{person}{L. Liu}, {and}
-  \bibinfo{person}{Y. Wang}.} \bibinfo{year}{2024}\natexlab{}.
+  \bibinfo{person}{Y. Wang}.} \bibinfo{year}{2024}\natexlab{a}.
 \newblock \showarticletitle{Rocks Coding, Not Development: A Human-Centric,
   Experimental Evaluation of {LLM}-Supported {SE} Tasks}.
 \newblock \bibinfo{journal}{\emph{Proceedings of the {ACM} on Software
@@ -1238,6 +1486,37 @@ Retrieved August 2026 from \tempurl}
   (\bibinfo{year}{2024}), \bibinfo{pages}{699--721}.
 \newblock
 \href{https://doi.org/10.1145/3643758}{doi:\nolinkurl{10.1145/3643758}}
+
+
+\bibitem[Wang et~al\mbox{.}(2024b)]%
+        {wang2024poolingbias}
+\bibfield{author}{\bibinfo{person}{Xiaochen Wang}, \bibinfo{person}{Xiao Xiao},
+  \bibinfo{person}{Ruhan Zhang}, \bibinfo{person}{Xuan Zhang},
+  \bibinfo{person}{Taesik Na}, \bibinfo{person}{Tejaswi Tenneti},
+  \bibinfo{person}{Haixun Wang}, {and} \bibinfo{person}{Fenglong Ma}.}
+  \bibinfo{year}{2024}\natexlab{b}.
+\newblock \showarticletitle{Mitigating Pooling Bias in E-commerce Search via
+  False Negative Estimation}. In \bibinfo{booktitle}{\emph{Proceedings of the
+  30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining}}.
+  \bibinfo{publisher}{Association for Computing Machinery},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{5917--5925}.
+\newblock
+\href{https://doi.org/10.1145/3637528.3671630}{doi:\nolinkurl{10.1145/3637528.3671630}}
+
+
+\bibitem[Wattanakriengkrai et~al\mbox{.}(2023)]%
+        {wattanakriengkrai2023longtail}
+\bibfield{author}{\bibinfo{person}{Supatsara Wattanakriengkrai},
+  \bibinfo{person}{Raula~Gaikovina Kula}, \bibinfo{person}{Christoph Treude},
+  {and} \bibinfo{person}{Kenichi Matsumoto}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Lessons from the Long Tail: Analysing Unsafe
+  Dependency Updates across Software Ecosystems}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 31st ACM Joint European Software
+  Engineering Conference and Symposium on the Foundations of Software
+  Engineering}}. \bibinfo{publisher}{Association for Computing Machinery},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{2077--2081}.
+\newblock
+\href{https://doi.org/10.1145/3611643.3613086}{doi:\nolinkurl{10.1145/3611643.3613086}}
 
 
 \bibitem[Weller et~al\mbox{.}(2024)]%
@@ -1266,6 +1545,20 @@ Retrieved August 2026 from \tempurl}
 \newblock \bibinfo{publisher}{Springer}, \bibinfo{address}{Berlin, Heidelberg}.
 \newblock
 \href{https://doi.org/10.1007/978-3-642-29044-2}{doi:\nolinkurl{10.1007/978-3-642-29044-2}}
+
+
+\bibitem[Wu et~al\mbox{.}(2023)]%
+        {wu2023releasenotes}
+\bibfield{author}{\bibinfo{person}{Jianyu Wu}, \bibinfo{person}{Weiwei Xu},
+  \bibinfo{person}{Kai Gao}, \bibinfo{person}{Jingyue Li}, {and}
+  \bibinfo{person}{Minghui Zhou}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Characterize Software Release Notes of {GitHub}
+  Projects: Structure, Writing Style, and Content}. In
+  \bibinfo{booktitle}{\emph{2023 IEEE International Conference on Software
+  Analysis, Evolution and Reengineering (SANER)}}. \bibinfo{publisher}{IEEE},
+  \bibinfo{address}{Piscataway, NJ, USA}, \bibinfo{pages}{473--484}.
+\newblock
+\href{https://doi.org/10.1109/saner56733.2023.00051}{doi:\nolinkurl{10.1109/saner56733.2023.00051}}
 
 
 \bibitem[Xia et~al\mbox{.}(2025)]%
@@ -1431,6 +1724,22 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{pages}{1592--1604}.
 \newblock
 \href{https://doi.org/10.1145/3650212.3680384}{doi:\nolinkurl{10.1145/3650212.3680384}}
+
+
+\bibitem[Zheng et~al\mbox{.}(2025)]%
+        {zheng2025maaqr}
+\bibfield{author}{\bibinfo{person}{Qi Zheng}, \bibinfo{person}{Mingjie Zhong},
+  \bibinfo{person}{Saisai Gong}, \bibinfo{person}{Huimin Jiang},
+  \bibinfo{person}{Kaixin Wu}, \bibinfo{person}{Hong Liu}, \bibinfo{person}{Jia
+  Xu}, {and} \bibinfo{person}{Linjian Mo}.} \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{{MAAQR}: An {LLM}-based Multi-Agent Framework for
+  Adaptive Query Rewriting in Alipay Search}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 48th International ACM SIGIR
+  Conference on Research and Development in Information Retrieval}}.
+  \bibinfo{publisher}{Association for Computing Machinery},
+  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{4289--4293}.
+\newblock
+\href{https://doi.org/10.1145/3726302.3731950}{doi:\nolinkurl{10.1145/3726302.3731950}}
 
 
 \bibitem[Zheng et~al\mbox{.}(2026)]%
