@@ -22,7 +22,7 @@ tectonic supplementary.tex --outdir /tmp/build
 Both carry their own bibliography, so both need the `pdflatex → bibtex →
 pdflatex → pdflatex` sequence (`tectonic` does this itself).
 
-Last verified 2026-09-28: paper 45 pages, supplement 13, zero undefined
+Last verified 2026-09-28: paper 45 pages, supplement 15, zero undefined
 references or citations in either.
 
 `tectonic` fetches what it needs on first run; no TeX install required. Any

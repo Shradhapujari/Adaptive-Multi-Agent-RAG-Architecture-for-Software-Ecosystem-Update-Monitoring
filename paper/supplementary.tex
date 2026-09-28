@@ -110,7 +110,7 @@ relevant documents no arm retrieved, which makes these numbers valid for the
 paired within-run comparisons this paper draws and invalid as absolute values
 to compare against published figures computed over a fixed judged corpus. We
 state the pooling protocol with every absolute number for this reason, and
-Section~\ref{sec:pool-demo} measures what ignoring it costs: two arms whose
+Section~S12.3 below measures what ignoring it costs: two arms whose
 retrieved lists are byte-identical, scored in pools of different width, differ
 by $+0.055$ recall@5.
 
@@ -699,6 +699,140 @@ query; because a hedged or negated critique keeps the document
 \textsc{irrelevant} verdict, via \texttt{find\_verdict}), that count is a lower
 bound on the critic's filtering.
 
+
+\section*{S11\quad Observations Carried Over From the Earlier Evaluation}
+These measurements come from the conference version of this work. They do not
+depend on the architecture comparison and are not affected by the corrections
+the paper reports; they are kept here in full because the paper states only
+their conclusions.
+
+The conference version of this work reported a set of measurements that do not
+depend on the architecture comparison and are not affected by the corrections
+above: they concern how the system behaves, not whether it beats a baseline.
+We summarize them here in the form the evidence supports, and refer the reader
+to that version for the full tables and traces.
+
+\textbf{Answer accuracy.} On the version-specific questions of the earlier
+evaluation the pipeline named Linux v7.0.0 (13 April 2026) and Firefox v149.0.1
+(7 April 2026), and in each case the version and date appeared in a document it
+had retrieved. On ten answers read from the live questions endpoint, four were
+fully and six partially correct under a lenient scoring that credits the right
+product with the wrong version. Under the strict CRAG-style scoring of
+Section~\ref{sec:scaled-eval}, correctness on questions with a reference answer
+is 0.30--0.37 for every arm including the baseline; the two measurements agree,
+and the strict one carries forward. What survives is the narrower claim: on
+none of the ten did the answer state a version number, release date, or update
+claim absent from its retrieved documents. Errors were retrieval and selection
+errors, not fabrications.
+
+\textbf{Adaptive feedback.} The Evaluator signals a retry when its quality
+score falls below a threshold ($\theta=0.30$ in that harness; 0.15 in the
+released implementation, Section~\ref{sec:agents}). The retry was instrumented
+and its rate in the surviving run artifact is zero: no question crossed the
+threshold, so its effect on retrieval was never measured, and the configuration
+evaluated in Sections~\ref{sec:two-metrics}--\ref{sec:leak} does not invoke the
+Orchestrator at all (Section~\ref{sec:setup}). None of the retrieval numbers in
+this paper include a retry. Before the union fetch, a retry re-issued a second
+rewritten query in place of the user's question --- the defect of
+Section~\ref{sec:localizing} repeated; under the union it inherits both
+phrasings, and in the released implementation each further round asks the
+Query Rewriter for vocabulary it has not yet tried (Section~\ref{sec:retry}).
+
+\textbf{Self-improvement.} The bespoke retrieval score rose from 0.756 in the
+first tertile of the 50-question run to 0.826 in the last ($+9.3\%$;
+$t(16)=2.18$, $p=0.043$, $d=0.83$), and 27 query-expansion terms accumulated
+positive weight in the Self-Improvement Memory, the highest-scoring being
+\emph{vulnerability}, \emph{patch}, \emph{advisory}, \emph{update}, and
+\emph{kernel}. The comparison is confounded: tertiles are ordered in time and
+the corpus is live, so drift is not separable from adaptation. The mechanism is
+sound and its learned terms are interpretable; the magnitude is not
+established, and establishing it needs a frozen corpus or an interleaved
+design.
+
+\textbf{Failure modes.} Three incorrect answers from that evaluation fail at
+three identifiable stages, which is the traceability
+Section~\ref{sec:decomposition} argues decomposition buys and the retrieval
+metrics do not score. A date constraint in ``What was the Linux version on
+January 1st 2026?'' survived the rewrite and was dropped at the retrieval call
+--- the paper's finding in miniature, since repaired for the vendor release
+endpoint alone, and parsed from the rewrite rather than the question, the one
+place the rule of Section~\ref{sec:rewrite-roles} is inverted. ``Synology NAS
+unreachable after upgrade'' matched no vendor because preprocessing removed the
+terms that would have matched, upstream of anything retrieval could recover.
+``What small IT task always turns into a nightmare?'' retrieved nothing
+relevant, correctly, and reported the empty result rather than declining the
+question --- the gap the CRAG-style scoring rewards closing and the Evaluator
+could close. Three examples establish that these failures occur, not how often.
+
+\textbf{Implementations.} Pure Python, LangChain, and smolagents
+implementations returned the same ranked documents on the evaluation set,
+checked by inspection of the retrieved sets rather than by a metric. Every
+measurement in this paper is from the Pure Python implementation. Within
+smolagents, ToolCallingAgent ran reliably on Llama~3.1~8B while Code Agent
+intermittently emitted invalid tool calls, a property of that agent under an
+8B model rather than of the architecture.
+
+\section*{S12\quad The Retry: Protocol, Limits, and an Accidental Pooling Demonstration}
+The paper states the retry result and its two limits; this section carries the
+measurement protocol behind them, and the pooling demonstration the same run
+produced by accident.
+
+\subsection*{S12.1\quad The two-pass protocol}
+What those retries do is now measured, in the one
+design the question admits: a two-pass protocol over the 500 questions, the
+first pass recording the retry arm alone so that its second-round rewrites'
+fetches --- phrasings no earlier snapshot could contain --- are captured, the
+second pass replaying both arms against that snapshot in a single run with one
+judged pool. Replaying one arm while the other fetched live would have left the
+retry arm reading a fresher corpus than the arm it is compared against, which
+is the confound of Section~\ref{sec:tier-control} at a smaller scale; a
+recording pass made fresh puts the whole corpus on one date instead of
+documenting the asymmetry.
+
+\subsection*{S12.2\quad Two limits on the claim}
+Two limits on the claim. The fire rate is inferred rather than recorded: the
+harness did not persist the round count per question when this run was made, so
+we counted the questions on which the retry arm spent two rewriter invocations
+instead of one (94, against the baseline's uniform one). A run that logs the
+count is the better instrument, and reconstructing it from token accounting is
+the kind of inference that should not be load-bearing twice. And 74 of the 30{,}808 document reads in the second
+pass were not in the snapshot, so the affected source returned nothing for
+those questions; at 0.24\% of reads that adds noise rather than a direction,
+but the pass is not the fully frozen article its protocol was meant to
+produce.
+
+\subsection*{S12.3\quad An accidental demonstration}
+
+The retry arm ran alone, so it judged only its own candidates, while
+\texttt{marag\_llm} was judged inside a three-arm pool. The two arms retrieved
+\emph{byte-identical} lists on every question. Scored as each run reports
+itself, they differ: nDCG@3 0.518 against 0.496, recall@5 0.606 against 0.551.
+Re-scored against the union of both runs' judgments they differ by $0.000$ on
+every metric, on 500 of 500 questions.
+
+We keep this as the clearest available statement of a caveat that is easy to
+nod at and hard to feel. A pooled-judgment metric is not a property of a
+ranking alone; it is a property of a ranking and the pool it was judged in. Two
+systems that retrieve the same documents in the same order can be separated by
+$+0.055$ recall@5 by nothing but the company their judgments kept --- larger
+than every architectural difference this paper reports. Absolute retrieval
+numbers from different runs cannot be compared, and a difference of this size
+between two published systems evaluated separately would be indistinguishable
+from a real effect.
+
+\subsection*{S12.4\quad The rendering artifact at $n=1000$}
+The same run reproduces the rendering artifact at full size, and we note it here
+because scale is the usual defence against it. The template arm scores $0.165$
+higher on correctness than the baseline on the 139 questions carrying a
+reference answer ($p<0.001$), while the same retrieval rendered as prose scores
+$0.004$ \emph{lower} than the baseline and is indistinguishable from it; the
+template arm is simultaneously $0.063$ below the baseline on faithfulness
+($p<0.001$) where the prose arm is level. A judge that rewards a structured
+answer on one axis and penalizes it on another, for content it did not change,
+is measuring the rendering on both. At $n=1000$ the effect is sharper rather
+than weaker, which is the outcome Section~\ref{sec:metric-threat} predicts and
+the reason that section retires the comparison rather than seeking a larger
+sample for it.
 
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{references}

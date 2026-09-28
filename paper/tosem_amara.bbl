@@ -2,7 +2,7 @@
 %%% Do NOT edit. File created by BibTeX with style
 %%% ACM-Reference-Format-Journals [18-Jan-2012].
 
-\begin{thebibliography}{122}
+\begin{thebibliography}{119}
 
 %%% ====================================================================
 %%% NOTE TO THE USER: you can override these defaults by providing
@@ -170,20 +170,6 @@
   \bibinfo{address}{Piscataway, NJ, USA}, \bibinfo{pages}{1320--1332}.
 \newblock
 \href{https://doi.org/10.1109/ICSE55347.2025.00100}{doi:\nolinkurl{10.1109/ICSE55347.2025.00100}}
-
-
-\bibitem[Berretta et~al\mbox{.}(2025)]%
-        {berretta2025maven}
-\bibfield{author}{\bibinfo{person}{Baltasar Berretta},
-  \bibinfo{person}{Augustus Thomas}, {and} \bibinfo{person}{Heather Guarnera}.}
-  \bibinfo{year}{2025}\natexlab{}.
-\newblock \showarticletitle{Dependency Update Adoption Patterns in the Maven
-  Software Ecosystem}. In \bibinfo{booktitle}{\emph{2025 IEEE/ACM 22nd
-  International Conference on Mining Software Repositories (MSR)}}.
-  \bibinfo{publisher}{IEEE}, \bibinfo{address}{Piscataway, NJ, USA},
-  \bibinfo{pages}{295--299}.
-\newblock
-\href{https://doi.org/10.1109/msr66628.2025.00053}{doi:\nolinkurl{10.1109/msr66628.2025.00053}}
 
 
 \bibitem[Besrour et~al\mbox{.}(2025)]%
@@ -1032,19 +1018,6 @@
 \href{https://doi.org/10.1109/ICSE48619.2023.00205}{doi:\nolinkurl{10.1109/ICSE48619.2023.00205}}
 
 
-\bibitem[Nath and Roy(2022)]%
-        {nath2022releasenotes}
-\bibfield{author}{\bibinfo{person}{Sristy~Sumana Nath} {and}
-  \bibinfo{person}{Banani Roy}.} \bibinfo{year}{2022}\natexlab{}.
-\newblock \showarticletitle{Exploring Relevant Artifacts of Release Notes: The
-  Practitioners' Perspective}. In \bibinfo{booktitle}{\emph{2022 IEEE
-  International Conference on Software Analysis, Evolution and Reengineering
-  (SANER)}}. \bibinfo{publisher}{IEEE}, \bibinfo{address}{Piscataway, NJ, USA},
-  \bibinfo{pages}{1270--1277}.
-\newblock
-\href{https://doi.org/10.1109/saner53432.2022.00152}{doi:\nolinkurl{10.1109/saner53432.2022.00152}}
-
-
 \bibitem[Nguyen et~al\mbox{.}(2025)]%
         {nguyen2025marag}
 \bibfield{author}{\bibinfo{person}{T. Nguyen}, \bibinfo{person}{P. Chin}, {and}
@@ -1502,21 +1475,6 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{5917--5925}.
 \newblock
 \href{https://doi.org/10.1145/3637528.3671630}{doi:\nolinkurl{10.1145/3637528.3671630}}
-
-
-\bibitem[Wattanakriengkrai et~al\mbox{.}(2023)]%
-        {wattanakriengkrai2023longtail}
-\bibfield{author}{\bibinfo{person}{Supatsara Wattanakriengkrai},
-  \bibinfo{person}{Raula~Gaikovina Kula}, \bibinfo{person}{Christoph Treude},
-  {and} \bibinfo{person}{Kenichi Matsumoto}.} \bibinfo{year}{2023}\natexlab{}.
-\newblock \showarticletitle{Lessons from the Long Tail: Analysing Unsafe
-  Dependency Updates across Software Ecosystems}. In
-  \bibinfo{booktitle}{\emph{Proceedings of the 31st ACM Joint European Software
-  Engineering Conference and Symposium on the Foundations of Software
-  Engineering}}. \bibinfo{publisher}{Association for Computing Machinery},
-  \bibinfo{address}{New York, NY, USA}, \bibinfo{pages}{2077--2081}.
-\newblock
-\href{https://doi.org/10.1145/3611643.3613086}{doi:\nolinkurl{10.1145/3611643.3613086}}
 
 
 \bibitem[Weller et~al\mbox{.}(2024)]%
