@@ -1141,9 +1141,28 @@ run, or someone else's answer.
    Needs an answer from the venue, not from us. **Do this first.**
 2. **Independent judge (threat T2).** `ollama:llama3.1` judges a pipeline it also
    generates for. §5.5 states the threat and the published agreement figures it
-   rests on, which is honest but not a defence. `--judge openai:gpt-4o` with
-   `OPENAI_API_KEY`; the answer-quality finding already has a second-family
-   re-judge on 40 questions, the retrieval judgments have none.
+   rests on, which is honest but not a defence. The answer-quality finding has a
+   second-family re-judge on 40 questions; the retrieval judgments have none.
+
+   **Set up 2026-09-29, not yet run.** `scripts/phase_judge.sh [n]` replays the
+   frozen three-arm run behind Table 11 with `--judge openai:gpt-4o` and nothing
+   else changed, so a metric difference is the judge and nothing else. It needs
+   `OPENAI_API_KEY` in the shell and `pip install openai` into `venv311` --
+   deliberately not in `requirements.txt`, so CI does not install it.
+
+   **The trap it defuses, which would have wasted the money:** `qrels_key()` is
+   `sha1(question):doc_id`, with no judge in the key, and
+   `results/qrels_cache.json` holds ~19k llama3.1 labels. A gpt-4o run against
+   that cache answers from llama3.1's labels for nearly every pair while
+   `config.json` says `judge: openai:gpt-4o`. `RESULTS_DIR` has no flag and no
+   env override, so the script runs in a worktree with its own `results/` and
+   empties the inherited cache there.
+
+   Volume, measured from the run's own pools: **n=100 is ~0.38M input and ~23K
+   output tokens** (489 relevance calls, 300 answer scorings); n=500 is ~1.89M
+   and ~114K. Price it at current gpt-4o rates before choosing. Start at 100 --
+   the claim §5.5 needs is that the *ordering* survives, and per-label kappa is
+   expected to be poor whatever the sample.
 3. **No head-to-head against published systems.** Researched, not started;
    FlashRAG and RAGLAB are the cheap route, and §2.5 defends the omission in
    terms a reviewer may still press. Recorded and unverified: RAGLAB's ColBERT
