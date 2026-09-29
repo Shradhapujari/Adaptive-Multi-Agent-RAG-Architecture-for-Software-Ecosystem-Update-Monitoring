@@ -18,6 +18,7 @@ node_modules/
 # git cannot re-include a file inside an excluded directory. Exclude the
 # directory's *contents* instead, which negations can override.
 results/*
+!results/qrels_mistral.json
 # ...except the judgment cache: small, and it saves a fresh clone hours of
 # re-judging. It is also part of the artifact (specs/reproducibility.md §2).
 !results/qrels_cache.json
