@@ -373,6 +373,14 @@ def fetch_release_notes(query: str, limit: int = 5) -> list:
         releases = [v for v in versions if not v.get("isCve")]
         versions = releases[:limit] + advisories[:limit]
         return [{
+            # `rerank.doc_text()` reads title/detail/text, not `notes`, so a row
+            # without a title is an empty document to the ranker and every
+            # release scored 0 -- the pool came back in fetch order however it
+            # was ranked. Same title shape the CLI gives its release rows; the
+            # renderer builds its own label from product/version/date and never
+            # reads this.
+            "title":     f"{v.get('versionProductName')} v{v.get('versionNumber')}"
+                         f" — {v.get('versionReleaseNotes', '')[:80]}",
             "product":   v.get("versionProductName", ""),
             "version":   v.get("versionNumber", ""),
             "date":      v.get("versionReleaseDate", ""),
@@ -456,36 +464,112 @@ def _step(label: str, show: bool):
     return st.spinner(label) if show else nullcontext()
 
 
-def vendor_subreddit_posts(query: str, already: list, per_sub: int = 8):
-    """The vendor's own subreddits, as the terminal trace searches them.
+def terminal_sources(query: str, rewritten: str, already: list):
+    """Every source the terminal retrieves from, in this app's pools.
 
-    The community agent reads `/api/reddit/query/positive`, which ranks the
-    whole feed by text. The terminal's RetrieverAgent also asks
-    `/api/reddit/by-subreddit` for the detected vendor's subreddits, and that is
-    where a thread like "KB5101650 breaks printing" lives: on the demo question
-    the app returned no printing document at all while the terminal named the
-    KB. Same detector and same fetch as the terminal, so both views see it.
+    This app had three fetchers, all against releasetrain.io; the terminal has
+    twelve, including Google News, the CISA KEV catalogue and CIRCL. On "What
+    broke printing in the latest Windows update?" the two documents that
+    answered it were Google News articles, so the app could not answer a
+    question the terminal answered well -- and ranking cannot recover a
+    document that was never fetched. `marag.gather_sources` is the terminal's
+    own fetch, shared rather than copied, so the two source lists cannot drift
+    apart again.
 
-    Returns `(kept, dropped)`; the caller adds the drops to the run's screen log.
+    The terminal normalises every source to one document shape
+    (title/subreddit/sentiment/score/date/url), which is the shape this app's
+    community and security panels already render. Its release documents carry
+    the extra fields this app's release panel needs -- product, version, notes,
+    channel, security, breaking -- under `release_row`, because flattening them
+    into the terminal's own document would change what `vendor.classify_record`
+    decides about a kernel advisory there. `_release_rows` unpacks them.
+
+    `gen_apple` is the one bucket left out: the Apple RSS feed carries a title
+    and a date and no version at all, so there is no release row to build. Its
+    items are announcements, and this app has no panel that is about them.
+
+    Returns `({"community": [...], "releases": [...], "cve": [...]}, dropped)`;
+    the caller adds the drops to the run's screen log.
     """
     import multiagent_rag_v3 as marag
     from guardrail import screened as _screen
 
     have = {(d.get("url") or "").rstrip("/").lower() for d in (already or ())}
-    out = []
-    for v in marag.extract_vendor(query)[:2]:
-        for sub in marag.VENDOR_SUBREDDITS.get(v, [v])[:3]:
-            try:
-                posts = marag.fetch_vendor_reddit(sub, query=query, limit=per_sub)
-            except Exception:  # noqa: BLE001 -- one dead subreddit is not an outage
-                continue
+    try:
+        # Same detector as the terminal: `extract_vendor` on the original
+        # wording, not the grounder's product names, which are catalogue
+        # entries and do not always match the subreddit map's keys.
+        src = marag.gather_sources(rewritten or query, original_query=query,
+                                   vendors=marag.extract_vendor(query))
+    except Exception as e:  # noqa: BLE001 -- a dead source list is not a dead run
+        # Recorded, not swallowed: returning empty silently is indistinguishable
+        # from "these sources had nothing", which is how a broken source list
+        # would go on looking like a thin news day.
+        _record_fetch_error("Shared sources", e)
+        return {"community": [], "releases": [], "cve": []}, []
+
+    pools, dropped = {}, []
+    for pool, buckets in (("community", ("vendor_reddit", "gen_reddit", "gen_news")),
+                          ("releases", ("vendor_releases", "gen_releases", "gen_llm")),
+                          ("cve", ("gen_cve", "gen_cisa", "gen_circl"))):
+        out = []
+        for bucket in buckets:
+            posts = src.get(bucket) or []
             for p in posts:
                 u = (p.get("url") or "").rstrip("/").lower()
                 if u and u not in have:
                     have.add(u)
                     out.append(p)
-    kept, dropped = _screen(out)
-    return kept, [{"doc": d, "pattern": pat} for d, pat in dropped]
+        # Screened per pool, but into one log: a row carrying an instruction is
+        # dropped before it can reach the ranker, the evidence list or the
+        # prompt, the same as `union_fetch` does for this app's own fetches.
+        pools[pool], drops = _screen(out)
+        dropped += [{"doc": d, "pattern": pat} for d, pat in drops]
+    # Screened as terminal documents (that is where the text is), rendered as
+    # release rows.
+    pools["releases"] = _release_rows(pools["releases"])
+    return pools, dropped
+
+
+def _subject_terms(g) -> list:
+    """The question's content words, minus the ones that carry no subject.
+
+    A product name is already enforced by the product filter, and asking for
+    it twice is what let "Windows 11 kiosk PC: can Chrome updates be scheduled
+    for weekends?" pass as the thread for a question about printing: `windows`
+    is in the detected products *and* in the question's terms, so the subject
+    test was satisfied by the word that had already satisfied the product
+    test. `LLM_GENERIC_TERMS` is the release vocabulary -- update, latest,
+    version, patch -- which every thread on an update feed carries.
+    """
+    import multiagent_rag_v3 as marag
+
+    names = {v.name.lower() for v in (g.vendors or ())}
+    return [t for t in (g.terms or ())
+            if len(t) > 3 and t.lower() not in names
+            and t.lower() not in marag.LLM_GENERIC_TERMS]
+
+
+def _release_rows(docs: list) -> list:
+    """Terminal release documents in this app's release-row shape.
+
+    A document with no `release_row` is dropped rather than rendered with
+    blank fields: the panel states a product and a version, and a row that
+    cannot say which release it is has nothing to say here. The `title` is
+    rebuilt in this app's own shape so ranking sees the same text for a shared
+    release as for one of this app's own.
+    """
+    out = []
+    for d in docs:
+        row = d.get("release_row")
+        if not row or not row.get("version"):
+            continue
+        row = dict(row)
+        row["title"] = (f"{row['product']} v{row['version']}"
+                        f" — {row['notes'][:80]}")
+        row["source"] = d.get("source", "")
+        out.append(row)
+    return out
 
 
 def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
@@ -611,10 +695,14 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         t0 = time.time()
         results["community"] = union_fetch(community_fetch, phrasings,
                                            pool_limit, temporal)
-        # Vendor subreddits, unless the run is pinned to the local store.
+        # The terminal's twelve sources, unless the run is pinned to the local
+        # store. One network burst for both pools: the security sources come
+        # back in the same call and are added to the CVE pool in step 4.
+        shared = {"community": [], "releases": [], "cve": []}
         if source != "store":
-            extra, dropped = vendor_subreddit_posts(query, results["community"])
-            results["community"] += extra
+            shared, dropped = terminal_sources(query, rewritten,
+                                               results["community"])
+            results["community"] += shared["community"]
             results["screened"].extend(dropped)
         results["timing"]["community"] = round(time.time()-t0, 1)
 
@@ -623,12 +711,27 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         t0 = time.time()
         results["releases"] = union_fetch(release_fetch, release_phrasings,
                                           pool_limit, temporal)
+        # Already fetched and screened in step 2. `/api/c/name/<vendor>` is the
+        # vendor catalogue, which this app never asked: it searched
+        # `/api/v/?q=` and took whatever came back under the query string.
+        # Dedupe on url, but an *empty* url is not an identity: this app's own
+        # release rows often have none, and treating "" as one seen key would
+        # drop every shared release behind the first of them.
+        _have = {u for u in ((r.get("url") or "").rstrip("/").lower()
+                             for r in results["releases"]) if u}
+        results["releases"] += [
+            r for r in shared["releases"]
+            if (r.get("url") or "").rstrip("/").lower() not in _have]
         results["timing"]["releases"] = round(time.time()-t0, 1)
 
     # Step 4 — CVE Agent
     with _step("CVE Agent — fetching security vulnerabilities...", show_steps):
         t0 = time.time()
         results["cve"] = union_fetch(cve_fetch, phrasings, limit, temporal)
+        # Already fetched and screened in step 2. The app's own CVE feed is
+        # Reddit; these are the advisory catalogues (CISA KEV, CIRCL) the
+        # terminal reads and this app had no fetcher for.
+        results["cve"] += shared["cve"]
         results["timing"]["cve"] = round(time.time()-t0, 1)
 
     # Step 4b — Vendor and record-type filter
@@ -671,11 +774,42 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     else:
         results["advisories_excluded"] = 0
 
-    # Only now cut to what the user asked to see. Everything above ranked and
-    # filtered over the deep pool.
-    results["community"] = results["community"][:limit]
-    results["releases"] = results["releases"][:limit]
-    results["cve"] = results["cve"][:limit]
+    # Rank, then cut to what the user asked to see. Nothing above this line
+    # ranks: `union_fetch` orders by window membership and the filters only
+    # drop. So the demo used to show the feed's own order -- newest-first from
+    # releasetrain, vote order from Reddit -- while the terminal showed
+    # `rerank.py`'s order over the same pool, which is the difference the
+    # evaluation measures. Same reranker, same `MARAG_RERANK` spec and the
+    # same rank-on-the-original-question choice the CLI defaults to.
+    import rerank as _rerank
+    _reranker = _rerank.get_reranker()
+    results["rerank"] = {"spec": _reranker.spec,
+                         "degraded": bool(_reranker.degraded),
+                         "reason": getattr(_reranker, "reason", "")}
+
+    def _safe_rank(docs):
+        """Rank, but never let ranking take the run down.
+
+        `EmbeddingReranker.rank()` does live HTTP and can raise *after*
+        `available()` succeeded -- a timeout, a reset, or an empty embedding
+        for an empty document. Retrieval in this app was incapable of raising;
+        keep it that way by degrading to BM25, which needs no network, and
+        finally to the fetch order. Same ladder as the CLI's `_safe_rank`.
+        """
+        if not docs:
+            return []
+        try:
+            return _reranker.rank(query, docs, top_k=limit)
+        except Exception as e:  # noqa: BLE001 -- a dead ranker is not a dead demo
+            results["rerank"]["degraded"] = True
+            results["rerank"]["reason"] = f"{type(e).__name__}: {e}"
+            try:
+                return _rerank.BM25Reranker().rank(query, docs, top_k=limit)
+            except Exception:  # noqa: BLE001
+                return list(docs)[:limit]
+
+    for _pool in ("community", "releases", "cve"):
+        results[_pool] = _safe_rank(results[_pool])
     results["timing"]["filter"] = round(time.time() - t0, 2)
 
     # Step 4b — Yes/No consensus
@@ -700,7 +834,16 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # what the presenter now leads the answer with. The tally below stays
     # gated -- counting stances only makes sense on a yes/no question.
     if thread is None:
-        thread = yesno.find_thread(query)
+        # Scoped by the same subject filter the community pool gets, and for
+        # the reason its docstring gives: a product match says the row is about
+        # the right product, not the right subject. The thread is quoted at the
+        # top of the answer, so an off-subject one is the most visible wrong
+        # citation the app can make.
+        thread = yesno.find_thread(
+            query,
+            scope=lambda rows: vendor.filter_community(rows, g.vendors,
+                                                       terms=g.terms),
+            must_mention=_subject_terms(g))
     if thread is not None:
         results["thread"] = thread
         results["top_comment"] = yesno.top_comment(thread)
@@ -810,8 +953,25 @@ def _presenter_caption(configured: str, presented=None) -> str:
             f"({presented.note}).")
 
 
-def _agent_table(results=None, presented=None) -> str:
+def _agent_table(results=None, presented=None, view: str = "detailed") -> str:
     """The sidebar's agent roster, reporting what each agent actually did.
+
+    Two views over one pipeline, which is not restructured either way.
+
+    "paper" is the architecture the paper and the RISE deck describe, and the
+    one multiagent_rag_v3.py implements: an Orchestrator that plans and
+    retries, a Query Rewriter, a Retriever, an Evaluator. This page grew a
+    different decomposition -- it split the Retriever into one agent per feed
+    and promoted the two pre-search grounding steps to agents of their own --
+    so a viewer holding the slides counted seven rows against four and had to
+    work out which was wrong. Neither was; they were the same pipeline named
+    twice. The folding is stated in the caption rather than hidden, and the
+    Answer Presenter stays on its own row in both: it is outside the deck's
+    four, and dropping the line that says whether a model or a rule wrote the
+    answer would mislead about the thing this app is most careful about.
+
+    "detailed" is the per-step view, and stays the default here so a caller
+    that does not ask gets the fuller report.
 
     It used to be a static table: "Query Rewriter | Llama 3.1" whether or not
     a model was reachable, "CVE Security | Live API" whether or not the feed
@@ -827,14 +987,20 @@ def _agent_table(results=None, presented=None) -> str:
         return f"| {name} | {status} |"
 
     head = ["| Agent | Status |", "|-------|--------|"]
+    paper = view == "paper"
     if results is None:
-        return "\n".join(head + [
-            row("Temporal Grounder", "Rule-based"),
-            row("Vendor & Intent", "Catalog + cues"),
-            row("Query Rewriter", "Llama 3.1 / rule"),
-            row("Community", "Live API"),
-            row("Release Notes", "Live API"),
-            row("Security", "Live API"),
+        idle = ([row("Orchestrator", "Plans and retries"),
+                 row("Query Rewriter", "User words → search words"),
+                 row("Retriever", "Vendor-scoped, 3 feeds"),
+                 row("Evaluator", "Scores evidence")]
+                if paper else
+                [row("Temporal Grounder", "Rule-based"),
+                 row("Vendor & Intent", "Catalog + cues"),
+                 row("Query Rewriter", "Llama 3.1 / rule"),
+                 row("Community", "Live API"),
+                 row("Release Notes", "Live API"),
+                 row("Security", "Live API")])
+        return "\n".join(head + idle + [
             row("Answer Presenter", "LLM / rule-based"),
             "", "*Idle — statuses fill in after a run.*"])
 
@@ -877,16 +1043,53 @@ def _agent_table(results=None, presented=None) -> str:
     else:
         presenter_status = "Rule-based"
 
+    community_row = feed("Community", results.get("community") or [])
+    release_row = feed("Release Notes",
+                       [r for r in rel if vendor.is_release_record(r)], rel_extra)
+    security_row = feed("CVE", results.get("cve") or [],
+                        f" · {dropped} off-topic dropped" if dropped else "")
+
+    if not paper:
+        return "\n".join(head + [
+            row("Temporal Grounder", temporal_status),
+            row("Vendor & Intent", vendor_status),
+            row("Query Rewriter", rewriter_status),
+            row("Community", community_row),
+            row("Release Notes", release_row),
+            row("Security", security_row),
+            row("Answer Presenter", presenter_status),
+        ])
+
+    # One row per agent in the deck, each reporting the same facts the
+    # per-step rows carry -- folded, never softened. A feed that did not
+    # answer is still named as down here, because "3 feeds" over two live
+    # ones would overstate the pool the answer rests on.
+    feeds_down = sorted(down & {"Community", "Release Notes", "CVE"})
+    n_docs = sum(len(results.get(k) or []) for k in ("community", "releases", "cve"))
+    retriever_status = f"{n_docs} doc(s) · {3 - len(feeds_down)}/3 feeds"
+    if feeds_down:
+        retriever_status += f" · ⚠️ {', '.join(feeds_down)} unreachable"
+
+    phrasings = results.get("fetch_phrasings") or []
+    orchestrator_status = (f"{len(phrasings)} phrasing(s) · "
+                           f"{results.get('source', 'agent')} source")
+
+    # The rewriter row carries the two steps folded into it, so the grounding
+    # that happened before the rewrite is still visible in this view.
+    rewriter_paper = f"{rewriter_status} · {temporal_status.lower()} · {vendor_status}"
+
+    ev = results.get("evaluation") or {}
+    if ev:
+        evaluator_status = (f"quality {ev.get('quality', 0)} · "
+                            f"{ev.get('signal', '—')} signal")
+    else:
+        evaluator_status = "Not run"
+
     return "\n".join(head + [
-        row("Temporal Grounder", temporal_status),
-        row("Vendor & Intent", vendor_status),
-        row("Query Rewriter", rewriter_status),
-        row("Community", feed("Community", results.get("community") or [])),
-        row("Release Notes",
-            feed("Release Notes", [r for r in rel if vendor.is_release_record(r)], rel_extra)),
-        row("Security",
-            feed("CVE", results.get("cve") or [],
-                 f" · {dropped} off-topic dropped" if dropped else "")),
+        row("Orchestrator", orchestrator_status),
+        row("Query Rewriter", rewriter_paper),
+        row("Retriever", retriever_status),
+        row("Evaluator", evaluator_status),
         row("Answer Presenter", presenter_status),
     ])
 
@@ -900,10 +1103,29 @@ with st.sidebar:
         st.image("https://upload.wikimedia.org/wikipedia/en/b/bb/University_of_the_Pacific_seal.svg", width=80)
         st.markdown("**Adaptive Multi-Agent RAG Architecture** · University of the Pacific · 2026")
         st.markdown("##### Active Agents")
+        # Which decomposition to name. The pipeline is identical either way --
+        # this picks how its steps are grouped, so the roster can be read
+        # against the paper's four agents or against the steps themselves.
+        agent_view = st.radio(
+            "Architecture", ["Paper (4 agents)", "Detailed (7 steps)"],
+            horizontal=True, label_visibility="collapsed", key="agent_view",
+            help="Paper: the Orchestrator, Query Rewriter, Retriever and "
+                 "Evaluator the paper and the seminar deck describe, which is "
+                 "what multiagent_rag_v3.py implements. Detailed: this page's "
+                 "own steps, with the Retriever's three feeds and the "
+                 "Rewriter's two grounding steps on rows of their own. Same "
+                 "run, same numbers, different grouping.")
+        agent_view_key = "paper" if agent_view.startswith("Paper") else "detailed"
         # Filled in again at the end of the run, once every status is a fact
         # rather than an advertisement.
         agent_status_slot = st.empty()
-        agent_status_slot.markdown(_agent_table())
+        agent_status_slot.markdown(_agent_table(view=agent_view_key))
+        if agent_view_key == "paper":
+            st.caption("Four agents as in the paper. The Retriever's three "
+                       "feeds and the Rewriter's temporal and vendor grounding "
+                       "are folded into their rows; the Answer Presenter sits "
+                       "outside the four. Nothing is hidden — switch to "
+                       "Detailed for a row each.")
     # Not `presenter_spec() or rule-based`: the presenter falls back to
     # whatever model_select finds reachable, so on a host with Ollama running
     # this caption promised rule-based prose and the run then used llama3.1.
@@ -1093,7 +1315,7 @@ with st.sidebar:
                 _ask_thread(_pick)
             else:
                 st.caption("No question matched — try All vendors.")
-        q_opts = {f"r/{r.get('subreddit','')} · {r.get('title','')[:70]} "
+        q_opts = {f"{vendor.attribution(r) or '—'} · {r.get('title','')[:70]} "
                   f"({len(r.get('comments') or [])} comments)": r for r in q_rows}
         picked = st.selectbox("Question", ["—"] + list(q_opts), key="reddit_pick")
         # Applied once per pick, so the box stays editable afterwards.
@@ -1405,6 +1627,15 @@ elif run_btn and query and compare_mode:
         st.caption(f"{ev['community_count']} community · {ev['release_count']} "
                    f"releases · {ev['cve_count']} CVE · quality {ev['quality']:.2f} · "
                    f"source `{source}` · {round(time.time() - t0, 1)}s")
+    # The roster and the presenter line belong to the pipeline, and the
+    # pipeline just ran -- but these two updates used to live only in the
+    # multi-agent branch below. Compare mode left the sidebar reading "Idle --
+    # statuses fill in after a run" with a finished run on screen beside it,
+    # and that is now the default view, so it was the state most visitors saw.
+    # The same argument as everywhere else here: report the run, not the
+    # advertisement.
+    agent_status_slot.markdown(_agent_table(results, presented, view=agent_view_key))
+    presenter_slot.caption(_presenter_caption(presenter_spec(), presented))
     st.session_state["last_answer"] = {"query": query, "reddit_id": reddit_id, "arm": "compare"}
 
 elif run_btn and query:
@@ -1469,7 +1700,7 @@ elif run_btn and query:
 
     # The roster now describes this run: which feeds answered, whether the
     # rewrite came from a model, how many advisories were separated out.
-    agent_status_slot.markdown(_agent_table(results, presented))
+    agent_status_slot.markdown(_agent_table(results, presented, view=agent_view_key))
     presenter_slot.caption(_presenter_caption(presenter_spec(), presented))
 
     # The trace is what knows which sources the answer actually cited, so it is
@@ -1645,8 +1876,14 @@ elif run_btn and query:
                 st.warning("No comment from anyone other than the asker or a bot — "
                            "nothing to present as an answer.")
             others = [c for c in th.get("comments") or [] if c is not tc]
-            with st.expander(f"“{th.get('title', '')}” (r/{th.get('subreddit', '')}) — "
-                             f"{len(others)} other comment(s), by score"):
+            # `vendor.attribution`, not a bare `r/` prefix: the questions feed
+            # is Reddit today, so this reads the same -- but a row with no
+            # subreddit rendered as a bare "(r/)", and the rule for naming a
+            # document's origin lives in one place now rather than being
+            # restated at each render site.
+            _from = vendor.attribution(th)
+            with st.expander(f"“{th.get('title', '')}”" + (f" ({_from})" if _from else "")
+                             + f" — {len(others)} other comment(s), by score"):
                 for c in sorted(others, key=lambda c: -(c.get("score") or 0)):
                     who = "asker" if c.get("is_submitter") else f"u/{c.get('author', '')}"
                     st.markdown(f"**{c.get('score', 0)}** · {who} — {c.get('body', '')[:300]}")
@@ -1657,9 +1894,11 @@ elif run_btn and query:
         # the answer, and a paragraph synthesised underneath it is elaboration.
         if yn is not None:
             st.markdown("### Yes/No Consensus")
-            st.caption(f"Counted off the comments of “{yn['thread']['title']}” "
-                       f"(r/{yn['thread'].get('subreddit','')}) — one vote per commenter, "
-                       f"the person who asked excluded.")
+            _from = vendor.attribution(yn["thread"])
+            st.caption(f"Counted off the comments of “{yn['thread']['title']}”"
+                       + (f" ({_from})" if _from else "")
+                       + " — one vote per commenter, the person who asked "
+                         "excluded.")
             if yn["thread"].get("url"):
                 st.caption(f"{yn['thread']['url']}")
             if yn["asker_report"]:
@@ -1774,41 +2013,58 @@ elif run_btn and query:
 
         # Community Feedback Tab
         with tab2:
-            st.markdown("**Live Reddit community feedback from releasetrain.io**")
+            st.markdown("**Live community feedback — Reddit, vendor subreddits and press**")
             if results["community"]:
-                order = st.selectbox("Sort", ["Newest first", "Oldest first", "Highest score"],
+                # "Most relevant" is the default and it is the pool's own
+                # order: the rank decides which documents survive the cut, so
+                # showing them by date meant the panel never displayed the
+                # ordering the answer was actually built from. The other two
+                # stay as ways to re-read the same five rows.
+                order = st.selectbox("Sort", ["Most relevant", "Newest first",
+                                              "Oldest first", "Highest score"],
                                      key="community_sort", label_visibility="collapsed")
-                posts = sorted(results["community"],
-                               key=(lambda p: p["score"] or 0) if order == "Highest score"
-                               else (lambda p: p["date"]),
-                               reverse=order != "Oldest first")
+                if order == "Most relevant":
+                    posts = list(results["community"])
+                else:
+                    posts = sorted(results["community"],
+                                   key=(lambda p: p["score"] or 0) if order == "Highest score"
+                                   else (lambda p: p["date"]),
+                                   reverse=order != "Oldest first")
                 for post in posts:
                     sentiment_class = "positive" if post["sentiment"]=="Positive" else "negative" if post["sentiment"]=="Negative" else "neutral"
                     icon = "🟢" if post["sentiment"]=="Positive" else "🔴" if post["sentiment"]=="Negative" else "🟡"
 
                     with st.expander(f"{icon} {post['title'][:80]}"):
                         col1, col2, col3 = st.columns(3)
-                        col1.metric("Subreddit", f"r/{post['subreddit']}")
-                        col2.metric("Score", post["score"])
-                        col3.metric("Date", post["date"])
+                        # Markdown, not `st.metric`: a metric renders its value
+                        # as one big non-wrapping line, which was fine for a
+                        # subreddit and truncates a publisher -- "Tom's
+                        # Hardware" showed as "Tom's H…", so the panel named
+                        # the source by a prefix of its name.
+                        col1.markdown(f"Source  \n**{vendor.attribution(post) or '—'}**")
+                        col2.markdown(f"Score  \n**{post['score']}**")
+                        col3.markdown(f"Date  \n**{post['date'] or '—'}**")
 
                         tags = []
                         if post.get("is_cve"): tags.append("CVE")
                         if post.get("is_update"): tags.append("Update")
                         if tags: st.markdown(" ".join(tags))
-                        if post.get("url"): st.markdown(f"[View on Reddit]({post['url']})")
+                        # Not "View on Reddit": the community pool carries
+                        # press articles and vendor posts now, and the link
+                        # goes wherever the document came from.
+                        if post.get("url"): st.markdown(f"[View source]({post['url']})")
             else:
                 st.info("No community feedback found for this query.")
 
         # CVE Tab
         with tab3:
-            st.markdown("**Security vulnerabilities from releasetrain.io CVE feed**")
+            st.markdown("**Security findings — the CVE feed and the advisory catalogues**")
             if results["cve"]:
                 for cve in results["cve"]:
                     with st.expander(f"{cve['title'][:80]}"):
                         col1, col2 = st.columns(2)
-                        col1.metric("Subreddit", f"r/{cve['subreddit']}")
-                        col2.metric("Date", cve["date"])
+                        col1.markdown(f"Source  \n**{vendor.attribution(cve) or '—'}**")
+                        col2.markdown(f"Date  \n**{cve['date'] or '—'}**")
                         if cve.get("tags"): st.markdown(f"**Tags:** {', '.join(cve['tags'])}")
                         if cve.get("url"): st.markdown(f"[View post]({cve['url']})")
             else:

@@ -126,6 +126,36 @@ def expand_terms(query):
             if t in syns or t==base: expanded.update(syns)
     return expanded
 
+def release_row(v: dict) -> dict:
+    """The demo app's release-row shape, read off a raw `/api/v/` record.
+
+    Carried on the ranked document as `release_row` rather than flattened into
+    it, because this pipeline's own document shape is load-bearing: `notes` and
+    `is_cve` at the top level would change what `vendor.classify_record` — and
+    so `doc_kind`, and so an eval arm's `citable_kinds` filter — decides about
+    a Linux kernel advisory. A nested key nothing else reads cannot do that.
+
+    The app's release panel reads product/version/notes/security/breaking; a
+    document ranked into its release pool has to carry them, and only the
+    fetcher still has the raw record to read them from.
+    """
+    notes = v.get("versionReleaseNotes", "")
+    if isinstance(notes, list):
+        notes = " ".join(str(n) for n in notes)
+    cls = v.get("classification", {}) or {}
+    return {
+        "product":  v.get("versionProductName", ""),
+        "version":  v.get("versionNumber", ""),
+        "date":     str(v.get("versionReleaseDate", ""))[:8],
+        "notes":    str(notes)[:200],
+        "channel":  v.get("versionReleaseChannel", ""),
+        "url":      v.get("versionUrl", ""),
+        "security": cls.get("securityType", []),
+        "breaking": cls.get("breakingType", []),
+        "is_cve":   v.get("isCve", False),
+    }
+
+
 def fetch_live_releases(query, limit=5, min_overlap=2):
     try:
         import requests as req
@@ -153,6 +183,7 @@ def fetch_live_releases(query, limit=5, min_overlap=2):
                     "source": "releases",
                     "url": v.get("versionUrl",""),
                     "date": v.get("versionReleaseDate",""),
+                    "release_row": release_row(v),
                 }))
         scored.sort(key=lambda x:x[0], reverse=True)
         return [d for _,d in scored[:limit]]
@@ -298,6 +329,7 @@ def fetch_llm_releases(query, limit=4, min_overlap=1, gate=True, max_terms=4):
                     "date": v.get("versionReleaseDate", ""),
                     "verified": True,
                     "tier": 1,
+                    "release_row": release_row(v),
                 }))
         scored.sort(key=lambda x: x[0], reverse=True)
         return [d for _, d in scored[:limit]]
@@ -328,7 +360,7 @@ def fetch_live_reddit(query, limit=5):
                 }))
         scored.sort(key=lambda x:x[0], reverse=True)
         return [d for _,d in scored[:limit]]
-    except:
+    except Exception:
         return []
 
 def fetch_live_cve(query, limit=3):
@@ -347,7 +379,7 @@ def fetch_live_cve(query, limit=3):
             "date": p.get("created_utc","")[:10],
             "detail": (p.get("author_description") or "")[:150],
         } for p in posts]
-    except:
+    except Exception:
         return []
 
 import xml.etree.ElementTree as ET
@@ -436,7 +468,7 @@ def fetch_github_releases(query, limit=4):
                         "date":      rel.get("published_at","")[:10],
                         "detail":    (rel.get("body","") or "")[:150],
                     })
-            except:
+            except Exception:
                 pass
         return results
     except Exception as e:
@@ -638,27 +670,97 @@ import requests as requests
 _VENDOR_NAMES    = []   # from /api/c/names        — 14,223 products
 _SUBREDDIT_NAMES = []   # from /api/reddit/meta/subreddits — 628 subreddits
 _VENDORS_LOADED  = False
+_CATALOG_SOURCE  = "unloaded"   # "live", "cache", "bundled" or "unloaded"
+_CATALOG_ERRORS  = []           # why the live fetch was not used, if it was not
+# Epoch before which a load that produced nothing at all will not be retried.
+# Only reached when the live endpoint AND the local catalog both fail, which
+# leaves _VENDORS_LOADED False by design -- without a floor, every question
+# then pays the live timeout again.
+_CATALOG_RETRY_AFTER = 0.0
+CATALOG_RETRY_SECONDS = 60.0
+
+
+def catalog_status() -> dict:
+    """Where the vendor vocabulary came from, and what failed to load.
+
+    extract_vendor returns [] both when a query names no product and when it
+    could not find out, and those mean opposite things: the first is a
+    finding, the second is an outage wearing its clothes. Nothing could tell
+    them apart, because a failed fetch left the list empty and said so only on
+    stdout, which nothing reads on a deployed host.
+    """
+    return {
+        "source": _CATALOG_SOURCE,
+        "vendors": len(_VENDOR_NAMES),
+        "subreddits": len(_SUBREDDIT_NAMES),
+        "errors": list(_CATALOG_ERRORS),
+        "degraded": _CATALOG_SOURCE not in ("live",),
+    }
+
 
 def load_vendor_lists():
-    """Cache vendor + subreddit lists once at startup."""
+    """Cache vendor + subreddit lists once, live if possible and locally if not.
+
+    A failed fetch used to leave _VENDOR_NAMES empty and set _VENDORS_LOADED
+    anyway, so one timeout at startup meant no vendor matched anything for the
+    life of the process -- every question answered unscoped, silently, until
+    someone restarted it. On a host that had never reached the endpoint at all
+    that was every question.
+
+    The disk cache and bundled list vendor.load_catalog() already maintains
+    are the answer to that; this module simply did not use them. 5613 names
+    cached against 74 bundled here today, either of which scopes a search
+    better than nothing does.
+    """
     global _VENDOR_NAMES, _SUBREDDIT_NAMES, _VENDORS_LOADED
-    if _VENDORS_LOADED:
+    global _CATALOG_SOURCE, _CATALOG_ERRORS, _CATALOG_RETRY_AFTER
+    # Not latching the empty case is what stops one timeout poisoning the
+    # process; the cost is that the empty case retries, and the live fetch it
+    # retries is a 15 s timeout when the endpoint is down. Both have to hold,
+    # so the retry is floored rather than removed: a host that can reach
+    # neither the endpoint nor a local catalog tries once a minute instead of
+    # once a question.
+    if _VENDORS_LOADED or time.time() < _CATALOG_RETRY_AFTER:
         return
+    _CATALOG_ERRORS = []
     try:
         r1 = requests.get("https://releasetrain.io/api/c/names", timeout=15)
+        r1.raise_for_status()
         _VENDOR_NAMES = [v.lower() for v in r1.json() if isinstance(v, str)]
+        _CATALOG_SOURCE = "live"
         print(f"  Loaded {len(_VENDOR_NAMES)} vendor names")
     except Exception as e:
-        print(f"  Warning: could not load vendor names: {e}")
+        _CATALOG_ERRORS.append(f"vendor names: {type(e).__name__}: {e}")
+        try:
+            # fetch=False: the live endpoint just refused, and asking it again
+            # through another door would only spend the timeout twice.
+            import vendor as _vendor_catalog
+            _VENDOR_NAMES = [v.lower() for v in _vendor_catalog.load_catalog(fetch=False)]
+            _CATALOG_SOURCE = "cache" if len(_VENDOR_NAMES) > 100 else "bundled"
+            print(f"  Vendor names unavailable ({e}); using {len(_VENDOR_NAMES)} "
+                  f"from the local catalog")
+        except Exception as inner:
+            _CATALOG_ERRORS.append(f"local catalog: {type(inner).__name__}: {inner}")
+            _CATALOG_SOURCE = "unloaded"
+            print(f"  Warning: could not load vendor names: {e}")
 
     try:
         r2 = requests.get("https://releasetrain.io/api/reddit/meta/subreddits", timeout=15)
+        r2.raise_for_status()
         _SUBREDDIT_NAMES = [s.lower() for s in r2.json().get("data", []) if isinstance(s, str)]
         print(f"  Loaded {len(_SUBREDDIT_NAMES)} subreddit names")
     except Exception as e:
+        # No local equivalent for this one, and none is invented here: the
+        # subreddit list is the third matching step, after aliases and vendor
+        # names, so losing it narrows the match rather than removing it.
+        _CATALOG_ERRORS.append(f"subreddits: {type(e).__name__}: {e}")
         print(f"  Warning: could not load subreddits: {e}")
 
-    _VENDORS_LOADED = True
+    # Only remember a load that produced a vocabulary. Caching the empty case
+    # is what turned one timeout into a process that never matched again.
+    _VENDORS_LOADED = bool(_VENDOR_NAMES)
+    if not _VENDORS_LOADED:
+        _CATALOG_RETRY_AFTER = time.time() + CATALOG_RETRY_SECONDS
 
 # Common aliases — maps query terms to canonical vendor names
 VENDOR_ALIASES = {
@@ -1054,6 +1156,7 @@ def fetch_vendor_releases(vendor: str, limit: int = 10, target_date: str = None)
                 "verified":  True,
                 "tier":      1,
                 "vendor":    vendor,
+                "release_row": release_row(v),
             })
         return results
     except Exception as e:
@@ -1445,6 +1548,96 @@ def _norm_url(u) -> str:
     return u.rstrip("/")
 
 
+def gather_sources(rewritten_query: str, original_query: str = "",
+                   vendors=(), union: bool = True, log=None) -> dict:
+    """Fetch every live source, returned in named buckets.
+
+    Lifted out of `RetrieverAgent.run` verbatim so the demo app can retrieve
+    from the same sources the terminal does. It used to have three fetchers of
+    its own against releasetrain.io while this had twelve, so a question whose
+    answer lived in Google News or the CISA catalogue was unanswerable in the
+    app and answered in the terminal -- and no amount of reranking fixes a
+    document that was never fetched. Two callers, one source list, so they
+    cannot drift apart again.
+
+    Buckets rather than tiers: the caller decides how to tier and rank them.
+    `log` takes the progress lines (the CLI passes `print`); None is silent.
+    """
+    if log is None:
+        log = lambda *_a, **_k: None  # noqa: E731
+
+    # ── STEP 2: Targeted vendor queries (if vendor found) ──
+    vendor_releases = []
+    vendor_reddit   = []
+    # Extract date from query if present
+    target_date = extract_date_from_query(rewritten_query)
+    if target_date:
+        log(f"  Date     : Detected → {target_date}")
+
+    if vendors:
+        # Expand vendor to related subreddits for better coverage
+        rel_calls, red_calls = [], []
+        for v in vendors[:2]:  # max 2 vendors
+            log(f"  Fetching : releasetrain.io/api/c/name/{v} ...")
+            rel_calls.append(lambda v=v: fetch_vendor_releases(v, limit=8, target_date=target_date))
+            # Search all related subreddits for this vendor
+            subs_to_search = VENDOR_SUBREDDITS.get(v, [v])
+            for sub in subs_to_search[:3]:
+                log(f"  Fetching : releasetrain.io/api/reddit/by-subreddit?q={sub} ...")
+                # Same rewrite-augments-search rule as the general sources
+                # below: the subreddit filter is keyed on the vendor, but
+                # the ranking within it is keyed on the query wording, so
+                # both phrasings have to be asked for.
+                red_calls.append(lambda sub=sub: fetch_vendor_reddit(sub, query=rewritten_query, limit=8))
+                if union and original_query and original_query.strip().lower() != rewritten_query.strip().lower():
+                    red_calls.append(lambda sub=sub: fetch_vendor_reddit(sub, query=original_query, limit=8))
+        for r in _gather(rel_calls): vendor_releases += r
+        for r in _gather(red_calls): vendor_reddit += r
+
+    # ── STEP 3: General sources, fetched for BOTH phrasings ──
+    # Measured on the 10-question ground-truth set: 22 of the 23 relevant
+    # documents the single-agent baseline retrieved were never fetched by
+    # this pipeline at all, because the rewrite *replaced* the user's
+    # wording at fetch time. Reranking cannot recover a document that was
+    # never in the pool, so the rewrite must augment the search rather than
+    # substitute for it. Both phrasings are searched and the pools unioned.
+    search_queries = [rewritten_query]
+    if union and original_query and original_query.strip().lower() != rewritten_query.strip().lower():
+        search_queries.append(original_query)
+
+    gen_releases, gen_apple, gen_cisa, gen_circl = [], [], [], []
+    gen_cve, gen_llm, gen_reddit, gen_news = [], [], [], []
+
+    # Gate on the question before spending a round trip per search term.
+    # Check the original wording too: a rewrite can drop the model name.
+    _wants_llm = query_mentions_llm(f"{original_query or ''} {rewritten_query}")
+    _sinks = {"releases": gen_releases, "apple": gen_apple, "cisa": gen_cisa,
+              "circl": gen_circl, "cve": gen_cve, "llm": gen_llm,
+              "reddit": gen_reddit, "news": gen_news}
+    _calls = []   # (sink, thunk), in the order the sequential loop appended
+    for qi, q in enumerate(search_queries):
+        tag = "rewritten" if qi == 0 else "original"
+        log(f"  Fetching : general sources for {tag} query ...")
+        if not vendor_releases:
+            _calls.append(("releases", lambda q=q: fetch_live_releases(q, limit=4)))
+        _calls.append(("apple", lambda q=q: fetch_apple_rss(q, limit=3)))
+        _calls.append(("cisa",  lambda q=q: fetch_cisa_kev(q, limit=2)))
+        _calls.append(("circl", lambda q=q: fetch_circl_apple(q, limit=2)))
+        _calls.append(("cve",   lambda q=q: fetch_live_cve(q, limit=2)))
+        if _wants_llm:
+            _calls.append(("llm", lambda q=q: fetch_llm_releases(q, limit=3, gate=False)))
+        if not vendor_reddit:
+            _calls.append(("reddit", lambda q=q: fetch_live_reddit(q, limit=3)))
+        _calls.append(("news",  lambda q=q: fetch_google_news(q, limit=2)))
+    for (sink, _), r in zip(_calls, _gather([c for _, c in _calls])):
+        _sinks[sink] += r
+
+    return {"vendor_releases": vendor_releases, "vendor_reddit": vendor_reddit,
+            "gen_releases": gen_releases, "gen_apple": gen_apple,
+            "gen_cisa": gen_cisa, "gen_circl": gen_circl, "gen_cve": gen_cve,
+            "gen_llm": gen_llm, "gen_reddit": gen_reddit, "gen_news": gen_news}
+
+
 class RetrieverAgent:
     name = "📚  Retriever Agent"
 
@@ -1491,77 +1684,18 @@ class RetrieverAgent:
         else:
             print(f"  Vendor   : None detected — using general search")
 
-        # ── STEP 2: Targeted vendor queries (if vendor found) ──
-        vendor_releases = []
-        vendor_reddit   = []
-        # Extract date from query if present
-        target_date = extract_date_from_query(rewritten_query)
-        if target_date:
-            print(f"  Date     : Detected → {target_date}")
-
-        if vendors:
-            # Expand vendor to related subreddits for better coverage
-            rel_calls, red_calls = [], []
-            for v in vendors[:2]:  # max 2 vendors
-                print(f"  Fetching : releasetrain.io/api/c/name/{v} ...")
-                rel_calls.append(lambda v=v: fetch_vendor_releases(v, limit=8, target_date=target_date))
-                # Search all related subreddits for this vendor
-                subs_to_search = VENDOR_SUBREDDITS.get(v, [v])
-                for sub in subs_to_search[:3]:
-                    print(f"  Fetching : releasetrain.io/api/reddit/by-subreddit?q={sub} ...")
-                    # Same rewrite-augments-search rule as the general sources
-                    # below: the subreddit filter is keyed on the vendor, but
-                    # the ranking within it is keyed on the query wording, so
-                    # both phrasings have to be asked for.
-                    red_calls.append(lambda sub=sub: fetch_vendor_reddit(sub, query=rewritten_query, limit=8))
-                    if union and original_query and original_query.strip().lower() != rewritten_query.strip().lower():
-                        red_calls.append(lambda sub=sub: fetch_vendor_reddit(sub, query=original_query, limit=8))
-            for r in _gather(rel_calls): vendor_releases += r
-            for r in _gather(red_calls): vendor_reddit += r
-
-        # ── STEP 3: General sources, fetched for BOTH phrasings ──
-        # Measured on the 10-question ground-truth set: 22 of the 23 relevant
-        # documents the single-agent baseline retrieved were never fetched by
-        # this pipeline at all, because the rewrite *replaced* the user's
-        # wording at fetch time. Reranking cannot recover a document that was
-        # never in the pool, so the rewrite must augment the search rather than
-        # substitute for it. Both phrasings are searched and the pools unioned.
-        search_queries = [rewritten_query]
-        if union and original_query and original_query.strip().lower() != rewritten_query.strip().lower():
-            search_queries.append(original_query)
-
-        gen_releases, gen_apple, gen_cisa, gen_circl = [], [], [], []
-        gen_cve, gen_llm, gen_reddit, gen_news = [], [], [], []
-
-        # Gate on the question before spending a round trip per search term.
-        # Check the original wording too: a rewrite can drop the model name.
-        _wants_llm = query_mentions_llm(f"{original_query or ''} {rewritten_query}")
-        _sinks = {"releases": gen_releases, "apple": gen_apple, "cisa": gen_cisa,
-                  "circl": gen_circl, "cve": gen_cve, "llm": gen_llm,
-                  "reddit": gen_reddit, "news": gen_news}
-        _calls = []   # (sink, thunk), in the order the sequential loop appended
-        for qi, q in enumerate(search_queries):
-            tag = "rewritten" if qi == 0 else "original"
-            print(f"  Fetching : general sources for {tag} query ...")
-            if not vendor_releases:
-                _calls.append(("releases", lambda q=q: fetch_live_releases(q, limit=4)))
-            _calls.append(("apple", lambda q=q: fetch_apple_rss(q, limit=3)))
-            _calls.append(("cisa",  lambda q=q: fetch_cisa_kev(q, limit=2)))
-            _calls.append(("circl", lambda q=q: fetch_circl_apple(q, limit=2)))
-            _calls.append(("cve",   lambda q=q: fetch_live_cve(q, limit=2)))
-            if _wants_llm:
-                _calls.append(("llm", lambda q=q: fetch_llm_releases(q, limit=3, gate=False)))
-            if not vendor_reddit:
-                _calls.append(("reddit", lambda q=q: fetch_live_reddit(q, limit=3)))
-            _calls.append(("news",  lambda q=q: fetch_google_news(q, limit=2)))
-        for (sink, _), r in zip(_calls, _gather([c for _, c in _calls])):
-            _sinks[sink] += r
+        # STEPS 2 and 3 -- every live source, in named buckets. Shared with the
+        # demo app so the two cannot retrieve from different source lists.
+        src = gather_sources(rewritten_query, original_query=original_query,
+                             vendors=vendors, union=union, log=print)
 
         # ── Tier 1: vendor-specific first, then general verified ──
-        tier1 = dedupe_docs(vendor_releases + gen_releases + gen_apple
-                            + gen_cisa + gen_circl + gen_cve + gen_llm)
+        tier1 = dedupe_docs(src["vendor_releases"] + src["gen_releases"]
+                            + src["gen_apple"] + src["gen_cisa"]
+                            + src["gen_circl"] + src["gen_cve"] + src["gen_llm"])
         # ── Tier 2: vendor reddit first, then general community ──
-        tier2 = dedupe_docs(vendor_reddit + gen_reddit + gen_news, seen=doc_keys(tier1))
+        tier2 = dedupe_docs(src["vendor_reddit"] + src["gen_reddit"]
+                            + src["gen_news"], seen=doc_keys(tier1))
 
         # ── Screen the pool: a fetched row is data, never instruction ──
         # `union_fetch` screens the demo app's pool, but this class is what the
@@ -1988,6 +2122,27 @@ Answer:"""
 # MANAGER AGENT — ORCHESTRATOR
 # ─────────────────────────────────────────────────────────────
 
+def plan_rounds(query: str, ceiling: int = None) -> int:
+    """How many retrieve-evaluate rounds this question is worth.
+
+    The budget only ever goes UP: a plain lookup gets the usual MAX_ROUNDS,
+    a comparison or multi-clause question gets one extra round to spend. It
+    never goes below the default, because a negative RLAIF signal on an easy
+    question is exactly when the retry pays -- budgeting that away would make
+    the loop worse on the questions it was built for.
+
+    Deterministic: no extra LLM call to decide how much LLM work to do.
+    """
+    if ceiling is None:
+        ceiling = ManagerAgent.MAX_ROUNDS
+    q = query.lower()
+    complex_q = (len(extract_vendor(query)) > 1
+                 or re.search(r"\b(vs|versus|compare|difference|both|either)\b", q)
+                 or q.count("?") > 1
+                 or len(q.split()) > 25)
+    return ceiling + 1 if complex_q else ceiling
+
+
 def orchestrate(rewriter, retriever, evaluator, query: str, top_k: int = 4,
                 union: bool = True, max_rounds: int = None) -> dict:
     """ManagerAgent's retrieve-evaluate-retry loop, with everything it saw.
@@ -2059,9 +2214,11 @@ class ManagerAgent:
         print(f"    Step 2 → delegate to Retriever Agent")
         print(f"    Step 3 → delegate to Evaluator Agent (RLAIF)")
         print(f"    Step 4 → if quality low, trigger retry")
+        budget = plan_rounds(query, self.MAX_ROUNDS)
+        print(f"    Budget: {budget} round(s) (default {self.MAX_ROUNDS})")
 
         return orchestrate(self.rewriter, self.retriever, self.evaluator,
-                           query, top_k=4, max_rounds=self.MAX_ROUNDS)["result"]["answer"]
+                           query, top_k=4, max_rounds=budget)["result"]["answer"]
 
 # ─────────────────────────────────────────────────────────────
 # RUNNER
@@ -2070,30 +2227,45 @@ class ManagerAgent:
 def show_why():
     print()
     bar("═")
-    print("  WHY MULTI-AGENT? The core argument")
+    print("  WHAT THE MEASUREMENTS SAY — and what they said before")
     bar("═")
     print("""
-  SINGLE AGENT (the problem):
-    → One model does everything
-    → Gets confused mixing rewriting + retrieval + evaluation
-    → No specialization = shallow, generic answers
-    → If one thing fails, everything fails
+  THE CLAIM WE STARTED WITH:
+    → Specialized agents (rewrite / retrieve / evaluate / orchestrate)
+      beat a single-agent baseline by 17.2% on retrieval quality
+    → That number came from a keyword-overlap score of our own design
 
-  MULTI-AGENT (the solution):
-    → Each agent has ONE job and does it well
-    → Manager coordinates — like a research team lead
-    → Rewriter uses real Llama 3.1 LLM (running on your Mac)
-    → RLAIF evaluator catches bad results and retries
-    → Transparent, explainable, extensible
+  DEFECT 1 — the rewrite replaced the user's wording:
+    → The rewritten query went to every retrieval endpoint alone, so
+      documents matching the user's own phrasing were never fetched
+    → Re-scored with nDCG@3 over pooled judgments, multi-agent LOST:
+      0.145 vs 0.765 baseline (paired deficit 0.620, Wilcoxon p=0.016, n=10)
+    → Fixed by issuing both phrasings and unioning the pools → parity
 
-  YOUR RESEARCH (6-phase roadmap):
-    Phase 2  →  Query Rewriter Agent  (Llama 3.1 — live now!)
-    Phase 3  →  Manager orchestration (CrewAI — next step)
-    Phase 4  →  Retriever Agent       (FAISS + BGE-Large)
-    Phase 5  →  Evaluator Agent       (RLAIF / Zero-HF)
+  DEFECT 2 — the benchmark leaked its own answer key:
+    → Questions are titles of real community posts; the live corpus
+      returns the post the title came from, and the judge calls it relevant
+    → That post sat in 72–98% of every top-k list we had reported on
+    → Invisible to paired comparison: every arm drew on it equally
+
+  WHAT IS LEFT, LEAK-FREE (n=500, 24 ecosystems, flat ranking):
+    → multi-agent 0.496 vs single-agent 0.490 nDCG@3 — a match, not a win
+      (Δ +0.006, 95% CI [-0.009, +0.021], 43 won / 410 tied / 47 lost)
+    → no paired difference exceeds 0.018, none survives Holm, at roughly
+      twice the latency (0.28s vs 0.12s)
+    → the faithfulness gap was an answer-FORMAT artifact: same retrieval
+      as prose scores 0.900 vs the baseline's 0.897 (Δ +0.003, n.s.);
+      rendered as a template it drops to 0.837 (Δ -0.059, p<0.001)
+
+  SO WHY RUN THIS PIPELINE AT ALL?
+    → Decomposition per se is not what produced the original result
+    → What the architecture buys is inspectability: every stage below
+      prints its own input, output, and score — which is how both
+      defects were found in the first place
     """)
 
 DEMO_QUERIES = [
+    "Which is more stable, Teams or Zoom?",
     "What is the latest version of Linux?",
     "Siri fail to execute tasks when offline after iOS 26.4 update",
     "Updated to kernel 6.19.11 and now desktop doesnt load",
@@ -2130,7 +2302,7 @@ def _pause(prompt: str) -> str:
 
 def show_commands():
     print("  Commands:")
-    print("    'why'  — show why multi-agent matters (start here!)")
+    print("    'why'  — what the measurements say (start here!)")
     print("    'demo' — run all 3 demo queries")
     print("    'auto' — AUTO MODE: fetch live Reddit questions and answer them")
     print("    'help' — show this list again")

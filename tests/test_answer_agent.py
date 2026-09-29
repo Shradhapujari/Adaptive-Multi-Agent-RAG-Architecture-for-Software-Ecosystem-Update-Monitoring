@@ -500,12 +500,24 @@ def test_top_voted_comment_is_cited_first():
     assert "reinstall grub2-efi" in ev[0].detail
 
 
-def test_community_posts_are_ordered_by_upvotes():
+def test_community_posts_are_cited_in_ranked_order():
+    """Replaces a test that pinned upvote order, which no longer holds.
+
+    Upvotes ranked the pool back when every row was a Reddit post and the
+    pool reached `collect_evidence` in feed order. Neither is true now: the
+    pool arrives ranked for relevance, and a press article or an advisory
+    carries score 0 by construction. Sorting on upvotes moved every
+    non-Reddit source behind every Reddit one and then cut at `per_kind`,
+    which is how the Google News article that answered a question could be
+    retrieved, ranked first, and still not cited.
+    """
     results = {"community": [
-        {"title": "quiet one", "subreddit": "linux", "score": 3},
-        {"title": "the one everyone agreed with", "subreddit": "linux", "score": 99},
+        {"title": "the article that answers it", "subreddit": "Wccftech",
+         "source": "google_news", "score": 0},
+        {"title": "the one everyone agreed with", "subreddit": "linux",
+         "score": 99},
     ]}
-    assert "everyone agreed" in collect_evidence(results, per_kind=1)[0].title
+    assert "answers it" in collect_evidence(results, per_kind=1)[0].title
 
 
 def test_rule_based_answer_is_one_sentence_off_the_top_comment():
