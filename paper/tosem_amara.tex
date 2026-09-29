@@ -277,7 +277,12 @@ pooled-judgment methodology we adopted to escape the first, because it inflated
 every arm by the same amount. We report the procedure that found each --- expose
 the candidate pool and count documents rather than read scores; re-run identical
 questions at an interval and treat a moving absolute level as a finding --- and
-the leak-free measurement that results.
+the leak-free measurement that results. Both procedures are human ones. Neither
+defect was reachable by a check the pipeline could run on itself: the first hid
+inside components that were each behaving correctly, the second inside
+statistics that were each computed correctly. Section~\ref{sec:human} collects
+what the four defects and their measurements imply about where a person has to
+remain in a loop otherwise designed to run without one.
 
 \subsection{Contributions}
 
