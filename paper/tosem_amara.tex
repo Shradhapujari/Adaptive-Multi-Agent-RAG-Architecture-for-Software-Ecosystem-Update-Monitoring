@@ -1150,7 +1150,9 @@ are tractable at that size. The \emph{benchmark} set is the 500 questions of
 Section~\ref{sec:benchmark}, from which a 100-question subset balanced across
 category and ecosystem carries the scaled evaluation
 (Section~\ref{sec:scaled-eval}), the first 300 carry the large live run, and
-all 500 carry the leak-free measurement (Section~\ref{sec:leak}). Sample sizes are stated with every reported
+all 500 carry the leak-free measurement (Section~\ref{sec:leak}); the same
+construction extends to 1{,}000 questions, on which the parity result is
+repeated (Section~\ref{sec:tier-control}). Sample sizes are stated with every reported
 number, since they differ across these three. The local fallback dataset contains 324 Reddit
 posts collected through the software ecosystem data lake and filtered
 using minimum quality criteria of at least 10 comments, 3 author
@@ -1177,10 +1179,13 @@ baseline and a memoryless, retry-free multi-agent pipeline, which is the
 configuration the union-fetch finding concerns. The retry and the memory are
 measured only where Section~S11 of the supplementary material says they are.
 
-All experiments were performed using Llama~3.1~8B executed through
-Ollama with temperature set to zero. The evaluation platform consisted
-of Apple Silicon hardware with 24\,GB memory and Metal GPU
-acceleration.
+Unless a section states otherwise, generation and judging use Llama~3.1~8B
+through Ollama at temperature zero. Two later measurements depart from that
+deliberately: the ladder of Section~\ref{sec:ladder-results} synthesises with
+Mistral and judges with \texttt{qwen2.5:7b-instruct}, and the grading cascade of
+Sections~\ref{sec:tier} and~\ref{sec:efficiency} grades candidates with
+\texttt{qwen2.5:7b-instruct}. The evaluation platform was Apple Silicon
+hardware with 24\,GB memory and Metal GPU acceleration.
 
 \subsection{Arm Comparability and the Ablation Ladder}\label{sec:ladder}
 
