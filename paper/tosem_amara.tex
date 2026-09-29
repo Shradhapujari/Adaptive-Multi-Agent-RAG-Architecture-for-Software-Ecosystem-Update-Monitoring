@@ -277,7 +277,12 @@ pooled-judgment methodology we adopted to escape the first, because it inflated
 every arm by the same amount. We report the procedure that found each --- expose
 the candidate pool and count documents rather than read scores; re-run identical
 questions at an interval and treat a moving absolute level as a finding --- and
-the leak-free measurement that results.
+the leak-free measurement that results. Both procedures are human ones. Neither
+defect was reachable by a check the pipeline could run on itself: the first hid
+inside components that were each behaving correctly, the second inside
+statistics that were each computed correctly. Section~\ref{sec:human} collects
+what the four defects and their measurements imply about where a person has to
+remain in a loop otherwise designed to run without one.
 
 \subsection{Contributions}
 
@@ -2633,6 +2638,142 @@ against fluent prose is partly scoring fluency. Any evaluation of an agentic
 system that emits structured output against a baseline that emits prose is
 exposed to this, and detecting it required constructing an arm for no purpose
 other than removing the confound.
+
+\subsection{Where the Human Was Required}\label{sec:human}
+
+This paper reports four defects. Each was found by a person, and in each case
+the automation that should have found it was not merely absent but
+\emph{structurally incapable} of finding it. That pattern is worth stating
+separately from the defects, because it is the part that transfers to any
+agentic pipeline, and because it locates where a human has to remain in a loop
+that is otherwise designed to run without one.
+
+We are not reporting a study of human--AI collaboration. No participants were
+recruited and no interaction was measured. What follows is a retrospective
+account of a system that was built, measured, corrected, and measured again,
+read for the question of what the automation could not do for itself. Its
+evidence is the four failures and their measurements; its claim is about the
+\emph{kind} of blindness each one represents.
+
+\subsubsection{Four Blind Spots, and What Each One Hides}
+
+\textbf{Component testing cannot see a wiring fault.} Every agent in the
+pipeline did its own job correctly: the rewriter produced good rewrites, the
+retriever faithfully queried what it was given, the reranker correctly ordered
+what it received. The defect lived in what one agent handed another --- the
+rewritten query \emph{replacing} the user's question at every endpoint --- and
+22 of the 23 relevant documents were never fetched
+(Section~\ref{sec:localizing}). No unit test of any component fails on this,
+because no component is wrong. The diagnosis required exposing the pre-rerank
+candidate pool and counting documents in it, which is an inspection of the
+\emph{seams} rather than of the parts.
+
+\textbf{The system's own quality signal can move the wrong way with
+confidence.} The bespoke retrieval score rose 17.2\% when the architecture was
+introduced (Section~\ref{sec:two-metrics}). That is the number a designer
+checks, and it was measuring the correlation between a metric and the
+vocabulary the rewriting agent produced. A score computed over the retrieved
+set cannot report documents that were never retrieved: their absence is not an
+observation it is capable of making. An agent cannot audit a measure whose
+blind spot it occupies.
+
+\textbf{Paired statistics cannot see a bias that inflates every arm equally.}
+The benchmark's questions were mined from the corpus the system retrieves from,
+so every arm retrieved the question's own source post at the same rate. Pooled
+judging, frozen corpora, and Holm-corrected Wilcoxon tests all worked exactly
+as designed on a quantity that was largely a lookup (Section~\ref{sec:leak}).
+The leak appeared only in the \emph{absolute level}, and the level is the one
+thing a frozen-corpus protocol teaches practitioners not to compare across
+runs. It was caught because a person noticed that the same 300 questions scored
+0.33 lower two weeks later and treated a moving level as a finding rather than
+as noise.
+
+\textbf{A coherent explanation can absorb the evidence against it.} Query
+rewriting is motivated in the literature by vocabulary mismatch, so a deficit
+after rewriting invites a ranking explanation. We pursued it, built three
+rerankers, and raised MRR by 150\% without materially moving nDCG. The
+literature, the mechanism, and the measurement agreed with each other, and what
+they agreed on was the wrong document (Section~\ref{sec:generalizes}). Nothing
+in the pipeline was positioned to distrust a story that fit; the residual gap
+had to be noticed by someone willing to hold a plausible diagnosis open.
+
+\subsubsection{The Agent Cannot Ask for Help It Cannot Recognise Needing}
+
+The architecture has an escalation mechanism, and it is the capability a single
+agent structurally lacks: the Evaluator scores retrieval quality and the
+Orchestrator retries when that score falls below a threshold. Across 500
+questions the score never fell below 0.300 against a threshold of 0.15, and
+zero retries fired (Section~\ref{sec:retry}). The gate is not conservative; it
+is closed. Any retrieval returning one recognised document is floored at twice
+the threshold, and the union fetch returns one for every question in this
+benchmark.
+
+The general form of this is worth separating from our implementation. A
+self-assessment built from the same evidence the system already trusts will
+tend to be confident exactly where the system is wrong, because the failure and
+the confidence have a common cause. An escalation path conditioned on that
+self-assessment inherits the blindness. This is the mechanism behind a familiar
+practical complaint --- that agentic systems fail silently rather than asking
+--- expressed here as a measurement rather than an impression: a threshold that
+the scoring function makes unreachable, and a rung of the ablation ladder that
+could not execute as built.
+
+\subsubsection{What the Metrics Do Not Score, and Humans Need}
+
+Two capabilities the architecture has are invisible to every metric in this
+paper, and both exist for a person rather than for a benchmark.
+
+The first is \emph{traceability}. When an answer is wrong, the decomposition
+localises the fault to vendor extraction, query reformulation, retrieval
+coverage, evaluation, or synthesis (Section~\ref{sec:decomposition}). nDCG does
+not score this, and the parity result of Section~\ref{sec:tier-control} does not
+capture it. For a system intended to be maintained rather than benchmarked once,
+the ability to answer ``which stage failed'' is what makes the next repair
+possible --- and the audience for that answer is a maintainer.
+
+The second is \emph{abstention}. On 273 of 500 questions no arm retrieves a
+document the judge accepts (Section~\ref{sec:leak}). Returning ``the retrieved
+sources do not answer this'' is a hand-back: it tells a person that the
+question needs them. In a maintenance context that is preferable to a confident
+wrong version number, and the CRAG-style scoring we implement rewards the
+asymmetry --- but our ground-truth coverage is too small for it to carry weight,
+so the paper cannot claim the benefit it can describe. A system that abstains
+well is collaborating; a metric that ignores abstention will not notice.
+
+\subsubsection{Evaluation Is the Loop That Did Not Close}
+
+The judge is the clearest case, because we tested it. All relevance judgments
+here were produced by \texttt{llama3.1}, which also synthesises two of the three
+arms. Re-scoring every judgment with a different model family leaves the
+ordering intact and every paired difference's sign unchanged, and per-label
+agreement is $\kappa=0.370$ (Section~\ref{sec:threats}). The ordering survived
+automated replacement; the \emph{labels} did not agree, and the disagreement is
+one-directional, which two language models cannot settle between themselves. No
+human-assessor sample was drawn, and that omission is not a gap in diligence but
+the structural limit of the design: an automated evaluation of an automated
+system can establish that a result is robust to the choice of automaton, and
+cannot establish that it is right.
+
+\subsubsection{Where This Leaves the Division of Labour}
+
+Read together, the four blind spots have one shape. Each automated check was
+sound within its own frame --- the unit test about its component, the metric
+about its retrieved set, the paired test about its difference, the literature
+about its mechanism --- and each was blind to something outside that frame. The
+human contributions in this project were not better versions of those checks.
+They were changes of frame: inspect the seam rather than the part, count
+documents rather than read scores, treat a moving absolute level as evidence,
+and hold a fitting explanation open.
+
+We therefore suggest that agentic pipelines be instrumented for the frame
+change rather than only for the task: expose the pre-ranking candidate set so
+that ``mis-ordered'' and ``never retrieved'' are separable without a person
+reading code; report absolute levels alongside paired deltas so that a drift is
+visible without a person remembering a number from two weeks ago; and treat a
+self-assessment that never triggers as a defect report rather than as evidence
+of health. None of this removes the human. It lowers the cost of the moments
+when the human is the only component that can act, which on the evidence of
+this paper are the moments that decide whether a measurement means anything.
 
 \subsection{Observations That Survive}\label{sec:survives}
 
