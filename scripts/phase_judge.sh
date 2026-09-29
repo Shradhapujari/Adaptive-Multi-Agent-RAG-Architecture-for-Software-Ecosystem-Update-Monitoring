@@ -63,7 +63,8 @@ MARAG_RANK_TIERS=flat \
 echo
 echo "Labels: $WT/results/qrels_cache.json   (gpt-4o only, by construction)"
 echo "Against: $ROOT/results/qrels_cache.json  (llama3.1)"
-echo "Report BOTH judges' system orderings side by side, plus per-label Cohen's"
-echo "kappa over the pairs they both judged. The claim the paper needs is that"
-echo "the ORDERING survives; per-label agreement is expected to be poor and"
-echo "Section 5.5 already says so."
+echo "Now read it:"
+echo "    python scripts/judge_compare.py --b $WT/results/qrels_cache.json"
+echo "It reports both judges' system orderings side by side and per-label kappa."
+echo "The claim the paper needs is that the ORDERING survives; per-label"
+echo "agreement is expected to be poor and Section 5.5 already says so."
