@@ -1,0 +1,36 @@
+# Runs the test suite on every PR. There was no CI before this: the only thing
+# standing behind a merge was whoever remembered to run pytest locally.
+#
+# 3.11 is the version venv311 pins and every number in results/ was produced
+# under. No Ollama on the runner -- the pipeline degrades to its rule-based
+# fallbacks by design (see requirements.txt), so the suite is expected to pass
+# without a model. If a test ever needs one, skip it here rather than
+# installing a model into CI.
+#
+# The runner needs no egress and no secrets: tests/conftest.py blocks outbound
+# sockets, so anything that reaches for the network fails loudly rather than
+# depending on a remote host being up. The vendor catalog tests read from
+# data/vendor_names.json, which is tracked for exactly this reason.
+#
+# Expect one skip on a clean checkout: test_run_artifacts.py has nothing to
+# check because results/run_*/ is gitignored. That skip is the design, not a
+# gap -- verified locally against requirements.txt alone: 799 passed, 1
+# skipped, 41 s.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m pytest tests -q
