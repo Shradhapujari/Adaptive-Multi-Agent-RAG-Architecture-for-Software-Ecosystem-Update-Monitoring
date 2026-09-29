@@ -985,10 +985,14 @@ Recorded so that a stale copy found in git history is recognisable as stale.
      the n=1,000 result with no setup for it. The benchmark paragraph now says
      the construction extends to 1,000.
 
-   One judgment call left for the author rather than taken here: the abstract
-   quotes the leak-free result at n=500 and never mentions the n=1,000 repeat,
-   which is the larger sample and the same answer. Whether that belongs in the
-   abstract is an editorial choice, not a defect.
+   The one judgment call the read surfaced — whether the n=1,000 repeat belongs
+   in the abstract — was taken by the author on 2026-09-29: it does, and it is
+   in. Worth knowing for anyone editing that paragraph: the n=1,000 run is a
+   *different configuration* (tier prior removed, grading cascade on every arm),
+   so its 0.485 level must never be set against the leak-free 0.30 as though the
+   number had moved. The abstract says "repeated under it", and that phrase is
+   load-bearing. It also says a 1,000-question *extension* of the benchmark,
+   because what the paper releases is the 500-question set.
 2. **Journal-first eligibility.** Whether the AgenticSE '26 proceedings status
    satisfies TOSEM's journal-first rules was never confirmed. Still open.
 3. **No head-to-head against published systems.** Researched, not started.
