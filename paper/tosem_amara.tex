@@ -1501,17 +1501,13 @@ each and covering 21 of the 24 software ecosystems. All 100 questions completed
 across all three systems.
 
 Three systems were run with the synthesis model held constant at Llama 3.1 8B,
-which isolates architecture from model:
-
-\begin{itemize}
-  \item \textbf{marag} --- the multi-agent pipeline as described, whose answer is
-  a template assembled by the Evaluator agent from the retrieved documents.
-  \item \textbf{marag\_llm} --- identical retrieval, but the answer is
-  synthesized in prose through the same prompt the baseline uses. This arm
-  exists solely so that answer-quality scores are comparable.
-  \item \textbf{single\_agent} --- the baseline: raw query, one retrieval pass,
-  one synthesis call.
-\end{itemize}
+which isolates architecture from model (Table~\ref{tab:ladder}):
+\texttt{marag}, the pipeline as described, whose answer is a template the
+Evaluator assembles from the retrieved documents; \texttt{marag\_llm}, identical
+retrieval with the answer synthesized in prose through the baseline's own
+prompt, an arm that exists solely so answer-quality scores are comparable; and
+\texttt{single\_agent}, the baseline --- raw query, one retrieval pass, one
+synthesis call.
 
 \begin{table}[t]
 \caption{Retrieval quality on the 100-question stratified benchmark subset
@@ -1894,7 +1890,8 @@ same abstention the prose arms make --- rendered under a ``VERIFIED from live
 APIs'' header and a list of version strings, and the judge scores that 0.7
 against a reference the answer does not contain. It is the judge-independence
 threat of Section~\ref{sec:threats} appearing as a false positive, and it wants
-a judge from a different model family before it means anything.
+a different-family judge on the \emph{answer} scores, which the re-judging
+reported there does not cover.
 
 \subsection{A Ranking Prior That Excluded the Corpus}\label{sec:tier}
 
