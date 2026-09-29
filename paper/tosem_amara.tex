@@ -2693,15 +2693,28 @@ separate 72\%~\cite{faggioli2023perspectives} --- so the significance reported
 in Section~\ref{sec:two-metrics} was obtained under a handicap rather than
 assisted by one.
 
-We took one mitigation and omit two. The answer-quality finding was re-judged by
-a second, different-family model (\texttt{qwen2.5:7b-instruct}) on 40 questions,
-and the format effect held at $+0.107$ versus $+0.111$, significant under both
-judges; that check is reported with the artifacts. The retrieval judgments were
-not re-scored by a second judge, and no human-assessor sample was drawn. Both
-are the obvious next steps, together with the adversarial ``gullibility''
-screening --- checking whether the judge can be fooled by query-string
-injection --- that Alaofi et al.\ show is not predicted by $\kappa$ and must be
-tested separately~\cite{alaofi2024fooled}.
+We took two mitigations and omit one. The answer-quality finding was re-judged
+by a second, different-family model (\texttt{qwen2.5:7b-instruct}) on 40
+questions, and the format effect held at $+0.107$ versus $+0.111$, significant
+under both judges. The retrieval judgments behind
+Table~\ref{tab:tier-control} were then re-scored in full by \texttt{mistral}, a
+different family from \texttt{llama3.1} with no part in that run --- its arms are
+\texttt{llama3.1} and its grading cascade \texttt{qwen2.5:7b-instruct}. All
+2{,}446 pairs across the 500 questions were relabelled.
+Every paired difference keeps its sign and three of four shrink: nDCG@3 $+0.006$
+under both judges, nDCG@5 $+0.010$ against $+0.007$, recall@5 $+0.018$ against
+$+0.009$, MRR $+0.008$ against $+0.004$. Agreement is $\kappa=0.370$ graded and $0.421$
+binary, inside the band cited above, and runs one way: \texttt{mistral} judges
+14.5\% of the pool relevant against \texttt{llama3.1}'s 33.2\%, demoting 499
+documents and promoting 40. They disagree about where the threshold sits, not
+about which documents are better, which is why absolute levels halve while every
+ordering holds. The parity result is robust to the choice of judge; it is not
+evidence that a stronger one would agree, since \texttt{mistral} is a 7B model
+run locally, and no human-assessor sample was drawn. Those remain the
+obvious next steps, with the adversarial ``gullibility'' screening --- whether
+the judge can be fooled by query-string injection --- that Alaofi et al.\ show
+is not predicted by $\kappa$ and must be tested
+separately~\cite{alaofi2024fooled}.
 
 \textbf{Benchmark validity.}
 The questions are real, and that is the source of the leak: they were mined
@@ -2789,8 +2802,9 @@ ecosystems and five question categories, mined from live release, advisory, and
 community sources.
 
 Future work includes head-to-head comparison against Self-RAG, CRAG, and
-Adaptive-RAG through the FlashRAG and RAGLAB toolkits; an independent judge to
-remove the model-family overlap between judge and system; evaluation on larger
+Adaptive-RAG through the FlashRAG and RAGLAB toolkits; a human-assessor sample and a stronger
+independent judge, the model-family overlap between judge and system having been
+removed only by a second local model (Section~\ref{sec:threats}); evaluation on larger
 and multilingual question sets, and across longer interaction histories, to
 establish whether retrieval-level adaptation scales and whether parity holds
 beyond these sources~\cite{yang2024,ranaldi2025,reuter2025}; replacement of the
