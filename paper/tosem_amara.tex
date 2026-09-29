@@ -3007,6 +3007,31 @@ including learned reward models and embedding-based matching; and stronger
 validation of community-derived information through agreement across multiple
 posts and source-credibility estimation.
 
+\section*{Generative AI Disclosure}
+
+Generative AI was used in this work in two distinct roles, and we state both
+because one of them is the object of study and the other is not.
+
+First, as components of the system under study. Llama~3.1, Mistral, and
+\texttt{nomic-embed-text}, run locally through Ollama, perform query rewriting,
+answer synthesis, relevance judging, and embedding, exactly as Section~\ref{sec:method}
+describes. \texttt{qwen2.5:7b-instruct} grades candidates in the cascade of
+Sections~\ref{sec:tier} and~\ref{sec:efficiency} and judges answers in the
+ladder of Section~\ref{sec:ladder-results}. These uses are measurements, not
+assistance, and every one of them is reported.
+
+Second, as engineering and editorial assistance. An AI coding assistant was used
+to implement and test parts of the evaluation harness, to analyse the saved run
+artifacts, and to draft and revise portions of this manuscript, including
+passages that survive in the submitted text. Its use was substantial rather than
+incidental. Every experimental design decision, every choice of what to measure
+and what to retract, and every interpretation of a result is the authors'. The
+authors verified each reported number against the run artifacts that produced
+it --- the mapping is in the artifact's \texttt{PROVENANCE.md} --- and take full
+responsibility for the content, including the passages an assistant drafted.
+
+No AI system is listed as an author, in accordance with ACM policy.
+
 \section*{Acknowledgments}
 
 We thank the maintainers of public software ecosystem data sources,
