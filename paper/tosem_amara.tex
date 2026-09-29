@@ -78,20 +78,19 @@ Update Monitoring}
 
 \begin{abstract}
 Software ecosystems produce release notes, security advisories, version control
-records, and community discussions, and answering a question about a software
-update usually requires combining several of them. Retrieval-Augmented
+records, and community discussions, and answering an update question usually means combining several of them. Retrieval-Augmented
 Generation (RAG) is a natural fit, and a common design pattern decomposes the
 pipeline into specialized agents, with a query-rewriting agent normalizing user
 terminology to the vocabulary of technical documents.
 
 This paper reports two evaluation defects, each of which made that pattern
-look decisively better or decisively worse than a single-agent baseline, and
-what the comparison looks like once both are removed. We built an adaptive
-multi-agent RAG architecture for software update questions --- specialized
-agents for query rewriting, retrieval, evaluation, and orchestration, with a
-retrieval-level feedback loop and a persistent term-weight memory --- and
-measured a 17.2\% retrieval improvement over a single-agent baseline on a
-keyword-overlap quality score of our own design. Re-scored with standard
+look decisively better or worse than a single-agent baseline, and what the
+comparison looks like once both are removed. We built an adaptive multi-agent
+RAG architecture for software update questions --- specialized agents for query
+rewriting, retrieval, evaluation, and orchestration, with a retrieval-level
+feedback loop and a persistent term-weight memory --- and measured a 17.2\%
+improvement over a single-agent baseline on a keyword-overlap score of our own
+design. Re-scored with standard
 information-retrieval metrics over pooled relevance judgments, the same system
 \emph{lost} to the same baseline (nDCG@3 0.145 versus 0.765; paired deficit
 0.620, exact Wilcoxon $p=0.016$, $n=10$). We traced the deficit to a wiring
@@ -102,39 +101,36 @@ which brought the pipeline to parity. Then a 500-question run scored 0.34 lower
 than a 300-question run on the same questions with nothing changed, and the
 second defect surfaced: the benchmark's questions are the titles of real
 community posts, the live corpus returns the post a title came from, and the
-judge marks it relevant. The question's own source post sat in 72--98\% of the
-top-$k$ lists behind every retrieval number we had reported, and it was
-precisely the document the rewrite had been losing. Struck from the candidate
+judge marks it relevant. The question's own source post sat in 72--98\% of
+the top-$k$ lists behind every number we had reported, and was precisely the
+document the rewrite had been losing. Struck from the candidate
 pool at fetch time and re-measured on 500 questions across 24 ecosystems, every
 arm --- multi-agent, single-agent, and rewrite-only --- retrieves at nDCG@3
 0.30--0.31, with no paired difference exceeding 0.015.
 
 We draw four conclusions for practitioners building agentic software
-engineering tools. First, a benchmark mined from the same live sources a system retrieves from
-leaks its own answer key, and the leak is invisible to paired comparison because
-every arm draws on it equally; it shows only in absolute levels, and we found it
-only because a level moved between two runs that should have agreed. Second, a
-bespoke retrieval-quality metric can invert the ordering that standard IR
-metrics produce, and standard IR metrics computed over a leaking corpus can
-manufacture a five-fold deficit out of a fetch fault that, leak-free, costs
-nothing measurable --- so architectural claims resting on either are not safe
-without the candidate pool exposed and counted. Third, an apparent 0.23 faithfulness deficit for the
-multi-agent system proved to be an artifact of answer \emph{format} --- a
-structured template judged against fluent prose --- and vanished when the same
-retrieval was synthesized through the baseline's own prompt (0.919 versus
+engineering tools. First, a benchmark mined from the sources a system retrieves
+from leaks its own answer key, and paired comparison cannot see it: every arm
+draws on it equally, so it moves absolute levels alone. Second, a bespoke
+retrieval metric can invert the ordering standard IR metrics produce, and
+standard IR metrics over a leaking corpus can manufacture a five-fold deficit
+from a fault that costs nothing measurable leak-free --- so architectural claims
+resting on either need the candidate pool exposed and counted. Third, an
+apparent 0.23 faithfulness deficit proved an artifact of answer \emph{format}
+--- a structured template judged against fluent prose --- and vanished when the
+same retrieval was synthesized through the baseline's prompt (0.919 versus
 0.929). Fourth, and least comfortable: with both defects repaired and the
 synthesis model held constant, the multi-agent pipeline \emph{matches} rather
 than beats the single-agent baseline on retrieval (nDCG@3 0.304 versus 0.301,
 $n=500$, leak-free) at roughly twice the latency, so decomposition per se is not
 what produced the original result. Removing a ranking prior that had excluded
-the community half of the corpus lifts every arm by 0.227 and changes no
-ordering; in that configuration, on a 1{,}000-question extension of the
-benchmark, the answer is the same (0.485 versus 0.476, paired $+0.009$, 101 questions won and 103 lost),
-and the two arms reach it while retrieving differently --- their candidate pools
-coincide on 1 question of the 1{,}000, at 50\,\% more fetch cost. We release the architecture, the evaluation
-harness with the leak excluded by construction, and a 500-question benchmark
-mined from live release, advisory, and community sources; these are available to reviewers on request and will be
-published on acceptance.
+the community half of the corpus lifts every arm by 0.227; in that
+configuration, on a 1{,}000-question extension of the benchmark, the answer is
+the same (0.485 versus 0.476, paired $+0.009$), and the two arms reach it while
+retrieving differently --- their candidate pools coincide on 1 question of the
+1{,}000, at 50\,\% more fetch cost. We release the architecture, the harness with the
+leak excluded by construction, and the 500-question benchmark; all are available
+to reviewers on request and published on acceptance.
 \end{abstract}
 
 \begin{CCSXML}
