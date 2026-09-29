@@ -1,17 +1,18 @@
 # Status — pick up here
 
 Living handoff note. Anyone (or any session) starting work reads this first, then
-`specs/roadmap.md` for the phase definitions, then `HANDOFF.md` if the paper is
-what you're picking up. **Update this file at the end of a work session**, not
+`specs/roadmap.md` for the phase definitions, then §14 if the paper is what
+you're picking up. **Update this file at the end of a work session**, not
 just the code.
 
-Last updated: **2026-09-14** (§12, the rules-file ablation, appended; §11 is the Week 3 update, appended at the end;
+Last updated: **2026-09-28** (§14, the paper track, merged in from `HANDOFF.md`;
+§13 is the Streamlit demo blocker and its retests; §12 is the rules-file ablation; §11 is the Week 3 update;
 §10 is the Week 2 update and the sections above it are the 2026-08-31 snapshot
 from the infra/eval-side session, all kept verbatim so the record of what was
 believed when stays readable).
-The paper-side session should re-check `HANDOFF.md`'s own "Last updated" line
-separately — the two docs are drifting apart and someone should merge or
-clearly split them.
+§14 is the paper track, merged in from `HANDOFF.md` on 2026-09-28; that file is
+deleted, and the sections above still referring to it are left as they were
+written. It records what of it survived and what did not.
 
 ---
 
@@ -204,9 +205,9 @@ headline run with a DOI before submission.
 
 ## 7. Which doc to read next
 
-- Picking up the **paper**: `HANDOFF.md` (deadline 2026-09-01, TOSEM). It has
-  its own numbers table and open-items list; cross-check every number against
-  a currently-admissible run before trusting it, per §6.
+- Picking up the **paper**: §14 (merged in from `HANDOFF.md`, which is gone).
+  Cross-check every number against `results/PROVENANCE.md` and a
+  currently-admissible run before trusting it, per §6.
 - Picking up the **experiment**: this file, then `evaluation-protocol.md` for
   what "admissible" and "MDE" mean precisely, then §3 above for exactly where
   things stand right now.
@@ -378,6 +379,7 @@ labelling of the rule-based path is working as `docs/Deployment.md` describes.
    asset and none of them are archived. `corpus_snapshot_b300_full_0901` is 84
    MB / 7,899 files.
 4. **`HANDOFF.md` vs this file.** Still drifting. Merge or split them.
+   *(Closed 2026-09-28: merged into §14, file deleted.)*
 
 
 ---
@@ -608,7 +610,8 @@ neither carried foreign content.
 5. **Mid-body questions are missed.** "592 Updates" asks its question in the
    middle of the body. Sentence-scanning made things worse (§11.5); a
    title-plus-last-sentence rule is the next thing worth measuring.
-6. **Frozen n=300, artifact packaging, `HANDOFF.md` drift.** Unchanged from
+6. **Frozen n=300, artifact packaging, `HANDOFF.md` drift.** *(The `HANDOFF.md`
+   half closed 2026-09-28: merged into §14.)* Unchanged from
    §10.6 items 2–4.
 
 ## 12. Rules-file ablation — run 2026-09-10 (not retained), re-run 2026-09-14 (retained, §12.6)
@@ -870,3 +873,175 @@ Two things the retest surfaced that are worth carrying forward:
 
 Latency is unchanged and still the reason to be careful live: 18.6 s and 39.9 s
 here, with the b1000 eval (PID 42307) resumed and contending for Ollama.
+
+### §13 retest, corrected again — the Chrome result was the exception, not the rule
+
+The session that could not reproduce the decline retested the full list and
+withdrew its own conclusion: its classifier scored "the sources provided do not
+directly compare…" as an answer because it matched only on "do not provide".
+Reading the answer texts, **Teams/Zoom and Siri still decline on both arms after
+#84–#86** (multi-agent 37.4 s and 60.3 s). Its Chrome result stands as a genuine
+answer with three cited versions, but one question is not evidence that the
+blocker moved.
+
+Ran the CLI demo from the merged tree here (`c9223e0`, main merged in) to see for
+myself. `"Which is more stable, Teams or Zoom?"` now produces a far richer
+**trace** than the app did — vendor detected `['teams','zoom']`, four targeted
+fetches plus both phrasings, 42 candidates ranked (Tier1 19 verified / Tier2 23
+community), quality 0.50 — but the **answer still opens by declining**:
+
+> "The sources do not provide a direct comparison of stability between Teams and
+> Zoom. However, according to the release notes for Zoom v7.1.9 and v7.1.6, the
+> software has been updated to improve performance and stability."
+
+So the demo's value is the pipeline trace, not the answer text. That is worth
+knowing before a slide claims otherwise.
+
+**Store facts, re-verified here, and broader than §13 first stated:**
+
+| pool | documents | untagged |
+|---|---|---|
+| release | 418 | 0 |
+| community | 103 | **103** |
+| cve | 17 | **17** |
+| total | **538** | |
+
+Only release notes carry a product at all. Community *and* CVE documents are
+entirely untagged, so vendor-aware retrieval reaches changelogs and nothing
+else. That is the structural reason an opinion question like "which is more
+stable" cannot succeed: the only vendor-reachable evidence is release notes, and
+release notes do not discuss stability. The one-document-dated-today fact
+reproduces (a release row; `linux` and `chrome` both stop at 20260923).
+
+**Separate defect, not the cause of the declines but it will skew a slide:**
+five product keys are split by case — `chrome`/`Chrome` (100 + 61),
+`linux`/`Linux` (132 + 12), plus `macos`, `ios`, `fedora`. Retrieval is
+unaffected because store search uses `d.product LIKE ?` and SQLite LIKE is
+case-insensitive for ASCII, but anything that GROUPs BY product double-counts,
+including the Monitor view's per-component figures.
+
+---
+
+## 14. The paper track — `HANDOFF.md` merged here, 2026-09-28
+
+`HANDOFF.md` was the paper track's doc of record. It was last updated
+2026-08-31 and has been wrong in places ever since; §11 item 4 and §12 item 6
+both logged the drift and neither closed it. It is deleted as of this section.
+What follows is what was still true, verified today where verification was
+cheap, and what was not, named explicitly so nobody reconstructs it from git
+history and trusts it.
+
+### 14.1 Where the paper is
+
+Submitted 2026-09-01 (§10), and reworked substantially since: reframed around
+the own-post leak (`ad95fb5`), conference-era sections cut (`e167672`), results
+at n=500 and n=1000 added, and cut to the page limit by moving protocol and
+secondary detail into a supplement (`1e55832`, PR #91, and this session).
+
+Verified 2026-09-28 by building both documents: **paper 45 pages, supplement 15
+pages, zero undefined references or citations in either.**
+`paper/README.md` is now the build doc of record — build order (the supplement
+reads the paper's `.aux` through `xr`), the committed-`.bbl` trap, and which
+files are live. Do not reintroduce build instructions here; they rot in two
+places.
+
+Source is `paper/tosem_amara.tex`, derived from the AgenticSE '26 conference
+version and retargeted to `acmsmall`. Self-contained, no `\input`. The
+`paper/frag_*.tex` fragments `HANDOFF.md` told you to keep are gone
+(`docs/paper-dead-files`).
+
+### 14.2 What `HANDOFF.md` claimed that is no longer true
+
+Recorded so that a stale copy found in git history is recognisable as stale.
+
+| Its claim | Now |
+|---|---|
+| "Deadline 1 September 2026", submission URL and type | Submitted on that date; the urgency it was written under is over |
+| "Current output: 34 pages of the 45 permitted" | 45 pages plus a 15-page supplement |
+| "Reframed around a negative result plus remedy"; §2 positions against expansion drift | Reframed again around the own-post leak; the drift reading was withdrawn as an artifact of it |
+| The whole "Numbers currently in the paper" table (+17.2 %, 22 of 23, 0.859 vs 0.863, n=10 and n=100 rows) | Superseded by the n=500 and n=1000 runs. **`results/PROVENANCE.md` is the map; quote a run, never a handoff table** |
+| "The 300-question run is incomplete — died at question 68 of 300" | n=300, n=500 twice, and n=1000 have all since run |
+| "§4's older subsections read unevenly" | Those subsections were cut; the carried-over observations now live in supplement S11 |
+| "Test suite: 399 passing" | See 14.5 |
+
+### 14.3 What survives, and is still open
+
+1. **Nobody has read the typeset PDF front to back.** Carried from
+   `HANDOFF.md` unchanged, and now more pressing than when it was written:
+   two further rounds of surgery have moved text into a supplement since.
+2. **Journal-first eligibility.** Whether the AgenticSE '26 proceedings status
+   satisfies TOSEM's journal-first rules was never confirmed. Still open.
+3. **No head-to-head against published systems.** Researched, not started.
+   RAGLAB ships a fine-tuned `selfrag_llama3-8B` plus VLLM and 4-bit configs;
+   FlashRAG carries 23 algorithms including Self-RAG, Adaptive-RAG and FLARE.
+   Recorded in `HANDOFF.md` and unverified since: Self-RAG direct assumes a
+   static Contriever/Wikipedia index (~100 GB RAM) and RAGLAB's ColBERT server
+   wants ~60 GB against this machine's 24 GB, so the harnesses are the cheaper
+   route. Check those figures before planning around them.
+4. **Independent judge (threat T2).** Still open, still the most likely
+   reviewer objection: the judge shares a model family with the system under
+   test. `--judge openai:gpt-4o` with `OPENAI_API_KEY` set.
+5. **Artifact DOI.** `specs/writing.md` §7 still has it unticked, as it has
+   since August, along with the similarity check.
+6. **The self-reflective baseline arm.** `eval_harness/selfreflective.py`
+   exists and its tests pass (50 in the `selfreflective`/`isrel` selection
+   today, against the 43 `HANDOFF.md` recorded). No results are reported, by
+   choice; supplement S10 states that in the paper rather than leaving the arm
+   unmentioned.
+7. **`results/PROVENANCE.md` stops short of the paper.** Its last section is
+   the rules ablation. The runs the paper now cites for the retry
+   (`run_1790278467`), the frozen three-arm control (`run_1790126271`) and the
+   n=1000 measurements (`run_1790365310`, `run_1790415950`) are not in it. The
+   paper states its own caveats for these, but the provenance map is behind the
+   paper, which is the gap that file exists to close.
+
+### 14.4 Traps from `HANDOFF.md` that are still true
+
+- **The qrels cache used to be keyed by row position**, so datasets with
+  overlapping ids read each other's labels. Fixed (keys hash the question
+  text), but any results directory produced before the fix is suspect;
+  `results/qrels_cache.pre-keyfix.bak` is kept only as a record.
+- **`single_agent` is unaffected by the union-fetch change** — it passes the
+  same string as original and rewritten, so the union collapses to one search.
+  That is what makes the before/after clean for the multi-agent arm.
+- **A bare `single_agent` synthesises with Mistral** while `marag` uses
+  Llama 3.1. Retrieval metrics are model-independent; answer metrics are not.
+  Hold the model constant explicitly: `single_agent:ollama:llama3.1`.
+- **`marag`'s answer is a template** assembled by `EvaluatorAgent`, not model
+  prose, so an LLM judge comparing it against `single_agent` partly measures
+  format. Use `marag:<backend>:<model>` (reported as `marag_llm`) for answer
+  quality. The paper reports this as the format artifact and it sharpens with
+  scale rather than washing out.
+- **Live APIs drift**, so two runs days apart are not strictly comparable.
+  Snapshot the pool when comparability matters; ten snapshot directories are on
+  disk under `data/`, none of them in git.
+- **`data/.benchmark_cache/`** is 87 MB of raw API responses, git-ignored by a
+  `.gitignore` inside itself. Rebuild with
+  `python build_multiecosystem_benchmark.py --refresh`, replay with `--offline`.
+- **Do not estimate the page count from a word count.** 16,200 words came out
+  as 33 pages, not the ~23 a words-per-page estimate predicted, because tables,
+  tikz figures and the bibliography are not words. Build it.
+
+### 14.5 Environment, verified 2026-09-28
+
+No committed virtualenv. Recreate:
+
+```bash
+python3.11 -m venv venv311
+./venv311/bin/pip install requests ollama numpy matplotlib pytest
+ollama pull llama3.1          # generation + judge
+ollama pull nomic-embed-text  # embedding reranker
+```
+
+`./venv311/bin/python -m pytest tests/ -q` today: **792 of 793 tracked tests
+pass in ~70 s, offline.** Two things that reading a bare "4 failed" would get
+wrong:
+
+- Three of the failures are in `tests/test_vendor_catalog_outage.py`, which is
+  **untracked** — someone's red tests for work in progress, not a regression.
+- The fourth, `test_plan_rounds.py::test_comparison_gets_one_extra_round`,
+  **passes on its own and fails in the full run**: an ordering dependency
+  between tests, not a broken feature. It belongs to this branch's own work
+  (`9922f90`) and is worth fixing before that branch merges.
+
+No `run_eval` process was running when this was written.
