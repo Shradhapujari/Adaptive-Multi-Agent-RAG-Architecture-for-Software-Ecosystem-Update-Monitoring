@@ -669,6 +669,61 @@ within +0.009 nDCG@3, with 796 of 1,000 questions tying on the metric. The arms
 are doing different work and arriving at the same place, which is a stronger
 null than two systems that happen to retrieve alike.
 
+## Threat T2 — the independent judge (2026-09-29)
+
+`results/qrels_mistral.json` — every document of `run_1790126271`'s pools
+relabelled by `ollama:mistral`, 2,446 (question, document) pairs over all 500
+questions. Produced by `scripts/rejudge_pools.py`, read by
+`scripts/judge_compare.py`.
+
+**Why relabelling and not a second run.** The first attempt replayed the whole
+pipeline with a different judge. It died at question 67 of 100 on
+`CorpusMiss: .../api/c/name/vscode is not in the snapshot`: the vendor catalog
+is fetched live and has drifted since the snapshot was recorded on 2026-09-22,
+so vendor extraction now resolves a product that run never queried. **The
+frozen snapshot alone does not reproduce that run today** — worth knowing
+against the reproducibility claim in the paper's Section 4.6.5, which was true
+when it was made. Relabelling the stored pools avoids the problem entirely:
+`pools.jsonl` carries each document's text, so the two judges score pools that
+are identical by construction rather than by reproduction. It is also 6.5x
+faster (103 judgments/minute against 15.8).
+
+**Independence.** `mistral` is a different model family from `llama3.1`, and
+unlike `qwen2.5:7b-instruct` it plays no part in the run being judged, whose
+arms are llama3.1 and whose grading cascade is qwen. It is a local 7B model, so
+this establishes that the ordering is robust to the choice of judge. It does
+not establish that a frontier judge agrees, and no sentence should claim it.
+
+**Agreement.** Cohen's kappa 0.370 graded (0/1/2), 0.421 binary, 75.0% exact —
+inside the 0.26-0.37 band the paper already cites for LLM relevance labels.
+
+| llama3.1 \ mistral | 0 | 1 | 2 | total |
+|---|---:|---:|---:|---:|
+| 0 | 1593 | 40 | 0 | 1633 |
+| 1 | 417 | 192 | 18 | 627 |
+| 2 | 82 | 55 | 49 | 186 |
+| total | 2092 | 287 | 67 | 2446 |
+
+The disagreement is one-directional: mistral judges 14.5% of the pool relevant
+against llama3.1's 33.2%, demoting 499 documents and promoting 40. The judges
+differ on where the threshold sits, not on which documents are better.
+
+**The result.** Every ordering survives, and the null gets more null:
+
+| Metric | llama3.1 Δ | mistral Δ | |
+|---|---|---|---|
+| nDCG@3 | +0.006 | +0.006 | same |
+| nDCG@5 | +0.010 | +0.007 | same |
+| Recall@5 | +0.018 | +0.009 | same |
+| MRR | +0.008 | +0.004 | same |
+
+Absolute levels fall by roughly half (nDCG@3 0.496 to 0.257) because the
+stricter judge shrinks the relevant set — a level difference, and the frozen
+corpus protocol already says levels do not travel across conditions. The
+multi-agent arm's lead keeps its sign on every metric and shrinks on three.
+Under an independent judge the architectures remain indistinguishable, which is
+what the paper reports under the original one.
+
 ## Reproducing an arm
 
 ```bash

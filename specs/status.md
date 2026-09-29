@@ -1139,6 +1139,178 @@ run, or someone else's answer.
    satisfies TOSEM's journal-first rules. Never confirmed, carried since August,
    and the only item that could invalidate the submission rather than weaken it.
    Needs an answer from the venue, not from us. **Do this first.**
+2. ~~**Independent judge (threat T2).**~~ **Done 2026-09-29 — the ordering
+   survives.** All 500 questions of the frozen three-arm run relabelled by
+   `ollama:mistral`, a different model family from llama3.1 that plays no part
+   in that run (its arms are llama3.1, its cascade is qwen). Every paired
+   difference keeps its sign and three of four shrink: nDCG@3 +0.006 under both
+   judges, Recall@5 +0.018 to +0.009. Cohen's kappa 0.370 graded, 0.421 binary,
+   inside the 0.26-0.37 band the paper already cites. `results/PROVENANCE.md`
+   has the confusion matrix; `results/qrels_mistral.json` is tracked.
+
+   The honest limit, which the write-up states and no sentence should exceed:
+   a local 7B judge establishes that the ordering is robust to the *choice* of
+   judge. It does not establish that a frontier judge agrees. `phase_judge.sh`
+   still takes `openai:gpt-4o` as an argument if that claim is ever wanted;
+   nothing was spent here.
+
+   Two things this cost, both worth keeping:
+
+   - **The pipeline-replay design was wrong.** Re-running retrieval and
+     generation to reach a judging step is hours of work to reproduce what the
+     run already stored. `scripts/rejudge_pools.py` relabels the pools in
+     `pools.jsonl` directly: identical by construction, 103 judgments/minute
+     against 15.8, resumable after every call.
+   - **The frozen snapshot no longer replays that run.** The first attempt died
+     at question 67 with `CorpusMiss` on a vendor-catalog URL: the catalog is
+     live and has drifted since 2026-09-22, so vendor extraction now resolves a
+     product the run never queried. Section 4.6.5's reproducibility claim was
+     true when made and is not true today. Re-recording the snapshot would fix
+     it; nothing in the paper depends on it until someone tries to reproduce.
+
+3. **No head-to-head against published systems.** Researched, not started.
+   RAGLAB ships a fine-tuned `selfrag_llama3-8B` plus VLLM and 4-bit configs;
+   FlashRAG carries 23 algorithms including Self-RAG, Adaptive-RAG and FLARE.
+   Recorded in `HANDOFF.md` and unverified since: Self-RAG direct assumes a
+   static Contriever/Wikipedia index (~100 GB RAM) and RAGLAB's ColBERT server
+   wants ~60 GB against this machine's 24 GB, so the harnesses are the cheaper
+   route. Check those figures before planning around them.
+4. **Independent judge (threat T2).** Still open, still the most likely
+   reviewer objection: the judge shares a model family with the system under
+   test. `--judge openai:gpt-4o` with `OPENAI_API_KEY` set.
+5. **Artifact DOI.** `specs/writing.md` §7 still has it unticked, as it has
+   since August, along with the similarity check.
+6. **The self-reflective baseline arm.** `eval_harness/selfreflective.py`
+   exists and its tests pass (50 in the `selfreflective`/`isrel` selection
+   today, against the 43 `HANDOFF.md` recorded). No results are reported, by
+   choice; supplement S10 states that in the paper rather than leaving the arm
+   unmentioned.
+7. **`results/PROVENANCE.md` stops short of the paper.** Its last section is
+   the rules ablation. The runs the paper now cites for the retry
+   (`run_1790278467`), the frozen three-arm control (`run_1790126271`) and the
+   n=1000 measurements (`run_1790365310`, `run_1790415950`) are not in it. The
+   paper states its own caveats for these, but the provenance map is behind the
+   paper, which is the gap that file exists to close.
+   *(Closed 2026-09-28: all four recorded, `67507e3`. Writing them up found an
+   overstatement in the paper -- the template arm's answers carry a retrieval
+   timestamp, so they cannot reproduce across runs and its answer metrics move;
+   retrieval reproduces document for document. The paper now says so.)*
+
+### 14.4 Traps from `HANDOFF.md` that are still true
+
+- **The qrels cache used to be keyed by row position**, so datasets with
+  overlapping ids read each other's labels. Fixed (keys hash the question
+  text), but any results directory produced before the fix is suspect;
+  `results/qrels_cache.pre-keyfix.bak` is kept only as a record.
+- **`single_agent` is unaffected by the union-fetch change** — it passes the
+  same string as original and rewritten, so the union collapses to one search.
+  That is what makes the before/after clean for the multi-agent arm.
+- **A bare `single_agent` synthesises with Mistral** while `marag` uses
+  Llama 3.1. Retrieval metrics are model-independent; answer metrics are not.
+  Hold the model constant explicitly: `single_agent:ollama:llama3.1`.
+- **`marag`'s answer is a template** assembled by `EvaluatorAgent`, not model
+  prose, so an LLM judge comparing it against `single_agent` partly measures
+  format. Use `marag:<backend>:<model>` (reported as `marag_llm`) for answer
+  quality. The paper reports this as the format artifact and it sharpens with
+  scale rather than washing out.
+- **Live APIs drift**, so two runs days apart are not strictly comparable.
+  Snapshot the pool when comparability matters; ten snapshot directories are on
+  disk under `data/`, none of them in git.
+- **`data/.benchmark_cache/`** is 87 MB of raw API responses, git-ignored by a
+  `.gitignore` inside itself. Rebuild with
+  `python build_multiecosystem_benchmark.py --refresh`, replay with `--offline`.
+- **Do not estimate the page count from a word count.** 16,200 words came out
+  as 33 pages, not the ~23 a words-per-page estimate predicted, because tables,
+  tikz figures and the bibliography are not words. Build it.
+
+### 14.5 Environment, verified 2026-09-28
+
+No committed virtualenv. Recreate:
+
+```bash
+python3.11 -m venv venv311
+./venv311/bin/pip install requests ollama numpy matplotlib pytest
+ollama pull llama3.1          # generation + judge
+ollama pull nomic-embed-text  # embedding reranker
+```
+
+`./venv311/bin/python -m pytest tests/ -q`: **800 tracked tests pass in ~32 s,
+offline and now enforced.** Both failures this section first recorded are fixed,
+and neither was what it looked like:
+
+- `test_plan_rounds.py::test_comparison_gets_one_extra_round` passed alone and
+  failed in a full run. A catalog-outage test was assigning `mod.requests.get`
+  on the shared `requests` module and leaking a *succeeding* stub, so the real
+  module loaded a 2-name vendor catalog and called itself healthy; every later
+  test touching vendor extraction was judged against a universe of two
+  products. Fixed in `_fresh_module` (`7b9a0e0`).
+- Removing that stub revealed that the suite had never been offline, whatever
+  this file has claimed since August: `load_vendor_lists()` prefers a live
+  fetch and only falls back to the disk cache. `tests/conftest.py` now blocks
+  outbound sockets, `tests/test_offline_guard.py` covers the guard itself, and
+  a `network` fixture is the deliberate opt-out. The run went 75 s stubbed,
+  183 s networked, 32 s offline.
+
+Three failures remain in `tests/test_vendor_catalog_outage.py`, which is
+**untracked** — someone's red tests for work in progress, not a regression.
+
+No `run_eval` process was running when this was written.
+
+---
+
+## 15. Where things stand — 2026-09-29
+
+Written at the end of a session that closed the paper-track backlog §14.3 opened
+and left the repository with CI for the first time. §14 is the paper track's
+merged handoff; this is what changed after it and what is actually left.
+
+### 15.1 What landed
+
+**The branch backlog is gone.** `feat/manager-round-budget` merged (PR #81),
+carrying five days of paper, provenance and docs work alongside its own feature.
+26 merged branches were deleted, remote and local; six unmerged ones remain
+(`cli/loop-ux`, `feat/single-agent-button`, `fix/advisory-vendor-mismatch`,
+`fix/cited-count-and-sentiment-label`, `fix/one-line-caption-names-the-presenter`,
+`fix/run-all-points-at-real-demos`). Deleted tips are recoverable from
+`git reflog`; every commit is on `main` regardless.
+
+**CI exists.** `.github/workflows/tests.yml` runs two jobs on every pull request
+and every push to `main`: `pytest` (~45 s) and `refs` (~7 s). Before this the
+only thing behind a merge was whoever remembered to run pytest.
+
+**The suite is offline and honest.** Two defects, one hiding the other:
+`test_catalog_outage.py` leaked a *succeeding* stub of `requests.get` into the
+whole process, so every later test judged vendor extraction against a two-product
+catalog while `catalog_status()` reported itself live and healthy. Removing it
+exposed that the suite had never been offline despite this file claiming so since
+August. `tests/conftest.py` now blocks outbound sockets, with
+`tests/test_offline_guard.py` covering the guard itself.
+**800 tests, ~32 s, no egress** (75 s stubbed, 183 s networked, 32 s offline).
+
+**The paper was read front to back three times.** Five substantive fixes, all of
+a kind no build or linter reports: §3.11's model claim and its evaluation-set
+list, §5.5's "largest evaluation is 500", an orphan sentence about a dataset no
+result uses, and three weak citations propping up our own contribution. The
+n=1,000 result is now in the abstract, which fits one page again. The third pass
+found nothing, which is the useful signal: pass one found three, pass two two,
+pass three none.
+
+**`scripts/check_refs.py` now catches both families.** Structural pointer faults
+(dangling `\cite`, `Table~\ref{fig:...}`, `item~8` in a seven-item list,
+`Table S6` at a supplement numbering its tables 1–4) and section drift (a
+generation or judging model the results use that §3.11 never names; a "largest
+evaluation" superlative in §5.5 that disagrees with §4). Verified by
+reintroducing the real defects, not only by its `--selfcheck`.
+
+### 15.2 What is left
+
+Nothing here is blocked on reading the paper again. Each item needs a decision, a
+run, or someone else's answer.
+
+1. **Journal-first eligibility.** Whether the AgenticSE '26 proceedings status
+   satisfies TOSEM's journal-first rules. Never confirmed, carried since August,
+   and the only item that could invalidate the submission rather than weaken it.
+   Needs an answer from the venue, not from us. **Do this first.**
 2. **Independent judge (threat T2).** `ollama:llama3.1` judges a pipeline it also
    generates for. §5.5 states the threat and the published agreement figures it
    rests on, which is honest but not a defence. The answer-quality finding has a

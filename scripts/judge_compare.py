@@ -33,6 +33,10 @@ from eval_harness.run_eval import qrels_key                             # noqa: 
 DEFAULT_RUN = ROOT / "results" / "run_1790126271_8fda4edb2d21"
 DEFAULT_B = ROOT.parent / "marag-judge-wt" / "results" / "qrels_cache.json"
 
+# Below this, a paired difference is a tie rather than a lead. The paper's own
+# smallest reported difference is 0.006 and it calls that indistinguishable.
+EPS = 0.002
+
 
 def kappa(pairs):
     """Cohen's kappa over (label_a, label_b) pairs."""
@@ -112,7 +116,8 @@ def report(res, systems, baseline):
     print("\n  (low per-label kappa is the literature, not a finding; the "
           "ordering below is the finding)\n")
 
-    metrics = ["nDCG@3", "nDCG@5", "Recall@5", "MRR"]
+    metrics = [m for m in ("nDCG@3", "nDCG@5", "Recall@5", "MRR")
+               if m in next(iter(res["A"].values()))]
     print(f"{'metric':<10} {'system':<28} {'judge A':>9} {'judge B':>9}   ordering")
     changed = []
     for m in metrics:
@@ -123,7 +128,12 @@ def report(res, systems, baseline):
                 continue
             a, b = res["A"][s][m], res["B"][s][m]
             da, db = a - base_a, b - base_b
-            flip = "CHANGED" if (da > 0) != (db > 0) else "same"
+            # A tie is not a reversed ordering. The first version of this called
+            # +0.006 -> +0.000 a CHANGE, which would have reported a finding out
+            # of a lead shrinking into a tie under a judge that scored every arm
+            # identically. A flip is a sign change with both sides off zero.
+            flip = ("CHANGED" if (da > EPS and db < -EPS) or (da < -EPS and db > EPS)
+                    else "tie" if abs(da) <= EPS and abs(db) <= EPS else "same")
             if flip == "CHANGED":
                 changed.append((m, s, da, db))
             print(f"{m:<10} {s:<28} {a:>9.3f} {b:>9.3f}   "
@@ -178,6 +188,27 @@ def selfcheck():
         res2 = compare(pools, cache_b, text, ranked, ["sys_good", "sys_bad"])
         assert res2["B"]["sys_good"]["nDCG@3"] < res2["B"]["sys_bad"]["nDCG@3"], \
             "an inverting judge must change the ordering, or this script is blind"
+
+    # a lead shrinking to a tie is NOT a flip -- the false alarm this script
+    # raised on its first real data, before EPS existed
+    fake = {"A": {"x": {"nDCG@3": 0.508}, "base": {"nDCG@3": 0.502}},
+            "B": {"x": {"nDCG@3": 0.190}, "base": {"nDCG@3": 0.190}},
+            "covered": ["1"], "n_pool": 1, "labels": [(1, 1)]}
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        report(fake, ["x", "base"], "base")
+    assert "nDCG@3" in buf.getvalue(), "no rows printed -- this test would pass vacuously"
+    assert "CHANGED" not in buf.getvalue(), "a lead going to a tie is not a flip"
+
+    # a genuine reversal must still be caught
+    real = {"A": {"x": {"nDCG@3": 0.520}, "base": {"nDCG@3": 0.500}},
+            "B": {"x": {"nDCG@3": 0.480}, "base": {"nDCG@3": 0.500}},
+            "covered": ["1"], "n_pool": 1, "labels": [(1, 1)]}
+    buf2 = io.StringIO()
+    with contextlib.redirect_stdout(buf2):
+        report(real, ["x", "base"], "base")
+    assert "CHANGED" in buf2.getvalue(), "a real sign reversal must be reported"
     print("selfcheck ok")
 
 
