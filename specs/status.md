@@ -1037,15 +1037,24 @@ ollama pull llama3.1          # generation + judge
 ollama pull nomic-embed-text  # embedding reranker
 ```
 
-`./venv311/bin/python -m pytest tests/ -q` today: **792 of 793 tracked tests
-pass in ~70 s, offline.** Two things that reading a bare "4 failed" would get
-wrong:
+`./venv311/bin/python -m pytest tests/ -q`: **800 tracked tests pass in ~32 s,
+offline and now enforced.** Both failures this section first recorded are fixed,
+and neither was what it looked like:
 
-- Three of the failures are in `tests/test_vendor_catalog_outage.py`, which is
-  **untracked** — someone's red tests for work in progress, not a regression.
-- The fourth, `test_plan_rounds.py::test_comparison_gets_one_extra_round`,
-  **passes on its own and fails in the full run**: an ordering dependency
-  between tests, not a broken feature. It belongs to this branch's own work
-  (`9922f90`) and is worth fixing before that branch merges.
+- `test_plan_rounds.py::test_comparison_gets_one_extra_round` passed alone and
+  failed in a full run. A catalog-outage test was assigning `mod.requests.get`
+  on the shared `requests` module and leaking a *succeeding* stub, so the real
+  module loaded a 2-name vendor catalog and called itself healthy; every later
+  test touching vendor extraction was judged against a universe of two
+  products. Fixed in `_fresh_module` (`7b9a0e0`).
+- Removing that stub revealed that the suite had never been offline, whatever
+  this file has claimed since August: `load_vendor_lists()` prefers a live
+  fetch and only falls back to the disk cache. `tests/conftest.py` now blocks
+  outbound sockets, `tests/test_offline_guard.py` covers the guard itself, and
+  a `network` fixture is the deliberate opt-out. The run went 75 s stubbed,
+  183 s networked, 32 s offline.
+
+Three failures remain in `tests/test_vendor_catalog_outage.py`, which is
+**untracked** — someone's red tests for work in progress, not a regression.
 
 No `run_eval` process was running when this was written.
