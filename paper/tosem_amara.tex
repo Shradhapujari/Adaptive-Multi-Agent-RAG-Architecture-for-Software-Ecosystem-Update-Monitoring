@@ -127,10 +127,16 @@ what produced the original result. Removing a ranking prior that had excluded
 the community half of the corpus lifts every arm by 0.227; in that
 configuration, on a 1{,}000-question extension of the benchmark, the answer is
 the same (0.485 versus 0.476, paired $+0.009$), and the two arms reach it while
-retrieving differently --- their candidate pools coincide on 1 question of the
-1{,}000, at 50\,\% more fetch cost. We release the architecture, the harness with the
-leak excluded by construction, and the 500-question benchmark; all are available
-to reviewers on request and published on acceptance.
+retrieving differently --- their candidate pools coincide on 1 question of the 1{,}000, at 50\,\% more fetch cost.
+
+Across all four, the defect was found by a person and the automated check that
+should have caught it could not: a unit test cannot see a fault in the handoff
+between two components that each behaved correctly, and a paired test cannot see
+a bias that inflates every arm equally. We report what that implies for where a
+person stays in a loop built to run without one. We release the architecture,
+the harness with the leak excluded by construction, and the 500-question
+benchmark; all are available to reviewers on request and published on
+acceptance.
 \end{abstract}
 
 \begin{CCSXML}
