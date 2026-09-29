@@ -34,3 +34,24 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: python -m pytest tests -q
+
+  # The paper's cross-references, which LaTeX will not check for you. An
+  # undefined \ref is loud; a *wrong* one is silent, and three silent ones
+  # reached the repository during the cut to 45 pages -- four \cite keys that
+  # existed in no .bib, an "items 6 and 8" pointer into a seven-item list, and
+  # six "Table S6..S9" pointers at a supplement whose tables printed as 1..4.
+  #
+  # Stdlib only and under a second, so it runs on every PR rather than behind a
+  # paths filter: a filter is one more thing to be wrong on the day the paper
+  # moves.
+  refs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      # The checker's own tests first. A checker that has quietly stopped
+      # checking is worse than no checker, because the green tick still shows.
+      - run: python scripts/check_refs.py --selfcheck
+      - run: python scripts/check_refs.py
