@@ -2134,9 +2134,14 @@ not at all, which is what a null looks like when it is not a power problem.
 That measurement is reproducible in the strongest sense this paper can offer. A
 strict replay of the same snapshot (run \texttt{run\_1790415950}), executed from
 a revision in which a document missing from the snapshot aborts the run rather
-than silently emptying a source, returned the same retrieved set for all 3{,}000
-arm-question pairs and the same metrics to five decimal places, against 51{,}245
-document reads and no miss on any document host. One qualification on what that
+than silently emptying a source, returned the same retrieved set --- and the same
+full candidate pool --- for all 3{,}000 arm-question pairs, against 51{,}245
+document reads and no miss on any document host. Every retrieval metric matches
+to four decimals, as do both model-written arms' answer metrics. The template
+arm's do not, and cannot: its rendered answer carries the retrieval timestamp,
+so a replay writes a different string for every question and the judge scores it
+afresh (faithfulness $0.835$ against $0.833$, correctness $0.304$ against
+$0.309$). One qualification on what that
 demonstrates: the two runs share the accumulated relevance cache, so the metric
 agreement is partly the same judgments being reused rather than independently
 re-derived. The document-level agreement is the part that is independent, and it
