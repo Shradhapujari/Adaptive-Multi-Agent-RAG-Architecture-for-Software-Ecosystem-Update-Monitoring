@@ -2131,6 +2131,14 @@ $[-0.003, +0.023]$ and recall@5 $+0.016$ $[-0.002, +0.033]$, neither surviving
 correction. Doubling the sample moves the absolute level not at all and the gap
 not at all, which is what a null looks like when it is not a power problem.
 
+The two arms are not, however, doing the same work beneath that score. Their
+candidate pools are identical on 1 question of the 1{,}000; the multi-agent pool
+is half again as large (18.6 documents on average against 12.4); and the top-4
+the ranker finally returns is identical on 264 questions, with a mean overlap of
+0.679. The tie is therefore not two systems retrieving alike and scoring alike.
+It is two systems retrieving differently --- one of them at 50\% more fetch cost
+--- and arriving at the same place.
+
 That measurement is reproducible in the strongest sense this paper can offer. A
 strict replay of the same snapshot (run \texttt{run\_1790415950}), executed from
 a revision in which a document missing from the snapshot aborts the run rather
@@ -2418,7 +2426,7 @@ from its retrieved documents.
   recorded live and one replayed, which is not one corpus; we report it and its
   correction because the error produced a significant result with a plausible
   mechanism and was caught only by repeating the measurement in a single pass.
-  The ranking gains of items~6 and~8 are real and belong to the retriever, not
+  The ranking gains of items~6 and~7 are real and belong to the retriever, not
   to the decomposition.
 \end{enumerate}
 
@@ -2722,26 +2730,6 @@ differ for other languages, software ecosystems, enterprise
 repositories, or domains where release documentation and community
 discussions are limited.
 
-\subsection{Future Work}
-
-Future work includes comparisons with Self-RAG, CRAG, and other
-multi-agent RAG systems, evaluation on larger and multilingual
-question sets, and investigation of learned reward models,
-embedding-based vendor matching, and adaptive threshold selection \cite{asai2024selfrag,yang2024,ranaldi2025}.
-
-Additional studies should examine retrieval adaptation across longer
-interaction histories and larger workloads to better understand the
-stability of the observed retrieval-level adaptation. Evaluations involving
-multiple software ecosystems would also help determine whether retrieval parity
-holds beyond the current data sources \cite{reuter2025}.
-
-Finally, future work should investigate stronger validation mechanisms
-for community-derived information, including agreement analysis across
-multiple posts, source credibility estimation, and integration of
-additional software ecosystem resources. Such mechanisms may further
-improve answer reliability while preserving the practical benefits of
-community knowledge.
-
 \section{Conclusion}\label{sec:conclusion}
 
 This paper presented a multi-agent RAG architecture for answering software
@@ -2801,10 +2789,14 @@ community sources.
 
 Future work includes head-to-head comparison against Self-RAG, CRAG, and
 Adaptive-RAG through the FlashRAG and RAGLAB toolkits; an independent judge to
-remove the model-family overlap between judge and system; evaluation across
-longer interaction histories to establish whether retrieval-level adaptation
-scales; and replacement of the heuristic evaluator thresholds and vendor
-matching with learned components.
+remove the model-family overlap between judge and system; evaluation on larger
+and multilingual question sets, and across longer interaction histories, to
+establish whether retrieval-level adaptation scales and whether parity holds
+beyond these sources~\cite{yang2024,ranaldi2025,reuter2025}; replacement of the
+heuristic evaluator thresholds and vendor matching with learned components,
+including learned reward models and embedding-based matching; and stronger
+validation of community-derived information through agreement across multiple
+posts and source-credibility estimation.
 
 \section*{Acknowledgments}
 
