@@ -341,6 +341,18 @@ remain in a loop otherwise designed to run without one.
   evaluation harness computing IR metrics, CRAG-style correctness labels, and
   paired statistics, released with the ablation arms that produced every number
   in this paper and the script that recomputes any earlier run leak-free.
+
+  \item \textbf{An account of where human judgment was required, derived from
+  the defects rather than asserted.} Each of the four defects above was found by
+  a person, and in each case the automated check that should have caught it was
+  structurally incapable of doing so: a unit test cannot see a fault in the
+  handoff between two correct components, a score computed over the retrieved
+  set cannot report documents never retrieved, a paired test cannot see a bias
+  that inflates every arm equally, and a self-assessment built from the evidence
+  the system already trusts is confident exactly where the system is wrong. We
+  give the four blind spots, the two capabilities our metrics do not score, and
+  what each implies for instrumenting an agentic pipeline for the moments a
+  person is the only component that can act (Section~\ref{sec:human}).
 \end{itemize}
 
 \subsection{Paper Organization}
@@ -351,8 +363,10 @@ Section~\ref{sec:method} describes the architecture and the data sources.
 Section~\ref{sec:results} presents the evaluation: the metric disagreement, the
 localization of its cause, the ranking ablation, the effect of the remedy, and
 then the leak that the remedy had been repairing and the leak-free measurement.
-Section~\ref{sec:discussion} discusses what generalizes, the limitations we are
-able to bound, and the threats we cannot.
+Section~\ref{sec:discussion} discusses what generalizes, where human judgment
+was required and why the automation could not substitute for it
+(Section~\ref{sec:human}), the limitations we are able to bound, and the threats
+we cannot.
 Section~\ref{sec:conclusion} concludes.
 
 \section{Related Work}\label{sec:related}
@@ -2956,6 +2970,16 @@ the pre-ranking candidate set, that evaluations on live corpora report absolute
 levels alongside paired deltas and re-run identical questions at an interval,
 and that a benchmark mined from a system's own sources be assumed to leak until
 the question's source document is shown absent from every pool.
+
+Those instruments lower a cost; they do not remove a person. Every defect
+reported here was found by one, and in each case the check that should have
+caught it was not missing but structurally unable to: the unit test was sound
+about its component, the metric about its retrieved set, the paired test about
+its difference, and each was blind outside that frame
+(Section~\ref{sec:human}). The contributions we can claim for the architecture
+are modest. The contribution we are most confident of is the account of where,
+in a pipeline built to run without supervision, supervision turned out to be
+load-bearing.
 
 We release the architecture, the evaluation harness with the exclusion built
 in, the ranking and fetching ablation arms, the script that recomputes any
