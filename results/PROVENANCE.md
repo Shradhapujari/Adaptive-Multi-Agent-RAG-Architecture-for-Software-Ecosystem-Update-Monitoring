@@ -586,14 +586,16 @@ against `data/corpus_snapshot_b1000_flat_0925`.
 | Measurement | `run_1790365310_0be41794f36e` | replay (lenient) | 42,472 | **2,177** | false |
 | Repeat | `run_1790415950_0be41794f36e` | strict | 51,245 | **0** | **true** |
 
-**The measurement run is the one to be careful with.** 2,177 of its reads went
-live to `news.google.com` (940) and `releasetrain.io` (1,237) during replay, and
-the harness logged the same `NOT comparable to other arms` warning. Because a
-lenient replay backfills what it misses, and the arms execute interleaved per
-question with `single_agent` last, a document fetched live for an early arm can
-be served from the snapshot to a later one. The direction of that asymmetry is
-not established and should not be assumed; what is established is that the run
-is not frozen and its absolute levels do not compare across runs.
+**The measurement run is not frozen, and the warning means what it says: its
+absolute levels do not compare across runs.** 2,177 of its reads went live to
+`news.google.com` (940) and `releasetrain.io` (1,237) during replay, and the
+harness logged `NOT comparable to other arms`. The arms execute interleaved per
+question (`marag`, `marag_llm`, `single_agent`), so the obvious worry is that a
+document fetched live for an early arm is served from the backfilled snapshot to
+a later one, or that a URL fetched live twice hours apart returns different text
+to different arms. **Neither happened, and the strict repeat is what shows it
+— see below.** The within-run pairing is sound; treat the caveat as scoped to
+cross-run comparison rather than to the null itself.
 
 Paired against `single_agent` (`comparison_check.md`):
 
@@ -627,10 +629,45 @@ Checked directly over the two `per_query.jsonl` files, 3,000 arm-question pairs:
 
 So "the same metrics to five decimal places" holds for retrieval and for the
 two model-written arms, and does **not** hold for the template arm's answer
-metrics. The reproducible claim is the document-level one, which is also the
-stronger one. The two runs additionally share the accumulated relevance cache,
-so metric agreement is partly the same judgments being reused rather than
-re-derived; document agreement is the part that is independent.
+metrics. The two runs additionally share the accumulated relevance cache, so
+metric agreement is partly the same judgments being reused rather than
+re-derived; the document-level agreement is the part that is independent.
+
+### Why this settles the lenient run's comparability
+
+`doc_id` hashes a document's **URL**, not its text (`generators.py`), so
+identical `doc_ids` alone would prove the same documents were *selected*, not
+that they said the same thing. The text evidence is separate and stronger: every
+generator runs at `temperature=0`, and `single_agent` produced byte-identical
+answers on 1,000 of 1,000 questions and `marag_llm` on 999. A deterministic
+generator cannot emit the same answer from different input, so the document text
+that reached it was the same in both runs.
+
+Put together: the strict repeat reads a fully populated snapshot with zero live
+reads, so no ordering effect is possible in it, and it reproduces the lenient
+run's pools and top-k exactly. Had an arm been starved by ordering, or had a
+twice-fetched URL drifted, the repeat would have diverged for that arm. It does
+not, on any of 3,000 pairs. The one exception is a single `marag_llm` answer,
+which is `temperature=0` nondeterminism rather than a different input --- its
+retrieved set is identical.
+
+### The parity is not an artifact of the arms being alike
+
+Worth recording because it is the first thing a reviewer will suspect. On the
+1,000 questions, `marag_llm` and `single_agent`:
+
+| | |
+|---|---|
+| Identical candidate pools | **1 of 1,000** |
+| Mean pool size | 18.6 vs 12.4 documents |
+| Identical top-4 | 264 of 1,000 (26.4 %) |
+| Mean top-4 overlap | 0.679 |
+
+The multi-agent arm fetches a pool half again as large and hands the ranker a
+materially different top-4 on three questions in four --- and still scores
+within +0.009 nDCG@3, with 796 of 1,000 questions tying on the metric. The arms
+are doing different work and arriving at the same place, which is a stronger
+null than two systems that happen to retrieve alike.
 
 ## Reproducing an arm
 
