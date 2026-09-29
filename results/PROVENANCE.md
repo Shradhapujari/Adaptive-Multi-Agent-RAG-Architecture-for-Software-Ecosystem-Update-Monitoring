@@ -514,6 +514,161 @@ that ran 16 questions in five and a half hours, both lived in session
 scratchpads and are gone. This sweep was run from the checkout so its
 snapshot and runs sit under `results/`.
 
+## `tab:tier-control` — the frozen three-arm control (n=500)
+
+`run_1790126271_8fda4edb2d21` — 500 questions of `benchmark_500.json`, arms
+`marag,marag:ollama:llama3.1,single_agent:ollama:llama3.1`, judge
+`ollama:llama3.1`, ranker `llm20@embed:nomic-embed-text:qwen2.5:7b-instruct`
+(flat ranking, the grading cascade on every arm), `exclude_own_post` on,
+`top_k=4`, 2026-09-21. Corpus `strict:data/corpus_snapshot_b500_flat_0921`:
+**33,454 hits, `corpus_misses=0`, `frozen=true`** — the 750 recorded misses are
+all `localhost`, which is not a corpus host. One pass, one judged pool, one
+clock. This is the run the paper's null rests on, and it is the only n=500
+three-arm run that is frozen by the harness's own gate.
+
+| Metric | marag / marag_llm | single_agent | Δ (95% CI) | W/T/L |
+|---|---:|---:|---|---|
+| nDCG@1 | 0.462 | 0.445 | +0.017 [−0.001, +0.035] | 17/475/8 |
+| nDCG@3 | 0.496 | 0.490 | +0.006 [−0.009, +0.021] | 43/410/47 |
+| nDCG@5 | 0.509 | 0.499 | +0.010 [−0.004, +0.025] | 56/390/54 |
+| Recall@5 | 0.551 | 0.532 | +0.018 [−0.001, +0.038] | 46/426/28 |
+| MRR | 0.536 | 0.528 | +0.008 [−0.004, +0.022] | 22/457/21 |
+| Faithfulness (`marag_llm`) | 0.900 | 0.897 | +0.003 [−0.006, +0.012] | 72/375/53 |
+| Faithfulness (`marag`, template) | 0.837 | 0.897 | −0.059 [−0.071, −0.047] | 38/190/272 |
+| Answer relevance (`marag_llm`) | 0.950 | 0.948 | +0.002 [−0.007, +0.011] | 55/408/37 |
+
+Nothing survives Holm correction. `marag` and `marag_llm` share a retrieval
+path, so their retrieval rows are identical by construction and are not two
+measurements. Full table: `comparison_frozen3.md` in the run directory.
+
+## `tab:retry` — the retry measured, two-pass (n=500)
+
+`run_1790278467_8fda4edb2d21` — pass 2 of two, 500 questions, arms
+`marag:ollama:llama3.1,marag_retry:ollama:llama3.1`, same ranker and judge as
+above, 2026-09-24. The two-pass design exists because the retry's second-round
+rewrites fetch phrasings no earlier snapshot can contain: pass 1
+(`b500_retry_2pass.log`) records the corpus with the retry arm alone, pass 2
+replays both arms against it in one run with one judged pool.
+
+Corpus `strict:data/corpus_snapshot_b500_retry2pass_0924`: 30,734 hits, 3,185
+misses, of which **74 are on corpus hosts** (`releasetrain.io` 65,
+`news.google.com` 9), so `frozen=false` and the harness logged
+`WARNING: corpus hosts were read live during replay; this run is NOT comparable
+to other arms`. The paper states this limit. **Read it as: within-run pairing is
+sound, cross-run comparison of its absolute numbers is not.**
+
+| Metric | Retry | No retry | Δ (95% CI) | W/T/L |
+|---|---:|---:|---|---|
+| nDCG@1 | 0.484 | 0.488 | −0.004 [−0.016, +0.008] | 4/490/6 |
+| nDCG@3 | 0.532 | 0.535 | −0.002 [−0.013, +0.008] | 8/481/11 |
+| nDCG@5 | 0.564 | 0.566 | −0.002 [−0.012, +0.009] | 9/480/11 |
+| Recall@5 | 0.630 | 0.631 | −0.001 [−0.013, +0.012] | 6/486/8 |
+| MRR | 0.566 | 0.567 | −0.001 [−0.012, +0.010] | 8/484/8 |
+| Faithfulness | 0.896 | 0.894 | +0.002 [−0.001, +0.007] | 12/479/9 |
+| Answer relevance | 0.952 | 0.951 | +0.002 [−0.001, +0.006] | 7/486/7 |
+
+The 18.8 % fire rate the paper reports is **not in this run's artifacts**: the
+harness did not persist a per-question round count when this ran, and the
+figure was reconstructed by counting questions on which the retry arm spent two
+rewriter invocations instead of one. `comparison_retry.md` carries the metrics;
+the fire rate is an inference over them. A run that logs `rounds` is the better
+instrument.
+
+## The n=1000 parity measurement, and its strict repeat
+
+Two runs over `benchmark_1000.json`, arms
+`marag,marag:ollama:llama3.1,single_agent:ollama:llama3.1`, judge
+`ollama:llama3.1`, ranker `embed:nomic-embed-text` (flat), `top_k=4`, both
+against `data/corpus_snapshot_b1000_flat_0925`.
+
+| | Run | Corpus mode | Hits | Misses on corpus hosts | `frozen` |
+|---|---|---|---:|---:|---|
+| Measurement | `run_1790365310_0be41794f36e` | replay (lenient) | 42,472 | **2,177** | false |
+| Repeat | `run_1790415950_0be41794f36e` | strict | 51,245 | **0** | **true** |
+
+**The measurement run is not frozen, and the warning means what it says: its
+absolute levels do not compare across runs.** 2,177 of its reads went live to
+`news.google.com` (940) and `releasetrain.io` (1,237) during replay, and the
+harness logged `NOT comparable to other arms`. The arms execute interleaved per
+question (`marag`, `marag_llm`, `single_agent`), so the obvious worry is that a
+document fetched live for an early arm is served from the backfilled snapshot to
+a later one, or that a URL fetched live twice hours apart returns different text
+to different arms. **Neither happened, and the strict repeat is what shows it
+— see below.** The within-run pairing is sound; treat the caveat as scoped to
+cross-run comparison rather than to the null itself.
+
+Paired against `single_agent` (`comparison_check.md`):
+
+| Metric | marag / marag_llm | single_agent | Δ (95% CI) | W/T/L |
+|---|---:|---:|---|---|
+| nDCG@3 | 0.485 | 0.477 | +0.009 [−0.003, +0.021] | 101/796/103 |
+| nDCG@5 | 0.505 | 0.495 | +0.010 [−0.003, +0.023] | 137/730/133 |
+| Recall@5 | 0.553 | 0.537 | +0.016 [−0.002, +0.033] | 111/803/86 |
+| Faithfulness (`marag_llm`) | 0.892 | 0.897 | −0.005 [−0.013, +0.003] | 111/769/120 |
+| Faithfulness (`marag`, template) | 0.835 | 0.897 | −0.063 [−0.072, −0.053] | 73/376/551 |
+| Correctness (`marag`, n=139) | 0.304 | 0.139 | +0.165 [+0.100, +0.232] | 44/86/9 |
+| Correctness (`marag_llm`, n=140) | 0.134 | 0.138 | −0.004 [−0.048, +0.038] | 8/124/8 |
+
+Nothing survives Holm correction. `aggregate.csv` gives the baseline's nDCG@3 as
+**0.4765**; the paper rounds it to 0.476 and `comparison_check.md` to 0.477.
+Same number, two roundings — quote the artifact.
+
+### What the repeat actually reproduces
+
+Checked directly over the two `per_query.jsonl` files, 3,000 arm-question pairs:
+
+- **Retrieval reproduces exactly.** Identical `doc_ids` on 3,000 of 3,000, and
+  identical full `pool_doc_ids` on 3,000 of 3,000. Every retrieval column of
+  `aggregate.csv` matches to four decimals.
+- **Answers do not, for one arm.** `single_agent` answers are identical on
+  1,000 of 1,000 and `marag_llm` on 999 of 1,000, but **`marag` differs on
+  1,000 of 1,000** — its template embeds a `Retrieved: <timestamp>` line, so a
+  replay cannot reproduce it by construction. Its judged scores move with it:
+  faithfulness 0.8346 → 0.8333, answer relevance 0.9229 → 0.9219, correctness
+  0.3043 → 0.3094.
+
+So "the same metrics to five decimal places" holds for retrieval and for the
+two model-written arms, and does **not** hold for the template arm's answer
+metrics. The two runs additionally share the accumulated relevance cache, so
+metric agreement is partly the same judgments being reused rather than
+re-derived; the document-level agreement is the part that is independent.
+
+### Why this settles the lenient run's comparability
+
+`doc_id` hashes a document's **URL**, not its text (`generators.py`), so
+identical `doc_ids` alone would prove the same documents were *selected*, not
+that they said the same thing. The text evidence is separate and stronger: every
+generator runs at `temperature=0`, and `single_agent` produced byte-identical
+answers on 1,000 of 1,000 questions and `marag_llm` on 999. A deterministic
+generator cannot emit the same answer from different input, so the document text
+that reached it was the same in both runs.
+
+Put together: the strict repeat reads a fully populated snapshot with zero live
+reads, so no ordering effect is possible in it, and it reproduces the lenient
+run's pools and top-k exactly. Had an arm been starved by ordering, or had a
+twice-fetched URL drifted, the repeat would have diverged for that arm. It does
+not, on any of 3,000 pairs. The one exception is a single `marag_llm` answer,
+which is `temperature=0` nondeterminism rather than a different input --- its
+retrieved set is identical.
+
+### The parity is not an artifact of the arms being alike
+
+Worth recording because it is the first thing a reviewer will suspect. On the
+1,000 questions, `marag_llm` and `single_agent`:
+
+| | |
+|---|---|
+| Identical candidate pools | **1 of 1,000** |
+| Mean pool size | 18.6 vs 12.4 documents |
+| Identical top-4 | 264 of 1,000 (26.4 %) |
+| Mean top-4 overlap | 0.679 |
+
+The multi-agent arm fetches a pool half again as large and hands the ranker a
+materially different top-4 on three questions in four --- and still scores
+within +0.009 nDCG@3, with 796 of 1,000 questions tying on the metric. The arms
+are doing different work and arriving at the same place, which is a stronger
+null than two systems that happen to retrieve alike.
+
 ## Reproducing an arm
 
 ```bash

@@ -7,12 +7,40 @@ mkdir -p /tmp/build && tectonic tosem_amara.tex --outdir /tmp/build
 
 `--outdir` must already exist; tectonic will not create it.
 
+**Build the paper before the supplement.** `supplementary.tex` pulls the main
+paper's section and table numbers through `xr`, which reads
+`tosem_amara.aux` — a gitignored build product. Build the supplement without it
+and every cross-reference into the paper typesets as `??`, with only a LaTeX
+warning to say so:
+
+```bash
+tectonic tosem_amara.tex --outdir /tmp/build --keep-intermediates
+cp /tmp/build/tosem_amara.aux .
+tectonic supplementary.tex --outdir /tmp/build
+```
+
+Both carry their own bibliography, so both need the `pdflatex → bibtex →
+pdflatex → pdflatex` sequence (`tectonic` does this itself).
+
+Last verified 2026-09-28: paper 45 pages, supplement 15, zero undefined
+references or citations in either.
+
+`python scripts/check_refs.py` sweeps for the cross-reference faults LaTeX does
+*not* report: a `\cite` key in no `.bib`, a `Table~\ref{fig:...}`, an
+`item~8` in a seven-item list, and a `Table S6` pointer at a supplement whose
+tables print as `1`. An undefined reference is loud; a wrong one is silent, and
+all three of those reached the repository during the cut to 45 pages.
+
+Ignore one warning from the supplement's build: `natbib` reports every citation
+as `multiply defined`, because `xr` imports the paper's `\bibcite` entries
+along with its labels. The supplement's own bibliography wins --- its citations
+run [1]--[44] against its own 44-entry list, checked --- so the warning is
+noise. It does mean a genuine duplicate would hide in it.
+
 `tectonic` fetches what it needs on first run; no TeX install required. Any
 LaTeX toolchain works, but the sequence has to be
 `pdflatex → bibtex → pdflatex → pdflatex` — one pass leaves the citations
 unresolved.
-
-Last verified 2026-09-10: 0 errors, 47 pages, no unresolved references.
 
 ## Editing the bibliography: read this first
 

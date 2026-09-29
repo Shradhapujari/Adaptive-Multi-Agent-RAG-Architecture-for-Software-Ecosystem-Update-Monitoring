@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,16 @@ def _fresh_module():
                                                   ROOT / "multiagent_rag_v3.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    # The module does `import requests`, so `mod.requests` is the one shared
+    # module object every other import in the process holds. A test stubbing
+    # `mod.requests.get` would patch requests for the rest of the run, and the
+    # stub that returns two product names is the worst kind: the real module
+    # then loads a 2-name catalog, reports source "live" and degraded False,
+    # and every later test judges vendor extraction against a universe of two.
+    # Give each fresh module its own copy to stub instead.
+    shim = types.ModuleType("requests_isolated")
+    shim.__dict__.update(sys.modules["requests"].__dict__)
+    mod.requests = shim
     return mod
 
 
