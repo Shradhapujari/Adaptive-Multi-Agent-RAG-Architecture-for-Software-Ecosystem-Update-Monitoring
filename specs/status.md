@@ -966,9 +966,29 @@ Recorded so that a stale copy found in git history is recognisable as stale.
 
 ### 14.3 What survives, and is still open
 
-1. **Nobody has read the typeset PDF front to back.** Carried from
-   `HANDOFF.md` unchanged, and now more pressing than when it was written:
-   two further rounds of surgery have moved text into a supplement since.
+1. ~~**Nobody has read the typeset PDF front to back.**~~ **Done 2026-09-29**,
+   all 45 pages of the build at `8b20098`. It reads as one argument rather than
+   a repaired conference paper: the negative result is in the abstract, the
+   +17.2 % retraction is explicit, every table names the run behind it, and the
+   pointers into the supplement (S1--S12) read as deliberate rather than as
+   holes. The n=10 inversion carries its p-floor caveat in the text, which is
+   the thing most likely to be pressed and is already answered.
+
+   Two contradictions the read caught, both fixed:
+
+   - §3.11 claimed "All experiments were performed using Llama 3.1 8B", which
+     §4.4 (synthesis at Mistral, judging at `qwen2.5:7b-instruct`) and the
+     grading cascade of §4.6 and §4.8 both contradict. It now states the
+     default and names the two deliberate departures.
+   - §3.11 introduced three evaluation sets and stopped at 500 questions, while
+     §4.6.5 and the summary report the parity result on all 1,000. A reader met
+     the n=1,000 result with no setup for it. The benchmark paragraph now says
+     the construction extends to 1,000.
+
+   One judgment call left for the author rather than taken here: the abstract
+   quotes the leak-free result at n=500 and never mentions the n=1,000 repeat,
+   which is the larger sample and the same answer. Whether that belongs in the
+   abstract is an editorial choice, not a defect.
 2. **Journal-first eligibility.** Whether the AgenticSE '26 proceedings status
    satisfies TOSEM's journal-first rules was never confirmed. Still open.
 3. **No head-to-head against published systems.** Researched, not started.
