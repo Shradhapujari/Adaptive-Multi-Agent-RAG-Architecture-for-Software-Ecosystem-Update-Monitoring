@@ -93,7 +93,9 @@ improvement over a single-agent baseline on a keyword-overlap score of our own
 design. Re-scored with standard
 information-retrieval metrics over pooled relevance judgments, the same system
 \emph{lost} to the same baseline (nDCG@3 0.145 versus 0.765; paired deficit
-0.620, exact Wilcoxon $p=0.016$, $n=10$). We traced the deficit to a wiring
+0.620, exact Wilcoxon $p=0.016$, $n=10$) --- a five-fold gap that the second
+defect below later reduces to 0.263 against 0.397, leaving the ordering and
+removing the magnitude. We traced the deficit to a wiring
 fault --- the rewritten query \emph{replaced} the user's wording at every
 retrieval endpoint, so documents matching the user's own phrasing were never
 fetched --- and repaired it by issuing both phrasings and unioning the pools,
