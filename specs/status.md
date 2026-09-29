@@ -1163,6 +1163,14 @@ run, or someone else's answer.
    and ~114K. Price it at current gpt-4o rates before choosing. Start at 100 --
    the claim §5.5 needs is that the *ordering* survives, and per-label kappa is
    expected to be poor whatever the sample.
+
+   **Reading the result:** `scripts/judge_compare.py` scores the same pools
+   under both judges with the harness's own metric functions and prints the
+   orderings side by side plus Cohen's kappa. Validated two ways before any
+   labels existed: a synthetic self-check in which an inverting judge must flip
+   the ordering (so the script cannot be blind), and a stand-in judge built from
+   the run's own labels, which reproduces Table 11 to four decimals with kappa
+   1.000. A `CHANGED` line in its output is the finding; a low kappa is not.
 3. **No head-to-head against published systems.** Researched, not started;
    FlashRAG and RAGLAB are the cheap route, and §2.5 defends the omission in
    terms a reviewer may still press. Recorded and unverified: RAGLAB's ColBERT
