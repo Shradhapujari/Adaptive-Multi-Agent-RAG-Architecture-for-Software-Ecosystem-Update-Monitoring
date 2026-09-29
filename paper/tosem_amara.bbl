@@ -2,7 +2,7 @@
 %%% Do NOT edit. File created by BibTeX with style
 %%% ACM-Reference-Format-Journals [18-Jan-2012].
 
-\begin{thebibliography}{119}
+\begin{thebibliography}{116}
 
 %%% ====================================================================
 %%% NOTE TO THE USER: you can override these defaults by providing
@@ -50,20 +50,6 @@
   \bibinfo{pages}{1107--1142}.
 \newblock
 \href{https://doi.org/10.1007/s10664-015-9377-5}{doi:\nolinkurl{10.1007/s10664-015-9377-5}}
-
-
-\bibitem[Adimulam et~al\mbox{.}(2026)]%
-        {adimulam2026}
-\bibfield{author}{\bibinfo{person}{A. Adimulam}, \bibinfo{person}{R. Gupta},
-  {and} \bibinfo{person}{S. Kumar}.} \bibinfo{year}{2026}\natexlab{}.
-\newblock \bibinfo{title}{The Orchestration of Multi-Agent Systems:
-  Architectures, Protocols, and Enterprise Adoption}.
-\newblock
-\showeprint[arxiv]{2601.13671}
-\urldef\tempurl%
-\url{https://arxiv.org/abs/2601.13671}
-\showURL{%
-\tempurl}
 
 
 \bibitem[Alaofi et~al\mbox{.}(2024)]%
@@ -667,18 +653,6 @@
 \href{https://doi.org/10.1145/3701716.3715313}{doi:\nolinkurl{10.1145/3701716.3715313}}
 
 
-\bibitem[Joshi(2025)]%
-        {joshi2025review}
-\bibfield{author}{\bibinfo{person}{S. Joshi}.} \bibinfo{year}{2025}\natexlab{}.
-\newblock \showarticletitle{Review of Autonomous and Collaborative Agentic {AI}
-  and Multi-Agent Systems for Enterprise Applications}.
-\newblock \bibinfo{journal}{\emph{International Journal of Innovative Research
-  in Engineering \& Management}} \bibinfo{volume}{12}, \bibinfo{number}{3}
-  (\bibinfo{year}{2025}), \bibinfo{pages}{65--76}.
-\newblock
-\href{https://doi.org/10.55524/ijirem.2025.12.3.9}{doi:\nolinkurl{10.55524/ijirem.2025.12.3.9}}
-
-
 \bibitem[Just et~al\mbox{.}(2014)]%
         {just2014mutants}
 \bibfield{author}{\bibinfo{person}{R. Just}, \bibinfo{person}{D. Jalali},
@@ -1198,20 +1172,6 @@
   \bibinfo{publisher}{Prentice-Hall}, \bibinfo{address}{Englewood Cliffs, NJ},
   \bibinfo{pages}{313--323}.
 \newblock
-
-
-\bibitem[Roman and Roman(2026)]%
-        {roman2026}
-\bibfield{author}{\bibinfo{person}{A. Roman} {and} \bibinfo{person}{J. Roman}.}
-  \bibinfo{year}{2026}\natexlab{}.
-\newblock \bibinfo{title}{Orchestral {AI}: A Framework for Agent
-  Orchestration}.
-\newblock
-\showeprint[arxiv]{2601.02577}
-\urldef\tempurl%
-\url{https://arxiv.org/abs/2601.02577}
-\showURL{%
-\tempurl}
 
 
 \bibitem[{RUC-NLPIR}(2024)]%

@@ -186,7 +186,11 @@ Retrieval-Augmented Generation (RAG) systems have emerged as a promising approac
 
 Recent multi-agent RAG systems decompose retrieval and reasoning into multiple specialized agents~\cite{wang2024mainrag, nguyen2025marag}. Most existing evaluations focus on general question-answering benchmarks, whereas software update questions require combining information from heterogeneous software ecosystem documents. In addition, the role of feedback-based adaptation in multi-agent RAG systems for software update question answering has received limited empirical evaluation~\cite{ma2023rafe}.
 
-This paper presents an Adaptive Multi-Agent RAG Architecture for answering software update questions \cite{he2025,joshi2025review}. The architecture consists of specialized agents for query rewriting, retrieval, evaluation, and orchestration connected through a feedback loop \cite{adimulam2026,roman2026}.
+This paper presents an Adaptive Multi-Agent RAG Architecture for answering
+software update questions, a design the recent literature on multi-agent systems
+for software engineering surveys more broadly~\cite{he2025}. The architecture
+consists of specialized agents for query rewriting, retrieval, evaluation, and
+orchestration connected through a feedback loop.
 
 \subsection{A Result We Did Not Expect}
 
@@ -1154,10 +1158,7 @@ category and ecosystem carries the scaled evaluation
 all 500 carry the leak-free measurement (Section~\ref{sec:leak}); the same
 construction extends to 1{,}000 questions, on which the parity result is
 repeated (Section~\ref{sec:tier-control}). Sample sizes are stated with every reported
-number, since they differ across these three. The local fallback dataset contains 324 Reddit
-posts collected through the software ecosystem data lake and filtered
-using minimum quality criteria of at least 10 comments, 3 author
-replies, and a quality score of at least 0.30.
+number, since they differ across these three. 
 
 The single-agent baseline issues the user's question directly and performs
 retrieval, evaluation, and answer generation within a single agent, without a
@@ -1470,8 +1471,6 @@ corpus snapshot recorded once and then replayed, so that the three arms differ
 only in the ranking function and every arm sees byte-identical documents.
 Table~S6 of the supplementary material reports it.
 
-
-
 The contrast with panel~(a) is the point. There, three successively stronger
 ranking functions raised MRR by 0.375 while leaving nDCG@3 within 0.043 of where
 it started: ranking was working and the answer was not in the candidate set to be
@@ -1569,8 +1568,6 @@ called the same retriever, so the ordering was never affected; only the level
 was. The same repair and the same frozen-corpus protocol are applied to
 Table~S8 of the supplementary material.
 
-
-
 \subsubsection{A Second Sample, and Why It Matters}
 
 The 100-question subset above balances category and ecosystem without regard to
@@ -1579,8 +1576,6 @@ none. We therefore repeated the evaluation on a second 100-question selection
 that prefers ground-truth records within each grid cell, retaining 28. This
 permits an answer-correctness measurement, and it provides an independent sample
 of the architecture comparison.
-
-
 
 Table~S8 of the supplementary material is the most useful evidence in this section, for a reason
 that has nothing to do with which system is ahead. On this sample the
@@ -1677,8 +1672,6 @@ A5  & \texttt{marag}                 & 0.752 & 0.761 & 0.822 & 0.738 & 0.659 \\
 Because the arms are paired within the run, the aggregate means understate what
 is available: the per-question differences can be tested directly.
 Table~S9 of the supplementary material reports them under a Wilcoxon signed-rank test.
-
-
 
 Four results follow, and three of them change what the earlier sections can
 claim.
