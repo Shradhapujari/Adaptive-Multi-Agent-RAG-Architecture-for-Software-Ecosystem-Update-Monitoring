@@ -3043,4 +3043,81 @@ software update questions and supporting documents used in this study.
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{references}
 
+\appendix
+
+\section{Artifact Appendix}\label{sec:artifact}
+
+%% TODO BEFORE CAMERA-READY: mint the deposit and replace the placeholder in
+%% A.2 with the real DOI. Zenodo's GitHub integration issues one from a tagged
+%% release. Do NOT write a DOI here that has not been minted.
+
+\subsection{Summary}
+
+The artifact is the system under study, the evaluation harness that produced
+every number in this paper, the benchmark, and the corpus snapshots that make
+the measurements repeatable. It supports the two claims that depend on
+execution: that the reported runs recompute from their saved artifacts, and that
+a strict replay of a frozen snapshot reproduces a run document for document
+(Section~\ref{sec:tier-control}).
+
+\subsection{Availability}
+
+The repository is available to reviewers on request through the editorial office
+and will be deposited publicly on acceptance. \emph{The archival DOI is not
+minted at the time of submission and is deliberately not stated here;} a
+citation to a deposit that does not yet exist is exactly the kind of unverifiable
+claim this paper argues against. On acceptance the repository will be deposited
+at the submission tag and this appendix will carry the resulting DOI.
+
+\subsection{What the Deposit Contains}
+
+\begin{itemize}
+  \item The architecture and the evaluation harness, including the ablation arms
+  behind every table, the reranking backends of Section~\ref{sec:rerank}, and
+  the fetch-time exclusion of Section~\ref{sec:leak}.
+  \item The benchmark: 500 questions over 24 software ecosystems, and the
+  1{,}000-question extension used in Section~\ref{sec:tier-control}, with the
+  manifests recording how each was drawn.
+  \item \texttt{PROVENANCE.md}, which maps every table in this paper to the run
+  directory that produced it and records which runs superseded earlier ones and
+  why. It is the entry point for checking a number rather than re-running it.
+  \item The run directories behind the reported tables:
+  \texttt{config.json} (the full configuration, including the corpus mode and
+  whether the run was frozen), \texttt{per\_query.jsonl}, \texttt{qrels.json},
+  \texttt{aggregate.csv}, and the pools where they were dumped.
+  \item The relevance judgments, including the independent judge's relabelling
+  of Section~\ref{sec:threats}, so that a reviewer can recompute any metric
+  without re-judging.
+  \item The corpus snapshot behind the frozen three-arm run
+  (\texttt{run\_1790126271}), approximately 139~MB of per-request records. This
+  is the component that makes replay possible and the one that does not travel
+  in a source repository; it is deposited separately and referenced from the
+  same record.
+\end{itemize}
+
+\subsection{Reproducing a Result}
+
+The harness needs Python~3.11, \texttt{requests}, and the stdlib; the test suite
+runs offline and blocks outbound sockets so that a failure is a defect rather
+than a network condition. Reproducing a \emph{measurement} additionally needs
+Ollama with \texttt{llama3.1}, \texttt{mistral}, \texttt{qwen2.5:7b-instruct},
+and \texttt{nomic-embed-text}, and the corpus snapshot.
+
+Three levels are available, in increasing cost. Recomputing a metric from a
+saved run needs no model and no network. Replaying a run against its snapshot in
+strict mode reproduces its retrieved sets exactly, which is the check
+Section~\ref{sec:tier-control} reports. Re-executing against live endpoints will
+\emph{not} reproduce the published numbers, by design: the corpus is a set of
+live feeds, and Section~\ref{sec:leak} is an account of what happens when that
+is forgotten.
+
+\subsection{One Limitation We Record Rather Than Repair}
+
+The vendor catalogue is fetched live and has drifted since the snapshots were
+recorded. A strict replay of the frozen run therefore aborts on a catalogue
+lookup the original run never issued, rather than silently substituting a
+different corpus. Re-recording a snapshot repairs this; the deposit documents
+the failure mode so that a reviewer meeting it recognises it as drift in a live
+dependency rather than as a broken artifact.
+
 \end{document}

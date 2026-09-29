@@ -122,7 +122,14 @@ diagnosis was tested rather than assumed.
 - [ ] Every threat in `evaluation-protocol.md` §8 addressed in Section 9.
 - [ ] +17.2 % retraction explicit.
 - [ ] Negative result in the abstract.
-- [ ] AI disclosure present and accurate.
-- [ ] Similarity check clean.
+- [x] AI disclosure present and accurate. *(Added 2026-09-29; states the
+      assistance as substantial rather than incidental, per §5 of this file.)*
+- [ ] Similarity check clean. **Yours to run — iThenticate is licensed and
+      cannot be run from here. ACM also runs it at submission.**
 - [ ] Artifact appendix points at an archived snapshot with a DOI.
+      *(Appendix written 2026-09-29 and deliberately carries no DOI: none has
+      been minted, and a citation to a deposit that does not exist is the
+      failure this paper argues against. Mint it from a tagged release via
+      Zenodo's GitHub integration, deposit the 139 MB snapshot for
+      run_1790126271 to the same record, then fill in §A.2.)*
 - [ ] Author list, affiliations, and ORCID complete; no AI system as author.
