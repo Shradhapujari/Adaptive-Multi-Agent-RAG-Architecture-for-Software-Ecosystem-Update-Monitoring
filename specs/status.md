@@ -1,11 +1,12 @@
 # Status — pick up here
 
-Living handoff note. Anyone (or any session) starting work reads this first, then
-`specs/roadmap.md` for the phase definitions, then §14 if the paper is what
-you're picking up. **Update this file at the end of a work session**, not
+Living handoff note. Anyone (or any session) starting work reads §15 first for
+where things stand, then `specs/roadmap.md` for the phase definitions, then §14
+for the paper track's history. **Update this file at the end of a work session**, not
 just the code.
 
-Last updated: **2026-09-28** (§14, the paper track, merged in from `HANDOFF.md`;
+Last updated: **2026-09-29** (§15 is where things stand and what is left --
+start there; §14 is the paper track, merged in from `HANDOFF.md`;
 §13 is the Streamlit demo blocker and its retests; §12 is the rules-file ablation; §11 is the Week 3 update;
 §10 is the Week 2 update and the sections above it are the 2026-08-31 snapshot
 from the infra/eval-side session, all kept verbatim so the record of what was
@@ -1080,5 +1081,89 @@ and neither was what it looked like:
 
 Three failures remain in `tests/test_vendor_catalog_outage.py`, which is
 **untracked** — someone's red tests for work in progress, not a regression.
+
+No `run_eval` process was running when this was written.
+
+---
+
+## 15. Where things stand — 2026-09-29
+
+Written at the end of a session that closed the paper-track backlog §14.3 opened
+and left the repository with CI for the first time. §14 is the paper track's
+merged handoff; this is what changed after it and what is actually left.
+
+### 15.1 What landed
+
+**The branch backlog is gone.** `feat/manager-round-budget` merged (PR #81),
+carrying five days of paper, provenance and docs work alongside its own feature.
+26 merged branches were deleted, remote and local; six unmerged ones remain
+(`cli/loop-ux`, `feat/single-agent-button`, `fix/advisory-vendor-mismatch`,
+`fix/cited-count-and-sentiment-label`, `fix/one-line-caption-names-the-presenter`,
+`fix/run-all-points-at-real-demos`). Deleted tips are recoverable from
+`git reflog`; every commit is on `main` regardless.
+
+**CI exists.** `.github/workflows/tests.yml` runs two jobs on every pull request
+and every push to `main`: `pytest` (~45 s) and `refs` (~7 s). Before this the
+only thing behind a merge was whoever remembered to run pytest.
+
+**The suite is offline and honest.** Two defects, one hiding the other:
+`test_catalog_outage.py` leaked a *succeeding* stub of `requests.get` into the
+whole process, so every later test judged vendor extraction against a two-product
+catalog while `catalog_status()` reported itself live and healthy. Removing it
+exposed that the suite had never been offline despite this file claiming so since
+August. `tests/conftest.py` now blocks outbound sockets, with
+`tests/test_offline_guard.py` covering the guard itself.
+**800 tests, ~32 s, no egress** (75 s stubbed, 183 s networked, 32 s offline).
+
+**The paper was read front to back three times.** Five substantive fixes, all of
+a kind no build or linter reports: §3.11's model claim and its evaluation-set
+list, §5.5's "largest evaluation is 500", an orphan sentence about a dataset no
+result uses, and three weak citations propping up our own contribution. The
+n=1,000 result is now in the abstract, which fits one page again. The third pass
+found nothing, which is the useful signal: pass one found three, pass two two,
+pass three none.
+
+**`scripts/check_refs.py` now catches both families.** Structural pointer faults
+(dangling `\cite`, `Table~\ref{fig:...}`, `item~8` in a seven-item list,
+`Table S6` at a supplement numbering its tables 1–4) and section drift (a
+generation or judging model the results use that §3.11 never names; a "largest
+evaluation" superlative in §5.5 that disagrees with §4). Verified by
+reintroducing the real defects, not only by its `--selfcheck`.
+
+### 15.2 What is left
+
+Nothing here is blocked on reading the paper again. Each item needs a decision, a
+run, or someone else's answer.
+
+1. **Journal-first eligibility.** Whether the AgenticSE '26 proceedings status
+   satisfies TOSEM's journal-first rules. Never confirmed, carried since August,
+   and the only item that could invalidate the submission rather than weaken it.
+   Needs an answer from the venue, not from us. **Do this first.**
+2. **Independent judge (threat T2).** `ollama:llama3.1` judges a pipeline it also
+   generates for. §5.5 states the threat and the published agreement figures it
+   rests on, which is honest but not a defence. `--judge openai:gpt-4o` with
+   `OPENAI_API_KEY`; the answer-quality finding already has a second-family
+   re-judge on 40 questions, the retrieval judgments have none.
+3. **No head-to-head against published systems.** Researched, not started;
+   FlashRAG and RAGLAB are the cheap route, and §2.5 defends the omission in
+   terms a reviewer may still press. Recorded and unverified: RAGLAB's ColBERT
+   server wants ~60 GB against this machine's 24 GB.
+4. **Artifact DOI and the similarity check.** Both unticked in
+   `specs/writing.md` §7 since August. The DOI needs an archived snapshot of the
+   run behind the headline table; §4 of this file says which snapshots do not
+   travel in git.
+5. **The Streamlit demo still declines every question** (§13). Open blocker for
+   live demos, unchanged. The CLI is the demo path until the retrieval-to-
+   generation gap §13 identifies is chased.
+6. **`tests/test_vendor_catalog_outage.py` is untracked and red** — someone's
+   work in progress, deliberately left alone. Three failures, not a regression.
+
+### 15.3 What CI does and does not protect
+
+It runs the suite and the cross-reference sweep. It does not read the paper.
+Three of the five fixes this session came from reading the typeset PDF end to
+end, and two of those three are now automated; the third — an orphan sentence
+that was merely irrelevant — is not detectable mechanically and never will be.
+Budget a full read before submission regardless of what CI says.
 
 No `run_eval` process was running when this was written.
