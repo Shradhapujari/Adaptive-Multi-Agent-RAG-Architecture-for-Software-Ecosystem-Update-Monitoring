@@ -2664,9 +2664,19 @@ what it received. The defect lived in what one agent handed another --- the
 rewritten query \emph{replacing} the user's question at every endpoint --- and
 22 of the 23 relevant documents were never fetched
 (Section~\ref{sec:localizing}). No unit test of any component fails on this,
-because no component is wrong. The diagnosis required exposing the pre-rerank
-candidate pool and counting documents in it, which is an inspection of the
-\emph{seams} rather than of the parts.
+because no component is wrong. The diagnosis required
+exposing the pre-rerank candidate pool and counting documents in it, which is an
+inspection of the \emph{seams} rather than of the parts.
+
+One question makes the seam visible on its own. Asked ``What was the Linux
+version on January 1st 2026?'', the pipeline carried the date constraint
+correctly through the rewriter and dropped it at the retrieval call: the
+rewriter preserved it, the retriever was never given it, and neither violated
+its own contract (Section~S11 of the supplementary material). What a user sees
+is an answer about the wrong release. What a per-component test sees is two
+components passing. The fault is visible only from a position that holds both
+sides of the handoff at once, and no agent in the pipeline occupies that
+position.
 
 \textbf{The system's own quality signal can move the wrong way with
 confidence.} The bespoke retrieval score rose 17.2\% when the architecture was
@@ -2753,6 +2763,20 @@ human-assessor sample was drawn, and that omission is not a gap in diligence but
 the structural limit of the design: an automated evaluation of an automated
 system can establish that a result is robust to the choice of automaton, and
 cannot establish that it is right.
+
+What that limit costs is concrete, and this paper contains the case. On the 72
+questions carrying a reference answer, the template arm scores 0.129 higher on
+correctness than either prose arm ($p=0.002$) --- a clean, reproducible,
+architecturally flattering result. Reading the winning answers shows what the
+judge rewarded. They \emph{decline}: they state that the sources do not cover
+the question, which is the same abstention the prose arms make. They decline
+under a ``VERIFIED from live APIs'' header followed by a list of version
+strings, and the judge scores that 0.7 against a reference the answer does not
+contain (Section~\ref{sec:leak}). The measurement is sound and it is measuring
+presentation. No aggregate could have caught this, because the aggregate is what
+was fooled, and no second automated judge settles it either: the format that
+misleads one model is available to mislead another. Someone had to open the
+answers and read them.
 
 \subsubsection{Where This Leaves the Division of Labour}
 
