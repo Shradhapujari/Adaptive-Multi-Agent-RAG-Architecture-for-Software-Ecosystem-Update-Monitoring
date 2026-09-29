@@ -994,6 +994,10 @@ Recorded so that a stale copy found in git history is recognisable as stale.
    n=1000 measurements (`run_1790365310`, `run_1790415950`) are not in it. The
    paper states its own caveats for these, but the provenance map is behind the
    paper, which is the gap that file exists to close.
+   *(Closed 2026-09-28: all four recorded, `67507e3`. Writing them up found an
+   overstatement in the paper -- the template arm's answers carry a retrieval
+   timestamp, so they cannot reproduce across runs and its answer metrics move;
+   retrieval reproduces document for document. The paper now says so.)*
 
 ### 14.4 Traps from `HANDOFF.md` that are still true
 
