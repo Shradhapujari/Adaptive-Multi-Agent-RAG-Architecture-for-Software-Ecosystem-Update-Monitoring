@@ -1316,8 +1316,9 @@ assertion, so we report exact ones. The multi-agent arm is worse on seven of the
 ten questions and tied on the remaining three, never better
 (Figure~\ref{fig:inversion-per-query}); the mean paired
 nDCG@3 difference is $-0.620$ with a percentile bootstrap 95\% CI of
-$[-0.865, -0.348]$, an exact two-sided Wilcoxon signed-rank $p$ of $0.016$, and
-a standardized effect size $d_z = -1.39$. A sign-flip permutation test on the
+$[-0.865, -0.348]$~\cite{efron1993bootstrap}, an exact two-sided Wilcoxon
+signed-rank $p$ of $0.016$~\cite{wilcoxon1945}, and a standardized effect size
+$d_z = -1.39$~\cite{cohen1988power}. A sign-flip permutation test on the
 mean difference gives the same $p$. The direction is consistent across every
 metric we computed: nDCG@1 $-0.667$, nDCG@5 $-0.632$, MRR $-0.550$, Recall@5
 $-0.550$, with $p \le 0.031$ throughout.
@@ -1859,7 +1860,7 @@ Llama~3.1 for every generation call, reranker \texttt{embed:nomic-embed-text},
 judge \texttt{llama3.1}, $\text{top-}k=4$. Mean over 500 questions; latency is
 the per-question median. The lower rows give the paired difference against
 \texttt{single\_agent}, the questions won/tied/lost, and the Holm-corrected
-$p$ across the family. Correctness ($n=72$, the ground-truth subset) is
+$p$~\cite{holm1979} across the family. Correctness ($n=72$, the ground-truth subset) is
 omitted from the paired rows for the reason given in the text. Run
 \texttt{run\_1789703506}, which queried the endpoints live and recorded them:
 by Section~S1 of the supplementary material its three arms share one corpus and its numbers
@@ -2783,7 +2784,8 @@ The judge is the clearest case, because we tested it. All relevance judgments
 here were produced by \texttt{llama3.1}, which also synthesises two of the three
 arms. Re-scoring every judgment with a different model family leaves the
 ordering intact and every paired difference's sign unchanged, and per-label
-agreement is $\kappa=0.370$ (Section~\ref{sec:threats}). The ordering survived
+agreement is Cohen's $\kappa=0.370$~\cite{cohen1960coefficient}
+(Section~\ref{sec:threats}). The ordering survived
 automated replacement; the \emph{labels} did not agree, and the disagreement is
 one-directional, which two language models cannot settle between themselves. No
 human-assessor sample was drawn, and that omission is not a gap in diligence but
