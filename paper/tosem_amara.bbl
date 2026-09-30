@@ -2,7 +2,7 @@
 %%% Do NOT edit. File created by BibTeX with style
 %%% ACM-Reference-Format-Journals [18-Jan-2012].
 
-\begin{thebibliography}{116}
+\begin{thebibliography}{117}
 
 %%% ====================================================================
 %%% NOTE TO THE USER: you can override these defaults by providing
@@ -1307,6 +1307,21 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{pages}{14918--14937}.
 \newblock
 \href{https://doi.org/10.18653/v1/2023.emnlp-main.923}{doi:\nolinkurl{10.18653/v1/2023.emnlp-main.923}}
+
+
+\bibitem[Takerngsaksiri et~al\mbox{.}(2025)]%
+        {takerngsaksiri2025hula}
+\bibfield{author}{\bibinfo{person}{W. Takerngsaksiri}, \bibinfo{person}{J.
+  Pasuksmit}, \bibinfo{person}{P. Thongtanunam}, \bibinfo{person}{C.
+  Tantithamthavorn}, \bibinfo{person}{R. Zhang}, \bibinfo{person}{F. Jiang},
+  \bibinfo{person}{J. Li}, \bibinfo{person}{E. Cook}, \bibinfo{person}{K.
+  Chen}, {and} \bibinfo{person}{M. Wu}.} \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{Human-In-The-Loop Software Development Agents}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 47th {IEEE/ACM} International
+  Conference on Software Engineering: Software Engineering in Practice
+  ({ICSE-SEIP})}}. \bibinfo{publisher}{{IEEE}}, \bibinfo{pages}{342--352}.
+\newblock
+\href{https://doi.org/10.1109/ICSE-SEIP66354.2025.00036}{doi:\nolinkurl{10.1109/ICSE-SEIP66354.2025.00036}}
 
 
 \bibitem[Thomas et~al\mbox{.}(2024)]%
