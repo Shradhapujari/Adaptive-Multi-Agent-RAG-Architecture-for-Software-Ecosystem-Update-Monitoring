@@ -2,7 +2,7 @@
 %%% Do NOT edit. File created by BibTeX with style
 %%% ACM-Reference-Format-Journals [18-Jan-2012].
 
-\begin{thebibliography}{117}
+\begin{thebibliography}{122}
 
 %%% ====================================================================
 %%% NOTE TO THE USER: you can override these defaults by providing
@@ -241,6 +241,28 @@
 \href{https://doi.org/10.18653/v1/2025.acl-long.131}{doi:\nolinkurl{10.18653/v1/2025.acl-long.131}}
 
 
+\bibitem[Cohen(1960)]%
+        {cohen1960coefficient}
+\bibfield{author}{\bibinfo{person}{J. Cohen}.} \bibinfo{year}{1960}\natexlab{}.
+\newblock \showarticletitle{A Coefficient of Agreement for Nominal Scales}.
+\newblock \bibinfo{journal}{\emph{Educational and Psychological Measurement}}
+  \bibinfo{volume}{20}, \bibinfo{number}{1} (\bibinfo{year}{1960}),
+  \bibinfo{pages}{37--46}.
+\newblock
+\href{https://doi.org/10.1177/001316446002000104}{doi:\nolinkurl{10.1177/001316446002000104}}
+
+
+\bibitem[Cohen(1988)]%
+        {cohen1988power}
+\bibfield{author}{\bibinfo{person}{J. Cohen}.} \bibinfo{year}{1988}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{Statistical Power Analysis for the
+  Behavioral Sciences} (\bibinfo{edition}{2nd} ed.)}.
+\newblock \bibinfo{publisher}{Lawrence Erlbaum Associates},
+  \bibinfo{address}{Hillsdale, NJ, USA}.
+\newblock
+\href{https://doi.org/10.4324/9780203771587}{doi:\nolinkurl{10.4324/9780203771587}}
+
+
 \bibitem[Collins-Thompson(2009)]%
         {collinsthompson2009risk}
 \bibfield{author}{\bibinfo{person}{K. Collins-Thompson}.}
@@ -296,6 +318,16 @@
   \bibinfo{pages}{2329--2345}.
 \newblock
 \href{https://doi.org/10.1109/TSE.2025.3586082}{doi:\nolinkurl{10.1109/TSE.2025.3586082}}
+
+
+\bibitem[Efron and Tibshirani(1993)]%
+        {efron1993bootstrap}
+\bibfield{author}{\bibinfo{person}{B. Efron} {and} \bibinfo{person}{R.~J.
+  Tibshirani}.} \bibinfo{year}{1993}\natexlab{}.
+\newblock \bibinfo{booktitle}{\emph{An Introduction to the Bootstrap}}.
+\newblock \bibinfo{publisher}{Springer US}, \bibinfo{address}{Boston, MA, USA}.
+\newblock
+\href{https://doi.org/10.1007/978-1-4899-4541-9}{doi:\nolinkurl{10.1007/978-1-4899-4541-9}}
 
 
 \bibitem[Faggioli et~al\mbox{.}(2023)]%
@@ -487,6 +519,19 @@
   \bibinfo{pages}{763--773}.
 \newblock
 \href{https://doi.org/10.1145/3106237.3106290}{doi:\nolinkurl{10.1145/3106237.3106290}}
+
+
+\bibitem[Holm(1979)]%
+        {holm1979}
+\bibfield{author}{\bibinfo{person}{S. Holm}.} \bibinfo{year}{1979}\natexlab{}.
+\newblock \showarticletitle{A Simple Sequentially Rejective Multiple Test
+  Procedure}.
+\newblock \bibinfo{journal}{\emph{Scandinavian Journal of Statistics}}
+  \bibinfo{volume}{6}, \bibinfo{number}{2} (\bibinfo{year}{1979}),
+  \bibinfo{pages}{65--70}.
+\newblock
+\newblock
+\shownote{JSTOR 4615733}.
 
 
 \bibitem[Hong et~al\mbox{.}(2024)]%
@@ -1466,6 +1511,17 @@ Retrieved August 2026 from \tempurl}
   \bibinfo{pages}{1987--2003}.
 \newblock
 \href{https://doi.org/10.18653/v1/2024.findings-eacl.134}{doi:\nolinkurl{10.18653/v1/2024.findings-eacl.134}}
+
+
+\bibitem[Wilcoxon(1945)]%
+        {wilcoxon1945}
+\bibfield{author}{\bibinfo{person}{F. Wilcoxon}.}
+  \bibinfo{year}{1945}\natexlab{}.
+\newblock \showarticletitle{Individual Comparisons by Ranking Methods}.
+\newblock \bibinfo{journal}{\emph{Biometrics Bulletin}} \bibinfo{volume}{1},
+  \bibinfo{number}{6} (\bibinfo{year}{1945}), \bibinfo{pages}{80--83}.
+\newblock
+\href{https://doi.org/10.2307/3001968}{doi:\nolinkurl{10.2307/3001968}}
 
 
 \bibitem[Wohlin et~al\mbox{.}(2012)]%
