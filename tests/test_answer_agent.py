@@ -565,3 +565,37 @@ def test_top_comment_at_the_floor_is_the_answer():
     at = dict(_WITH_TOP, top_comment={**_WITH_TOP["top_comment"],
                                       "score": answer_agent.TOP_COMMENT_FLOOR})
     assert collect_evidence(at)[0].kind == "answer"
+
+
+def test_split_summary_separates_the_headline_from_the_findings():
+    """The UI shows the headline alone, so it must not swallow the list."""
+    text = ("Users report three problems with the latest Edge update [S1].\n\n"
+            "1. Dark mode options removed in 144.0.3719.82 [S2].\n"
+            "2. Default search engine hijacked after KB5121767 [S1].")
+    head, items = answer_agent.split_summary(text)
+    assert head == "Users report three problems with the latest Edge update [S1]."
+    assert len(items) == 2
+    assert items[0].startswith("1.")
+
+    # A one-finding answer is all headline and no list.
+    head, items = answer_agent.split_summary("No known Siri issues [S1].")
+    assert head == "No known Siri issues [S1]."
+    assert items == []
+
+    # A model that skipped the summary still yields a usable headline rather
+    # than rendering an empty success box above the findings.
+    head, items = answer_agent.split_summary("1. Only an item [S1].\n2. Two [S2].")
+    assert head == "Only an item [S1]."
+    assert items == ["2. Two [S2]."]
+
+    assert answer_agent.split_summary("") == ("", [])
+
+
+def test_by_source_groups_evidence_under_the_sections_the_ui_offers():
+    groups = answer_agent.by_source(collect_evidence(RESULTS))
+    # Release notes and advisories are filed apart: an advisory's version is
+    # the affected one, not a version that shipped.
+    assert "Release notes" in groups
+    assert all(e.kind == "release" for e in groups["Release notes"])
+    for section, rows in groups.items():
+        assert rows, f"{section} listed with no sources"
