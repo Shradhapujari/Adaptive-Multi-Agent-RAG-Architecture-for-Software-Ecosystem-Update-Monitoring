@@ -127,6 +127,17 @@ def test_prompt_names_the_bracket_rule_and_only_listed_sources():
     assert "Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28" in prompt
 
 
+def test_prompt_forbids_an_unsupported_severity_grade():
+    """'Any critical vulnerabilities?' over SECURITY-tagged but ungraded rows
+    produced 'no critical vulnerabilities' followed by five of them listed
+    as findings -- the model answered a severity question the sources never
+    graded, then contradicted its own headline with the list under it."""
+    ev = collect_evidence(RESULTS)
+    prompt = build_cited_prompt("Any critical Linux vulnerabilities?", ev)
+    assert "must not contradict the list" in prompt
+    assert "do not grade severity" in prompt.lower()
+
+
 class _StubClient:
     spec = "stub:model"
 
