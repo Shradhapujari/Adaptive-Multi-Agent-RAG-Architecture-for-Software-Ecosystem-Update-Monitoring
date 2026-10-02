@@ -47,6 +47,9 @@ __all__ = [
     "build_cited_prompt",
     "deterministic_paragraph",
     "_one_sentence",
+    "split_summary",
+    "by_source",
+    "SOURCE_SECTIONS",
     "present_answer",
     "CITATION_RULE",
     "TOP_COMMENT_FLOOR",
@@ -114,21 +117,39 @@ def expand_tags(text: str, evidence) -> str:
 
 
 CITATION_RULE = (
-    "Answer in ONE sentence of plain English \u2014 no more. If a [Top comment \u2026] "
-    "source is listed, it is the Reddit community's own highest-upvoted answer "
-    "to this question: base the sentence on what it says and cite it. "
-    "Otherwise use the highest-upvoted community post, or the release notes "
-    "when no community answer is listed. Cite the source it came from by "
-    "its short tag in square brackets, e.g. [S1] or [S3] \u2014 copy the tag "
-    "exactly and put nothing else inside the brackets. Cite only tags that "
-    "appear in the list. "
-    "Do not invent versions, dates or CVE numbers. If the sources do not "
-    "answer the question, say so plainly in that one sentence.\n"
+    "State the ANSWER ITSELF \u2014 the specific thing that is wrong, changed or "
+    "fixed. Never answer with where it was reported: \u201cthere are known issues, "
+    "as reported by the community\u201d names no issue and is not an answer. "
+    "Name the symptom, the version, the fix.\n"
+    "Shape \u2014 follow it exactly:\n"
+    "The FIRST line is one sentence that answers the question directly and "
+    "completely enough to stand alone. It is what a reader who stops after one "
+    "line should take away.\n"
+    "If the sources describe SEVERAL distinct findings, leave a blank line and "
+    "then list them, one per line, as \u201c1. \u2026\u201d, \u201c2. \u2026\u201d \u2014 at most five, most "
+    "important first. If there is only one finding, write the first line and "
+    "stop. Nothing else.\n"
+    "If a [Top comment \u2026] source is listed, it is the Reddit community's own "
+    "highest-upvoted answer to this question: base the answer on what it says "
+    "and cite it. Otherwise use the community posts' reported detail, or the "
+    "release notes when no community answer is listed. "
+    "EVERY line you write must end with its source's short tag in square "
+    "brackets \u2014 the summary line and every numbered item alike; a line with "
+    "no tag is not acceptable. Copy the tag exactly and put nothing else "
+    "inside the brackets; cite only tags that appear in the source list. "
+    "Required shape:\n"
+    "Users report three problems with the latest Edge update [S1].\n"
+    "\n"
+    "1. Dark mode options were removed from edge://flags in 144.0.3719.82 [S2].\n"
+    "2. The default search engine was hijacked after KB5121767 [S1].\n"
+    "Do not invent versions, dates, CVE numbers or symptoms: every issue you "
+    "name must appear in a source. If the sources genuinely do not answer the "
+    "question, say exactly that in one sentence and name what they do cover.\n"
     "The sources were retrieved for this question and each carries its own "
     "date and, where applicable, a SECURITY marker: a dated source inside the "
     "time frame IS an answer to a question about that time frame, so report it "
     "rather than saying nothing was found.\n"
-    "Output the one sentence only \u2014 no preamble, no heading, no surrounding "
+    "Output the answer only \u2014 no preamble, no heading, no surrounding "
     "quotation marks, no closing advice about checking elsewhere."
 )
 
@@ -148,6 +169,53 @@ _SENT_END = re.compile(r"(?<=[.!?])\s+(?=[\"\u201c\'(]?[A-Z])")
 def _one_sentence(text: str) -> str:
     """The first sentence, citations intact. The rule says one; models drift."""
     return _SENT_END.split((text or "").strip(), 1)[0].strip()
+
+
+def split_summary(text: str):
+    """Split a presented answer into its headline and its numbered findings.
+
+    The presenter is asked for one summary sentence, then an optional numbered
+    list. The UI shows the headline on its own so a reader who wants only the
+    answer gets exactly that, and keeps the findings for whoever reads on.
+    Returns ``(headline, [item, ...])``; the list is empty for a one-line
+    answer, and a model that ignored the shape still yields a usable headline.
+    """
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    if not lines:
+        return "", []
+    items = [ln for ln in lines if _LIST_ITEM.match(ln)]
+    head = next((ln for ln in lines if not _LIST_ITEM.match(ln)), "")
+    if not head:
+        # All list, no summary: lead with the first finding rather than
+        # showing an empty headline above it.
+        return _one_sentence(_LIST_ITEM.sub("", items[0])), items[1:]
+    return _one_sentence(head), items
+
+
+# The kinds `collect_evidence` emits, in the order the UI offers them, with
+# the label each gets on screen.
+SOURCE_SECTIONS = (
+    ("community", "Community"),
+    ("answer", "Community"),
+    ("release", "Release notes"),
+    ("advisory", "Security"),
+    ("cve", "Security"),
+)
+
+
+def by_source(evidence):
+    """Group evidence under the section headings the UI offers.
+
+    Readers arrive wanting one kind of source -- "what do the release notes
+    say", "what are people actually reporting" -- and were being handed one
+    undifferentiated answer to search through.
+    """
+    out = {}
+    for kind, section in SOURCE_SECTIONS:
+        for e in evidence or ():
+            if e.kind == kind:
+                out.setdefault(section, []).append(e)
+    return out
 
 
 @dataclass
@@ -289,6 +357,10 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
         label = "Community" + (f" - {sub}" if sub else "") + (f", {date}" if date else "")
         ev.append(Evidence(
             label=label, kind="community", title=_clean(p.get("title", ""), 160),
+            # The post's own text and its best reply. Without this the only
+            # community fact reaching the presenter was a headline, so it could
+            # report that a thread existed but not what it said.
+            detail=_clean(p.get("body", ""), 400),
             url=p.get("url", ""), date=date, sentiment=p.get("sentiment", ""),
         ))
 
@@ -313,6 +385,9 @@ def build_cited_prompt(query: str, evidence: List[Evidence],
 _PREAMBLE = re.compile(
     r"^\s*(?:here (?:is|'s)[^\n:]*:|answer\s*:|paragraph\s*:)\s*", re.I)
 
+# "1." / "2)" at the start of a line — an enumerated answer.
+_LIST_ITEM = re.compile(r"^\s*\d+[.)]\s+", re.M)
+
 
 def _strip_preamble(text: str) -> str:
     """Drop the meta line and wrapping quotes small models like to add."""
@@ -320,7 +395,13 @@ def _strip_preamble(text: str) -> str:
     # A model that announces the paragraph usually puts it in the block below.
     parts = [p.strip() for p in out.split("\n\n") if p.strip()]
     parts = [p for p in parts if not _PREAMBLE.fullmatch(p + " ")] or parts
-    if len(parts) > 1:
+    if _LIST_ITEM.search(out):
+        # An enumerated answer is a summary line followed by its items, often
+        # separated by a blank line. The longest-cited-block rule below would
+        # keep the items and throw the summary away, so for a list only an
+        # explicit preamble is dropped.
+        out = "\n\n".join(p for p in parts if not _PREAMBLE.match(p)) or out
+    elif len(parts) > 1:
         keep = [p for p in parts if not _PREAMBLE.match(p)]
         # Prefer the longest cited block; a preface rarely carries a citation.
         cited = [p for p in keep if "[" in p]
@@ -544,7 +625,13 @@ def _present(query: str, results: Dict, model_spec: Optional[str] = None,
                     # unclosed "[" never parses as a citation, so a real answer
                     # came back "uncited" (stored run #50).
                     temperature=0.0, max_tokens=400)
-                text = expand_tags(_one_sentence(_strip_preamble(text)), evidence)
+                # Not trimmed to one sentence here. That trim is what capped
+                # the answer at a single clause, so a question with five
+                # distinct findings could only ever report one of them -- and
+                # the safest single clause a model can write is the one that
+                # names no finding at all. The compact view still collapses
+                # this to a line (`app_1._one_line`); details keeps the list.
+                text = expand_tags(_strip_preamble(text), evidence)
                 if text:
                     # The model was given these sources and nothing else, so
                     # anything it states outside them is invented. Failing the

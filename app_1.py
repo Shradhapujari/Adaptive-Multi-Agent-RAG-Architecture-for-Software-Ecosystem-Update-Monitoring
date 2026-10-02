@@ -292,6 +292,29 @@ def is_security_post(row: dict) -> bool:
 
 # ── AGENT 2: COMMUNITY AGENT ─────────────────────────────
 
+def _post_report(p: dict) -> str:
+    """What the post actually says: the author's text, then its best reply.
+
+    Only `title` used to survive this function, so an answer composed from
+    these rows could say a thread about the question existed but never what
+    anyone in it reported -- which is how "there are known issues, as reported
+    by the community" became the best the presenter could honestly write.
+    `author_description` is the post body and `comments[].body` the replies;
+    both are on the row already and were being dropped.
+    """
+    parts = []
+    body = (p.get("author_description") or "").strip()
+    if body:
+        parts.append(body)
+    replies = [c for c in (p.get("comments") or [])
+               if (c.get("body") or "").strip()]
+    if replies:
+        best = max(replies, key=lambda c: c.get("score") or 0)
+        parts.append(f"Top reply ({best.get('score', 0)} pts): "
+                     f"{best['body'].strip()}")
+    return " — ".join(parts)
+
+
 def fetch_community_feedback(query: str, limit: int = 5) -> list:
     """Fetches community Reddit feedback from releasetrain.io."""
     data = _get_json(REDDIT_POSITIVE_API, {"q": query, "limit": limit},
@@ -300,6 +323,7 @@ def fetch_community_feedback(query: str, limit: int = 5) -> list:
         posts = data.get("data", [])
         return [{
             "title":      p.get("title", ""),
+            "body":       _post_report(p),
             "reddit_id":  p.get("redditId", ""),
             "subreddit":  p.get("subreddit", ""),
             "url":        p.get("url", ""),
@@ -872,7 +896,39 @@ def _one_line(text: str) -> str:
     server.` -- with the closing quote and the citation gone.
     """
     plain = _CITE.sub("", text or "").strip()
-    return answer_agent._one_sentence(plain) or "No answer could be composed."
+    head, _items = answer_agent.split_summary(plain)
+    return head or answer_agent._one_sentence(plain) or "No answer could be composed."
+
+
+def render_answer(presented, *, key: str = "") -> None:
+    """The answer, then the findings, then the sources split by where they came from.
+
+    One block, used by both arms, so the two columns cannot drift apart. The
+    headline is the whole answer for a reader who wants one line; the numbered
+    findings are for one who wants the specifics; the tabs are for one who
+    arrived asking only what the community -- or only what the release notes --
+    actually said, and who otherwise had to read all of it to find out.
+    """
+    head, items = answer_agent.split_summary(presented.text)
+    st.success(_CITE.sub("", head) if head else presented.text)
+
+    if items:
+        with st.expander(f"What was found ({len(items)})", expanded=True):
+            for it in items:
+                st.markdown(f"- {it}")
+
+    groups = answer_agent.by_source(presented.evidence)
+    if not groups:
+        return
+    names = [f"{n} ({len(v)})" for n, v in groups.items()]
+    for tab, (_name, rows) in zip(st.tabs(names), groups.items()):
+        with tab:
+            for e in rows:
+                st.markdown(f"**{e.title}**" + (f"  ·  _{e.date}_" if e.date else ""))
+                if e.detail:
+                    st.caption(e.detail)
+                if e.url:
+                    st.caption(e.url)
 
 
 def _answer_caption(presented, n_cited: int, secs) -> str:
@@ -1622,7 +1678,10 @@ elif run_btn and query and compare_mode:
         if tc and show_details:
             st.info(f"**Top-voted comment ({tc.get('score', 0)} points, "
                     f"u/{tc.get('author','')}):** {tc.get('body','')[:600]}")
-        st.success(presented.text if show_details else _one_line(presented.text))
+        if show_details:
+            render_answer(presented, key="cmp")
+        else:
+            st.success(_one_line(presented.text))
         ev = results["evaluation"]
         st.caption(f"{ev['community_count']} community · {ev['release_count']} "
                    f"releases · {ev['cve_count']} CVE · quality {ev['quality']:.2f} · "
@@ -2108,7 +2167,7 @@ elif run_btn and query:
         st.markdown("---")
         st.markdown("### Final Answer")
 
-        st.success(presented.text)
+        render_answer(presented, key="marag")
 
         st.caption(_answer_caption(presented, len(cited), present_secs))
 
