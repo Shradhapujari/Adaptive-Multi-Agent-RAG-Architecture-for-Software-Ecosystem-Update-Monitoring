@@ -35,6 +35,16 @@ def test_a_live_catalog_says_nothing(catalog):
     assert app_1._catalog_note() is None
 
 
+def test_nothing_loaded_yet_is_not_an_outage(catalog):
+    """The import-time state is source "unloaded" with no errors, and
+    `degraded` is true for it. A call site that ran before the first fetch
+    would announce "neither the live endpoint nor a local copy could be read"
+    having asked neither. Unreachable while every call site runs after the
+    pipeline; one banner moved up the page is all it takes."""
+    catalog("unloaded", [], [])
+    assert app_1._catalog_note() is None
+
+
 def test_a_cached_catalog_names_the_source_the_count_and_the_cause(catalog):
     catalog("cache", ["x"] * 5613, ["vendor names: HTTPError: 502"])
     note = app_1._catalog_note()
