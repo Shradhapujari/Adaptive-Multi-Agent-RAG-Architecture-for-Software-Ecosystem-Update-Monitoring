@@ -157,6 +157,22 @@ def test_guardrail_rejects_a_severity_no_source_states():
     assert any(x.code == "ungraded_severity" for x in v.violations)
 
 
+def test_a_refusal_may_name_the_grade_it_could_not_establish():
+    """The honest answer to an ungradeable severity question has to be able to
+    say the word: flagging it would leave nothing correct to write. Denying
+    the grade is not a refusal and stays checked."""
+    import guardrail
+    ev = collect_evidence(RESULTS)
+    tag = next(iter(e.label for e in ev))
+    refusal = ("The sources do not rate severity, so I cannot say whether any "
+               "critical vulnerability exists.")
+    assert guardrail.check(refusal, ev, "Any critical Linux vulnerabilities?").ok
+    denial = f"There are no critical vulnerabilities in Linux [{tag}]."
+    codes = {x.code for x in guardrail.check(
+        denial, ev, "Any critical Linux vulnerabilities?").violations}
+    assert "ungraded_severity" in codes
+
+
 def test_feedback_prompt_puts_the_rejection_before_the_prompt():
     """Appended after the prompt, llama3.1 returned the rejected answer
     byte-identical on the live Linux question; rejection-first fixed it."""

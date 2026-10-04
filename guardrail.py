@@ -380,8 +380,15 @@ def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
     # asked "are there critical ones?" does not make "there are critical ones"
     # supported -- answering the grade either way is the same unsupported
     # claim, which is the bug this check exists for.
+    # A refusal is allowed to name the grade it could not establish: "the
+    # sources do not rate severity, so I cannot say whether any critical
+    # vulnerability exists" is the honest answer, and flagging it would push
+    # the model off the one thing it should say. Denying the grade is not a
+    # refusal and does not get the pass: "there are no critical
+    # vulnerabilities" asserts, fails `_asserts`, and is still checked.
     low = haystack.lower()
-    graded = {g.lower() for m in _SEVERITY_RE.findall(text) for g in m if g}
+    graded = set() if abstained else {
+        g.lower() for m in _SEVERITY_RE.findall(text) for g in m if g}
     for word in sorted(graded):
         if word not in low:
             # Worded as an instruction: this text is read back to the model
