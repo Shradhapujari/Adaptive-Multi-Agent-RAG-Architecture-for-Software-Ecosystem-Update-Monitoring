@@ -596,6 +596,57 @@ def _release_rows(docs: list) -> list:
     return out
 
 
+def _short(err: str, limit: int = 90) -> str:
+    """One readable clause from an exception string.
+
+    requests puts its whole retry history in str(e): the connection pool, the
+    host and port, the url and a nested cause, which is six lines on screen and
+    tells the reader nothing they act on. What survives here is the call that
+    failed, the exception type and the start of its message -- enough to tell a
+    502 from a timeout from a refused connection.
+    """
+    out = err.split(" (Caused by")[0]
+    out = re.sub(r"HTTP(?:S)?ConnectionPool\([^)]*\):\s*", "", out)
+    out = re.sub(r"\s+for url:.*$", "", out)
+    out = out.split(": /")[0].strip().rstrip(":")
+    return out if len(out) <= limit else out[:limit].rstrip() + "…"
+
+
+def _catalog_note() -> Optional[str]:
+    """One line naming a degraded vendor catalog, or None when it is live.
+
+    `extract_vendor` returns [] both when a question names no product and when
+    the catalog could not be loaded, and those mean opposite things: the first
+    is a finding about the question, the second is an outage wearing its
+    clothes. `multiagent_rag_v3.catalog_status()` has told them apart since the
+    local-catalog fallback went in, but nothing read it, so a degraded catalog
+    still reached the reader as stdout on a host nobody is tailing.
+    """
+    import multiagent_rag_v3 as marag
+    st_ = marag.catalog_status()
+    if not st_.get("degraded"):
+        return None
+    # requests puts the whole connection-pool retry dump in str(e), which runs
+    # to six lines of urllib3 internals on screen. The reader needs which call
+    # failed and why, not the pool's retry history; the untruncated text is
+    # still on stdout and in catalog_status()["errors"].
+    why = "; ".join(_short(e) for e in (st_.get("errors") or ())) or "not recorded"
+    if st_.get("source") == "unloaded":
+        # Nothing loaded at all: no product can match, so every question on
+        # this host is searched unscoped until a retry succeeds.
+        return (f"**No product catalog loaded** — neither the live endpoint nor "
+                f"a local copy could be read, so no question is vendor-scoped "
+                f"and “no product matched” below means nothing. Retried every "
+                f"{int(marag.CATALOG_RETRY_SECONDS)}s. Cause: {why}")
+    where = {"cache": "a cached copy on disk",
+             "bundled": "the small bundled list"}.get(
+                 st_.get("source"), str(st_.get("source")))
+    return (f"**Product catalog degraded** — vendor names came from {where} "
+            f"({st_.get('vendors', 0)} names), not the live endpoint. A product "
+            f"missing from it is not matched, so a question about one is not "
+            f"vendor-scoped. Cause: {why}")
+
+
 def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
                  yesno_on: bool = True, unclear_as_no: bool = False,
                  survey_on: bool = True, source: str = "agent",
@@ -1686,6 +1737,12 @@ elif run_btn and query and compare_mode:
         st.caption(f"{ev['community_count']} community · {ev['release_count']} "
                    f"releases · {ev['cve_count']} CVE · quality {ev['quality']:.2f} · "
                    f"source `{source}` · {round(time.time() - t0, 1)}s")
+    # Compare is the default view, so a catalog outage that only warned in the
+    # other two branches was invisible to most visitors. Outside the columns:
+    # it is a property of the run, not of either arm.
+    _cat = _catalog_note()
+    if _cat:
+        st.warning(_cat)
     # The roster and the presenter line belong to the pipeline, and the
     # pipeline just ran -- but these two updates used to live only in the
     # multi-agent branch below. Compare mode left the sidebar reading "Idle --
@@ -1794,6 +1851,11 @@ elif run_btn and query:
                        + " · turn on **Show details** in the sidebar for the evidence.")
         for e in results.get("errors") or []:
             st.error(f"**{e['agent']} feed unreachable** — {e['error']}.")
+        # Same rule as a feed outage: an error the reader has to see, in the
+        # view that shows nothing else.
+        _cat = _catalog_note()
+        if _cat:
+            st.warning(_cat)
 
     if show_details:
         if show_pipeline:
@@ -1821,6 +1883,9 @@ elif run_btn and query:
                 st.error(f"**{e['agent']} feed unreachable** — {e['error']}. "
                          "No documents from this feed are included below, and "
                          "nothing is cited from it.")
+        _cat = _catalog_note()
+        if _cat:
+            st.warning(_cat)
 
         # ── SCREENED DOCUMENTS ────────────────────────────────
         # Dropping is silent to the model and loud here: the model never sees
@@ -1848,6 +1913,14 @@ elif run_btn and query:
                     if gq.vendors:
                         st.success("**Products:** " + ", ".join(
                             f"“{v.matched}” → `{v.name}`" for v in gq.vendors))
+                    elif _catalog_note():
+                        # Not a finding about the question: the catalog this
+                        # was matched against is not the live one, so "none
+                        # matched" may be the outage talking.
+                        st.error("**Products:** none matched — and the catalog "
+                                 "is degraded, so this may be the outage "
+                                 "rather than a question that names no "
+                                 "product. See the catalog warning above.")
                     else:
                         st.warning("**Products:** none matched the catalog — "
                                    "retrieval is not vendor-scoped for this question.")

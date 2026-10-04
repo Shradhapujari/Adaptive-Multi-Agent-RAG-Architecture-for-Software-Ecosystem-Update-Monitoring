@@ -678,6 +678,12 @@ _CATALOG_ERRORS  = []           # why the live fetch was not used, if it was not
 # then pays the live timeout again.
 _CATALOG_RETRY_AFTER = 0.0
 CATALOG_RETRY_SECONDS = 60.0
+# Overridable so the degraded path can be exercised on a host where the real
+# endpoint is up: point it at an unroutable address and the fallback, the
+# banner and the retry floor all run for real. Same seam as
+# MARAG_FETCH_WORKERS; the default is the live endpoint.
+CATALOG_NAMES_URL = os.environ.get(
+    "MARAG_CATALOG_URL", "https://releasetrain.io/api/c/names")
 
 
 def catalog_status() -> dict:
@@ -724,7 +730,7 @@ def load_vendor_lists():
         return
     _CATALOG_ERRORS = []
     try:
-        r1 = requests.get("https://releasetrain.io/api/c/names", timeout=15)
+        r1 = requests.get(CATALOG_NAMES_URL, timeout=15)
         r1.raise_for_status()
         _VENDOR_NAMES = [v.lower() for v in r1.json() if isinstance(v, str)]
         _CATALOG_SOURCE = "live"
