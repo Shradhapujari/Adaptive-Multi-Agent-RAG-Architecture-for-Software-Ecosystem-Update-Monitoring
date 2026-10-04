@@ -127,17 +127,52 @@ def test_prompt_names_the_bracket_rule_and_only_listed_sources():
     assert "Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28" in prompt
 
 
-def test_prompt_forbids_an_unsupported_severity_grade():
+def test_guardrail_rejects_headline_contradicting_its_list():
     """'Any critical vulnerabilities?' over SECURITY-tagged but ungraded rows
-    produced 'no critical vulnerabilities' followed by five of them listed
-    as findings -- the model answered a severity question the sources never
-    graded, then contradicted its own headline with the list under it."""
+    produced 'no critical vulnerabilities' followed by five of them listed --
+    a prompt rule was patched in; now the checker catches it and the model is
+    asked again with the violation named."""
+    import guardrail
     ev = collect_evidence(RESULTS)
-    prompt = build_cited_prompt("Any critical Linux vulnerabilities?", ev)
-    assert "must not contradict the list" in prompt
-    assert "do not grade severity" in prompt.lower()
+    tag = next(iter(e.label for e in ev))
+    bad = (f"There are no critical vulnerabilities in Linux this month [{tag}].\n\n"
+           f"1. CVE fix in the kernel [{tag}].\n2. Another fix [{tag}].")
+    v = guardrail.check(bad, ev, "Any critical Linux vulnerabilities?")
+    codes = {x.code for x in v.violations}
+    assert "contradiction" in codes
+    # Being asked about "critical" is not a licence to grade: the headline
+    # claims a severity the sources never state, either way it is answered.
+    assert "ungraded_severity" in codes
+    ok = (f"There are several security vulnerabilities in Linux this month, and "
+          f"the sources do not rate their severity [{tag}].\n\n"
+          f"1. CVE fix in the kernel [{tag}].")
+    assert guardrail.check(ok, ev, "Any critical Linux vulnerabilities?").ok
 
 
+def test_guardrail_rejects_a_severity_no_source_states():
+    import guardrail
+    ev = collect_evidence(RESULTS)
+    tag = next(iter(e.label for e in ev))
+    v = guardrail.check(f"A critical vulnerability was fixed [{tag}].", ev, "Any Linux updates?")
+    assert any(x.code == "ungraded_severity" for x in v.violations)
+
+
+def test_feedback_prompt_puts_the_rejection_before_the_prompt():
+    """Appended after the prompt, llama3.1 returned the rejected answer
+    byte-identical on the live Linux question; rejection-first fixed it."""
+    import guardrail
+    from answer_agent import feedback_prompt
+    v = guardrail.Verdict(False, [guardrail.Violation("contradiction", "x")])
+    p = feedback_prompt("ORIGINAL-PROMPT", "bad answer", v)
+    assert p.index("bad answer") < p.index("ORIGINAL-PROMPT")
+
+
+def test_feedback_prompt_names_the_violations():
+    import guardrail
+    from answer_agent import feedback_prompt
+    v = guardrail.Verdict(False, [guardrail.Violation("contradiction", "x")])
+    p = feedback_prompt("PROMPT", "bad answer", v)
+    assert "PROMPT" in p and "bad answer" in p and "contradiction: x" in p
 class _StubClient:
     spec = "stub:model"
 
