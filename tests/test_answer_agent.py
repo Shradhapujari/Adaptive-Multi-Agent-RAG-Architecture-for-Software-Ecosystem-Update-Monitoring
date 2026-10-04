@@ -157,6 +157,62 @@ def test_guardrail_rejects_a_severity_no_source_states():
     assert any(x.code == "ungraded_severity" for x in v.violations)
 
 
+def test_a_negated_summary_over_non_findings_is_not_a_contradiction():
+    """"No security vulnerabilities are mentioned" over two items that each say
+    the same thing is not a contradiction: both halves report an absence. Read
+    as one, llama3.1 was asked to assert findings it did not have, returned the
+    identical answer twice and the honest line was thrown away."""
+    import guardrail
+    ev = collect_evidence(RESULTS)
+    tag = next(iter(e.label for e in ev))
+    padded = (f"No security vulnerabilities are mentioned in the release notes [{tag}].\n\n"
+              f"1. Supply chain security is a concern, but no specific "
+              f"vulnerabilities are mentioned [{tag}].\n"
+              f"2. There is no mention of security vulnerabilities [{tag}].")
+    assert guardrail.check(padded, ev, "Any Python vulnerabilities?").ok
+
+
+def test_a_graded_update_is_checked_like_a_graded_vulnerability():
+    """"There are critical Linux updates today" passed the demo sweep while
+    grading a severity no source states -- the noun was "updates", not
+    "vulnerabilities", and nothing else about the claim differs."""
+    import guardrail
+    ev = collect_evidence(RESULTS)
+    tag = next(iter(e.label for e in ev))
+    v = guardrail.check(f"There are critical Linux updates today [{tag}].",
+                        ev, "Any critical Linux updates today?")
+    assert any(x.code == "ungraded_severity" for x in v.violations)
+
+
+def test_an_absence_explained_three_ways_is_not_a_contradiction():
+    """"Is iOS v4.2.0 vulnerable?" came back as a negated summary over three
+    items that each explained the absence -- "but not in iOS v4.2.0", "does not
+    contain information about it". Matching negation phrasings missed both and
+    read them as findings, so a correct abstention was rejected twice and
+    discarded. A bare negation token in the item is the test."""
+    import guardrail
+    ev = collect_evidence(RESULTS)
+    tag = next(iter(e.label for e in ev))
+    ans = ("iOS v4.2.0 is not mentioned in the sources as being vulnerable "
+           f"[{tag}].\n\n"
+           f"1. There is no information about iOS v4.2.0 in the sources [{tag}].\n"
+           f"2. The sources mention vulnerabilities in other versions, but not "
+           f"in iOS v4.2.0 [{tag}].\n"
+           f"3. The latest version does not contain information about it [{tag}].")
+    codes = {x.code for x in guardrail.check(ans, ev, "Is iOS v4.2.0 vulnerable?").violations}
+    assert "contradiction" not in codes, codes
+
+
+def test_the_shape_example_is_marked_as_invented():
+    """llama3.1 returned the format example verbatim as its answer to "Any
+    issues reported by Reddit users this week?" -- Edge, the flags symptom, the
+    version and the KB number, over sources about Chrome and Ubuntu."""
+    ev = collect_evidence(RESULTS)
+    prompt = build_cited_prompt("Any issues reported this week?", ev)
+    assert "FORMAT example only" in prompt
+    assert "never the content" in prompt
+
+
 def test_a_refusal_may_name_the_grade_it_could_not_establish():
     """The honest answer to an ungradeable severity question has to be able to
     say the word: flagging it would leave nothing correct to write. Denying
