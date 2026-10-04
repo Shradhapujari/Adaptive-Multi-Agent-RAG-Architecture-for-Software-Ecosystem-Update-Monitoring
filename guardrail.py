@@ -257,17 +257,40 @@ def _truncated(text: str) -> bool:
 
 
 _LIST_RE = re.compile(r"^\s*\d+[.)]\s+")
-_NEGATED_HEAD_RE = re.compile(
-    r"\b(?:there (?:are|were|is) no|no (?:known |reported |new )?"
-    r"(?:critical |high |moderate |severe |security )?"
-    r"(?:vulnerabilit|issue|problem|bug|update|advisor|cve|finding|report)"
-    r"|none (?:were |was |are |is )?(?:found|reported)|nothing (?:was )?reported)",
+# "No vulnerabilities", "no specific vulnerabilities are mentioned", "none
+# reported", "not mentioned in the sources" — a line that reports an absence.
+_NEGATED_RE = re.compile(
+    r"\bno (?:\w+ ){0,2}"
+    r"(?:vulnerabilit|issue|problem|bug|update|advisor|cve|finding|report|mention)"
+    r"|\bnone (?:were |was |are |is )?(?:found|reported|mentioned)"
+    r"|\bnothing (?:was )?(?:found|reported|mentioned)"
+    r"|\b(?:are|is|were|was) not mentioned",
     re.I)
-# A severity word only when it grades something: "critical vulnerability",
-# "critical security vulnerabilities", "rated critical". Not "high CPU usage".
-_SEVERITY_NOUN = r"(?:severit|vulnerabilit|cve|issue|bug|flaw|advisor|risk|defect)"
+# Whether a numbered ITEM reports a finding is decided by a bare negation
+# token, not by matching phrasings. Enumerating them does not work: "the
+# sources mention vulnerabilities in iOS 26.6.0, but not in iOS v4.2.0" and
+# "it does not contain information about iOS v4.2.0" are both absences in
+# wording no list of negation phrases anticipated, and reading them as
+# findings made a three-item abstention look self-contradicting. An item with
+# any negation in it is not asserting a finding.
+_ITEM_NEGATION = re.compile(
+    r"\b(?:no|not|none|nothing|never|without|absent|unaffected|unknown)\b|n't",
+    re.I)
+# A severity word only when it grades something. Two branches, because the
+# nouns differ in how safely they can be read as a grade.
+#
+# "vulnerability", "CVE", "flaw" are graded nouns: any of the five words in
+# front of one, within a word or two, is a grade.
+_GRADED_NOUN = r"(?:severit|vulnerabilit|cve|issue|bug|flaw|advisor|risk|defect)"
+# "update", "patch", "fix" are not. "high update frequency" and "low latency
+# fix" are ordinary prose, so only the words that have no non-grading reading
+# count here, and they have to sit next to the noun: "critical Linux updates"
+# yes, "low latency fix" no. Found by the demo sweep, where "there are
+# critical Linux updates today" passed while grading nothing any source says.
+_UNGRADED_NOUN = r"(?:update|patch|fix)"
 _SEVERITY_RE = re.compile(
-    r"\b(critical|high|moderate|medium|low)\b(?:\s+\w+){0,2}\s+" + _SEVERITY_NOUN
+    r"\b(critical|high|moderate|medium|low)\b(?:\s+\w+){0,2}\s+" + _GRADED_NOUN
+    + r"|\b(critical|severe|moderate)\b(?:\s+\w+){0,1}\s+" + _UNGRADED_NOUN
     + r"|\b(?:rated|severity(?:\s+of)?)\s+(critical|high|moderate|medium|low)\b", re.I)
 
 
@@ -363,15 +386,29 @@ def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
         if d not in known_dates:
             bad.append(Violation("unsupported_date", f"{d} is in no source"))
 
-    # "There are no critical vulnerabilities" over a numbered list of five:
-    # the second line disproves the first.
+    # A negated summary over a numbered list is only a fault if the list holds
+    # a real finding, which needs the items read, not just counted.
+    #
+    # "No security vulnerabilities are mentioned" over two items that each say
+    # the same thing is not a contradiction -- both halves report an absence --
+    # and flagging it as one asked llama3.1 to assert findings it did not have.
+    # It returned the identical answer twice and the honest line was discarded.
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    if lines and any(_LIST_RE.match(ln) for ln in lines[1:]) \
-            and _NEGATED_HEAD_RE.search(lines[0]):
-        bad.append(Violation(
-            "contradiction",
-            "the summary line says none were found and then lists findings — "
-            "rewrite the summary so it states that the listed findings exist"))
+    items = [ln for ln in lines[1:] if _LIST_RE.match(ln)]
+    if items and _NEGATED_RE.search(lines[0]):
+        # Only a real finding under the negated summary is a fault. A negated
+        # summary over items that each explain the absence is verbose, not
+        # wrong, and rejecting it cost two of the four demo questions it fired
+        # on: "Is iOS v4.2.0 vulnerable?" lost "the sources mention
+        # vulnerabilities in iOS 26.6.0 and iOS 18.7.10, but not in iOS v4.2.0"
+        # -- useful, honest, and replaced by a rule-based paragraph. An honest
+        # verbose answer beats a correct one thrown away.
+        if any(not _ITEM_NEGATION.search(it) for it in items):
+            bad.append(Violation(
+                "contradiction",
+                "the summary line says none were found and then lists findings "
+                "— rewrite the summary so it states that the listed findings "
+                "exist"))
 
     # Severity is a grade a source states, not one the model infers from a
     # bare SECURITY marker. Each word is checked on its own so "high" in a

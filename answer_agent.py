@@ -137,7 +137,14 @@ CITATION_RULE = (
     "brackets \u2014 the summary line and every numbered item alike; a line with "
     "no tag is not acceptable. Copy the tag exactly and put nothing else "
     "inside the brackets; cite only tags that appear in the source list. "
-    "Required shape:\n"
+    # Illustrative only, and it has to say so: llama3.1 returned this example
+    # verbatim as its answer to "Any issues reported by Reddit users this
+    # week?" -- Edge, the flags symptom, the version and the KB number, over
+    # sources about Chrome and Ubuntu. The guardrail caught the version; the
+    # KB id is not version-shaped and went through.
+    "Required shape — this is a FORMAT example only. Its wording, versions, KB "
+    "numbers and symptoms are invented and appear in no source: copy the "
+    "layout, never the content.\n"
     "Users report three problems with the latest Edge update [S1].\n"
     "\n"
     "1. Dark mode options were removed from edge://flags in 144.0.3719.82 [S2].\n"
