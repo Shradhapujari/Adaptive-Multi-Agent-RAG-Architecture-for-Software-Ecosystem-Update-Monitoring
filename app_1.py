@@ -624,7 +624,15 @@ def _catalog_note() -> Optional[str]:
     """
     import multiagent_rag_v3 as marag
     st_ = marag.catalog_status()
-    if not st_.get("degraded"):
+    # A recorded reason, not the flag alone. Before the first load the source
+    # is "unloaded" with no errors, and `degraded` is true for it, so a call
+    # site that ran before the catalog was fetched would announce an outage
+    # that has not happened. Every call site today runs after the pipeline, so
+    # this is unreachable now and would stop being so the moment the banner is
+    # moved further up the page -- which is the natural thing to want from a
+    # banner. Found by the parallel session on the same task, which gated on
+    # this from the start.
+    if not (st_.get("degraded") and st_.get("errors")):
         return None
     # requests puts the whole connection-pool retry dump in str(e), which runs
     # to six lines of urllib3 internals on screen. The reader needs which call
