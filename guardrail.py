@@ -256,6 +256,21 @@ def _truncated(text: str) -> bool:
     return "[" in t and t.rfind("[") > t.rfind("]")
 
 
+_LIST_RE = re.compile(r"^\s*\d+[.)]\s+")
+_NEGATED_HEAD_RE = re.compile(
+    r"\b(?:there (?:are|were|is) no|no (?:known |reported |new )?"
+    r"(?:critical |high |moderate |severe |security )?"
+    r"(?:vulnerabilit|issue|problem|bug|update|advisor|cve|finding|report)"
+    r"|none (?:were |was |are |is )?(?:found|reported)|nothing (?:was )?reported)",
+    re.I)
+# A severity word only when it grades something: "critical vulnerability",
+# "critical security vulnerabilities", "rated critical". Not "high CPU usage".
+_SEVERITY_NOUN = r"(?:severit|vulnerabilit|cve|issue|bug|flaw|advisor|risk|defect)"
+_SEVERITY_RE = re.compile(
+    r"\b(critical|high|moderate|medium|low)\b(?:\s+\w+){0,2}\s+" + _SEVERITY_NOUN
+    + r"|\b(?:rated|severity(?:\s+of)?)\s+(critical|high|moderate|medium|low)\b", re.I)
+
+
 def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
     """Check a presented answer against the evidence it was built from.
 
@@ -347,6 +362,37 @@ def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
     for d in extract_dates(text):
         if d not in known_dates:
             bad.append(Violation("unsupported_date", f"{d} is in no source"))
+
+    # "There are no critical vulnerabilities" over a numbered list of five:
+    # the second line disproves the first.
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if lines and any(_LIST_RE.match(ln) for ln in lines[1:]) \
+            and _NEGATED_HEAD_RE.search(lines[0]):
+        bad.append(Violation(
+            "contradiction",
+            "the summary line says none were found and then lists findings — "
+            "rewrite the summary so it states that the listed findings exist"))
+
+    # Severity is a grade a source states, not one the model infers from a
+    # bare SECURITY marker. Each word is checked on its own so "high" in a
+    # source does not license "critical" in the answer.
+    # The question is NOT a licence here, unlike a version or a date. Being
+    # asked "are there critical ones?" does not make "there are critical ones"
+    # supported -- answering the grade either way is the same unsupported
+    # claim, which is the bug this check exists for.
+    low = haystack.lower()
+    graded = {g.lower() for m in _SEVERITY_RE.findall(text) for g in m if g}
+    for word in sorted(graded):
+        if word not in low:
+            # Worded as an instruction: this text is read back to the model
+            # on the retry, and naming the fault without naming the fix got
+            # the fault kept (llama3.1 dropped the contradiction and held on
+            # to "critical" through a full feedback pass).
+            bad.append(Violation(
+                "ungraded_severity",
+                f"no source states the severity {word!r} — report that the "
+                f"vulnerabilities exist and that the sources do not rate "
+                f"their severity, instead of using the word {word!r}"))
 
     return Verdict(not bad, bad)
 

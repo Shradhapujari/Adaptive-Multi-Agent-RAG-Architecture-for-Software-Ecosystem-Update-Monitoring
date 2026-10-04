@@ -129,14 +129,6 @@ CITATION_RULE = (
     "then list them, one per line, as \u201c1. \u2026\u201d, \u201c2. \u2026\u201d \u2014 at most five, most "
     "important first. If there is only one finding, write the first line and "
     "stop. Nothing else.\n"
-    "The summary line must not contradict the list under it: if you list "
-    "findings, the summary says they exist, never that none were found. A "
-    "source marked SECURITY with no stated severity is a vulnerability, not "
-    "necessarily a CRITICAL one \u2014 do not grade severity (critical, high, "
-    "moderate\u2026) unless a source states that word itself; if the question asks "
-    "for a severity the sources do not grade, answer about the vulnerabilities "
-    "that exist and say the sources do not rate severity, rather than "
-    "answering 'no critical ones' as if that were established.\n"
     "If a [Top comment \u2026] source is listed, it is the Reddit community's own "
     "highest-upvoted answer to this question: base the answer on what it says "
     "and cite it. Otherwise use the community posts' reported detail, or the "
@@ -611,6 +603,23 @@ def present_answer(query: str, results: Dict, model_spec: Optional[str] = None,
                    note=f"{out.note}; {note}" if out.note else note)
 
 
+def feedback_prompt(prompt: str, answer: str, verdict) -> str:
+    """The rejected answer and its violations, ahead of the original prompt.
+
+    Order is what makes this work. Appended after the prompt, llama3.1 ignored
+    the correction entirely and returned the rejected answer byte-identical:
+    the shape spec it had just followed was nearer the end than the complaint.
+    Rejection first, with the instruction to keep the findings and change only
+    what the problems name, is what actually got a fixed answer back.
+    """
+    why = "\n".join(f"- {v}" for v in verdict.violations)
+    return (f"Your previous answer to this question was REJECTED:\n{answer}\n\n"
+            f"Why it was rejected, checked against the sources:\n{why}\n\n"
+            "Write a new answer that fixes every problem above. Keep the same "
+            "findings and the same citations; change only what the problems "
+            f"name.\n\n{prompt}")
+
+
 def _present(query: str, results: Dict, model_spec: Optional[str] = None,
              window_note: str = "", per_kind: int = 4) -> PresentedAnswer:
     """Turn a pipeline result into a readable, cited paragraph.
@@ -627,23 +636,27 @@ def _present(query: str, results: Dict, model_spec: Optional[str] = None,
             from eval_harness.providers import make_client, LLMError
             client = make_client(spec)
             if client.available():
-                text = client.generate(
-                    build_cited_prompt(query, evidence, window_note),
+                prompt = build_cited_prompt(query, evidence, window_note)
+                note = "model returned an empty answer"
+                # One feedback pass: the guardrail's violations go back to the
+                # model by name before the rule-composed fallback is used.
+                # ponytail: single retry; raise if a second pass measurably helps.
+                for attempt in range(2):
                     # 150 truncated long enumerations mid-citation: the
                     # unclosed "[" never parses as a citation, so a real answer
                     # came back "uncited" (stored run #50).
-                    temperature=0.0, max_tokens=400)
-                # Not trimmed to one sentence here. That trim is what capped
-                # the answer at a single clause, so a question with five
-                # distinct findings could only ever report one of them -- and
-                # the safest single clause a model can write is the one that
-                # names no finding at all. The compact view still collapses
-                # this to a line (`app_1._one_line`); details keeps the list.
-                text = expand_tags(_strip_preamble(text), evidence)
-                if text:
+                    text = client.generate(prompt, temperature=0.0, max_tokens=400)
+                    # Not trimmed to one sentence here. That trim is what
+                    # capped the answer at a single clause, so a question with
+                    # five distinct findings could only ever report one. The
+                    # compact view still collapses this to a line
+                    # (`app_1._one_line`); details keeps the list.
+                    text = expand_tags(_strip_preamble(text), evidence)
+                    if not text:
+                        break
                     # The model was given these sources and nothing else, so
-                    # anything it states outside them is invented. Failing the
-                    # check falls back to the rule-composed paragraph -- built
+                    # anything it states outside them is invented. Failing
+                    # twice falls back to the rule-composed paragraph -- built
                     # from the same evidence by code, so it cannot fail -- and
                     # not to a refusal, which would throw away a real answer
                     # over one bad span.
@@ -651,10 +664,9 @@ def _present(query: str, results: Dict, model_spec: Optional[str] = None,
                     if verdict.ok:
                         return PresentedAnswer(text, "llm", client.spec,
                                                evidence=evidence)
-                    note = ("model output failed the guardrail — "
-                            + "; ".join(str(v) for v in verdict.violations))
-                else:
-                    note = "model returned an empty answer"
+                    problems = "; ".join(str(v) for v in verdict.violations)
+                    note = f"model output failed the guardrail — {problems}"
+                    prompt = feedback_prompt(prompt, text, verdict)
             else:
                 note = f"{client.spec} not reachable"
         except Exception as e:  # noqa: BLE001 — any import/transport failure
