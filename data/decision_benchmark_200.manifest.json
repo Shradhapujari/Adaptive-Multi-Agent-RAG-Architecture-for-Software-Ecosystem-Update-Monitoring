@@ -1,0 +1,31 @@
+{
+  "n": 200,
+  "verdicts": [
+    "act",
+    "hold",
+    "insufficient_evidence"
+  ],
+  "benchmark": "data/benchmark_500.json",
+  "benchmark_sha1": "06f02c794cf4",
+  "pool_run": "results/run_1790126271_8fda4edb2d21",
+  "pool_run_config_sha1": "6d6faf06eac2",
+  "stratify": "category,ecosystem",
+  "categories": {
+    "releases": 40,
+    "bugs": 40,
+    "security": 40,
+    "community": 40,
+    "general": 40
+  },
+  "asks": {
+    "version": 40,
+    "fix_status": 87,
+    "date": 7,
+    "other": 63,
+    "cve": 3
+  },
+  "ecosystems": 24,
+  "empty_pool": 0,
+  "median_pool": 13,
+  "output_sha1": "affb28f58b5d"
+}
