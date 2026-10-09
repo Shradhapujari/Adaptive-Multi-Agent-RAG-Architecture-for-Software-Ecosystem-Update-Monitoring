@@ -29,3 +29,20 @@ tzdata==2026.4
 # failure -- just a blunter rewrite and a blunter answer. Temporal grounding
 # (temporal.py) is rule-based by design and needs no model at all.
 streamlit>=1.32.0
+
+# Agentic-decision work (2026-10, agentic/* branches). Present in venv311 and
+# pinned for the same reason as everything above: the LangGraph arm must replay
+# byte-identically, and these are the versions it will be measured under.
+# Nothing on main imports them yet; the first consumer is the Phase 3
+# `LangGraphGenerator` arm. pydantic is the state schema, langgraph the
+# orchestration + interrupt() for the human gate, the checkpoint package is
+# what makes that gate resumable. langchain-core is a hard dependency of all
+# three, never imported directly -- no LangChain retrievers or loaders, every
+# fetch stays on `requests` so corpus_snapshot.py keeps intercepting it.
+pydantic==2.13.5
+pydantic-core==2.46.5
+langgraph==1.2.11
+langgraph-checkpoint==4.2.0
+langgraph-prebuilt==1.1.0
+langgraph-sdk==0.4.4
+langchain-core==1.6.2
