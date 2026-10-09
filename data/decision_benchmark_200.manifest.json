@@ -19,7 +19,7 @@
   },
   "asks": {
     "version": 40,
-    "fix_status": 87,
+    "stance": 87,
     "date": 7,
     "other": 63,
     "cve": 3
@@ -27,5 +27,5 @@
   "ecosystems": 24,
   "empty_pool": 0,
   "median_pool": 13,
-  "output_sha1": "affb28f58b5d"
+  "output_sha1": "f4b4a8ca503e"
 }

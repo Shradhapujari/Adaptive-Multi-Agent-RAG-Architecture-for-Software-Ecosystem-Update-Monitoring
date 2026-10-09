@@ -11,8 +11,8 @@ ground_truth at all). This writes the sheet the annotators fill in.
 Questions: data/benchmark_500.json, 200 taken by the harness's own
 `stratified_limit` over category then ecosystem -- deterministic, no RNG, and
 the same balance the benchmark was built for. Each question is also tagged
-with the attribute it asks for (version / date / fix_status / cve / other) by
-the harness's extractors, so kappa can be reported per stratum later.
+with the attribute it asks for (version / date / stance / cve / other) by
+`graph.asks`, the same gate the state machine routes on, so kappa can be reported per stratum later.
 
 Evidence: every document any arm retrieved or pooled for that question in
 run_1790126271 (frozen corpus, flat ranking, exclude_own_post, all three
@@ -26,46 +26,19 @@ See docs/decision_annotation_guide.md.
 import hashlib
 import json
 import os
-import re
 import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 
-from eval_harness.benchmarks import (extract_dates, extract_versions,  # noqa: E402
-                                     stratified_limit)
-from yesno import looks_yesno  # noqa: E402
+from eval_harness.benchmarks import stratified_limit  # noqa: E402
+from graph import asks  # noqa: E402
 
 BENCHMARK = "data/benchmark_500.json"
 POOL_RUN = "results/run_1790126271_8fda4edb2d21"
 OUT = "data/decision_benchmark_200.jsonl"
 N = 200
 VERDICTS = ("act", "hold", "insufficient_evidence")
-
-_CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b|\b(?:vulnerab|exploit|security (?:fix|patch|update))", re.I)
-_DATE_WORDS = re.compile(r"\b(when|release date|released|coming out|eta|how long)\b", re.I)
-_VERSION_WORDS = re.compile(r"\b(latest|newest|version|which release|what release|v\d)\b", re.I)
-_FIX_WORDS = re.compile(r"\b(fix(?:ed)?|broke(?:n)?|bug|crash|issue|problem|safe to|should i|okay to|worth)\b", re.I)
-
-
-def asks(question: str) -> str:
-    """The attribute a question wants decided. Order is specificity: a CVE
-    mention beats a version mention, which beats a yes/no phrasing."""
-    q = question or ""
-    if _CVE_RE.search(q):
-        return "cve"
-    if _DATE_WORDS.search(q) or extract_dates(q):
-        return "date"
-    if _VERSION_WORDS.search(q):
-        return "version"
-    # "did 6.8 break grub?" names a version but asks about a fix, so the
-    # fix words outrank a bare version number; "latest"/"which version" do not.
-    if _FIX_WORDS.search(q) or looks_yesno(q, is_title=True):
-        return "fix_status"
-    if extract_versions(q, multipart_only=True):
-        return "version"
-    return "other"
-
 
 def load_pools(run_dir: str) -> dict:
     """query_id -> [doc, ...], every arm's retrieved + pooled docs, deduped."""

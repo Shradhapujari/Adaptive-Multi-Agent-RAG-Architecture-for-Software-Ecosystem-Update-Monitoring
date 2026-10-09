@@ -37,6 +37,6 @@ expected — judge the title).
 
 Two annotators label all 200 independently. Agreement is Cohen's κ over the
 three verdicts, reported overall and per `asks` stratum (version / date /
-fix_status / cve / other). Disagreements are adjudicated by a third reader
+stance / cve / other). Disagreements are adjudicated by a third reader
 without seeing who labelled what; the adjudicated label is gold. Do not
 discuss questions until both sheets are complete.

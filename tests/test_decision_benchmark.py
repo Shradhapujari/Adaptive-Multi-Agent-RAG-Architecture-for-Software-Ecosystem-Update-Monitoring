@@ -12,7 +12,7 @@ def test_asks_prefers_the_most_specific_attribute():
     assert asks("Is CVE-2026-1234 fixed in Fedora 44?") == "cve"
     assert asks("When is iOS 26.1 coming out?") == "date"
     assert asks("What is the latest version of Firefox?") == "version"
-    assert asks("Did the 6.8 kernel break grub for anyone else?") == "fix_status"
+    assert asks("Did the 6.8 kernel break grub for anyone else?") == "stance"
     assert asks("Thoughts on the new Arch install guide") == "other"
 
 
