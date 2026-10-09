@@ -1434,12 +1434,8 @@ def call_llama(prompt: str, model: str = "llama3.1"):
     error")` check goes with it -- sniffing a prefix out of what is otherwise
     model output is a test that a model can pass by quoting it.
     """
-    payload = json.dumps({
-        "model": model,
-        "prompt": rules_block() + prompt,
-        "stream": False,
-        "options": {"temperature": 0}
-    }).encode()
+    payload = json.dumps(
+        _tokens.ollama_payload(model, rules_block() + prompt, temperature=0)).encode()
 
     req = urllib.request.Request(
         "http://localhost:11434/api/generate",

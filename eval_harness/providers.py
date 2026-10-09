@@ -86,12 +86,8 @@ class OllamaClient(LLMClient):
             return False
 
     def _generate(self, prompt, system, temperature, max_tokens) -> str:
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": temperature, "num_predict": max_tokens},
-        }
+        payload = tokens.ollama_payload(self.model, prompt,
+                                        temperature=temperature, num_predict=max_tokens)
         if system:
             payload["system"] = system
         data = json.dumps(payload).encode()
