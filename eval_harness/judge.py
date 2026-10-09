@@ -16,7 +16,11 @@ Two responsibilities:
 
 To reduce self-evaluation bias (the conference's "independence of providers"
 point), the judge should be a *different* model from the system under test.
-The judge returns strict JSON; we parse defensively.
+The judge returns strict JSON; we parse defensively. A response that cannot
+be parsed (or a transport error) scores every axis as None, never 0.0: a
+missing judgment is not a maximally hallucinated answer, and the aggregator
+already skips None. The Judge counts those failures so a run can report its
+parse-failure rate alongside the means it did get.
 """
 
 from __future__ import annotations
@@ -42,11 +46,12 @@ def _extract_json(text: str) -> Optional[dict]:
         return None
 
 
-def _clamp01(x) -> float:
+def _clamp01(x) -> Optional[float]:
+    """A score in [0, 1], or None when the judge gave no number for the axis."""
     try:
         v = float(x)
     except (TypeError, ValueError):
-        return 0.0
+        return None
     return max(0.0, min(1.0, v))
 
 
@@ -59,6 +64,11 @@ def cache_tag(doc: dict) -> str:
 
 
 class Judge:
+    # Class-level so a Judge built with __new__ (the tests) still counts.
+    # Transport errors count as parse failures: either way there is no score.
+    answer_calls = 0
+    answer_parse_failures = 0
+
     def __init__(self, spec: str = "ollama:llama3.1"):
         self.client: LLMClient = make_client(spec)
         self.client.role = "judge"
@@ -106,7 +116,7 @@ class Judge:
 
     # ---- answer scoring -------------------------------------------------
     def score_answer(self, query: str, answer: str, contexts: List[str],
-                     ground_truth: Optional[str] = None) -> Dict[str, float]:
+                     ground_truth: Optional[str] = None) -> Dict[str, Optional[float]]:
         ctx = "\n".join(f"- {c[:300]}" for c in contexts[:6]) or "(no retrieved context)"
         gt_block = (
             f'\nReference answer (ground truth): "{ground_truth[:400]}"\n'
@@ -130,17 +140,24 @@ class Judge:
         )
         try:
             raw = self.client.generate(prompt, temperature=0.0, max_tokens=200)
-        except LLMError:
-            raw = ""
+        except LLMError as e:
+            raw = f"[LLMError] {e}"
+        self.answer_calls += 1
         obj = _extract_json(raw)
-        if not obj:
-            # No parseable JSON is no judgment. Scoring it 0.0 charged the arm
-            # for the judge's own failure and dragged every mean down; None is
-            # what report.py and compare.py already skip.
+        if obj is None:
+            # Until 2026-10 this fell through to 0.0 on every axis, so a judge
+            # that answered in prose, truncated its JSON, or timed out was
+            # scored as a fully hallucinated, off-topic answer -- and the row
+            # was indistinguishable from a real zero. None is skipped by
+            # report.aggregate and compare._metric_value; the count is the
+            # measurement.
+            self.answer_parse_failures += 1
+            print(f"[judge] unparseable answer score "
+                  f"({self.answer_parse_failures}/{self.answer_calls}): {raw[:100]!r}")
             return {"faithfulness": None, "answer_relevance": None, "correctness": None}
-        out = {
-            "faithfulness": _clamp01(obj.get("faithfulness", 0.0)),
-            "answer_relevance": _clamp01(obj.get("answer_relevance", 0.0)),
+        out: Dict[str, Optional[float]] = {
+            "faithfulness": _clamp01(obj.get("faithfulness")),
+            "answer_relevance": _clamp01(obj.get("answer_relevance")),
         }
         corr = obj.get("correctness", None)
         out["correctness"] = None if (corr is None or ground_truth is None) else _clamp01(corr)

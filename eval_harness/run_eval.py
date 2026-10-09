@@ -457,6 +457,11 @@ def run(cfg: EvalConfig) -> str:
                 # retry, >1 means the Evaluator scored the first pool negative.
                 # Only the retry arm can exceed 1; the others report 1.
                 "rounds": out.get("rounds", 1),
+                # Only the decision arm sets this: verdict, collapsed verdict,
+                # the doc_ids its rule used, obligations met, stop reason. It
+                # is what verdict accuracy and abstention precision are scored
+                # from, so it has to be on disk, not inferred later.
+                "decision": out.get("decision"),
                 "self_quality": out.get("self_quality"),
                 "answer": out["answer"],
                 # Only set by the synthesising multi-agent arm: which model wrote
@@ -498,6 +503,16 @@ def run(cfg: EvalConfig) -> str:
     cfg_dict = {k: getattr(cfg, k) for k in vars(cfg)}
     cfg_dict["systems_evaluated"] = [g.name for g in gens]
     cfg_dict["judge_active"] = judging
+    # A None answer score is a judge that returned nothing parseable, not a
+    # zero; how often that happened is part of what the means mean.
+    # getattr: the tests hand the harness stub judges without the counters.
+    _jc = getattr(judge, "answer_calls", 0)
+    _jf = getattr(judge, "answer_parse_failures", 0)
+    cfg_dict["judge_answer_calls"] = _jc
+    cfg_dict["judge_answer_parse_failures"] = _jf
+    if _jc:
+        print(f"[harness] judge answer-score parse failures: {_jf}/{_jc} "
+              f"({100.0 * _jf / _jc:.1f}%) -- scored as None, excluded from the means")
     cfg_dict["dataset_hash"] = ds_hash
     cfg_dict["n_questions"] = len(records)
     # Which arm this run actually is. Reading it back off the environment at
