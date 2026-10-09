@@ -15,12 +15,36 @@ counted as calls only -- `/api/embeddings` reports no token counts.
 
 Process-wide and single-threaded on purpose: the harness runs arms one after
 another, and a lock here would be protecting nothing.
+
+This is also where those three sites get the request options they share, so
+that a model-loading or context-window setting is one number, not three.
 """
 from __future__ import annotations
 
 import json
 import os
 from typing import Dict
+
+# `keep_alive=-1` keeps the model resident between calls. Ollama's default
+# unloads it after five idle minutes, and a judge pass that alternates models
+# pays a multi-second reload per swap that then lands in the latency column as
+# if the architecture had spent it. `num_ctx=4096` is Ollama 0.34's own default
+# for these models (`ollama ps` shows CONTEXT 4096), stated explicitly so a
+# future Ollama that changes the default cannot change a measurement. Both are
+# overridable for a memory-constrained host: MARAG_OLLAMA_KEEP_ALIVE=5m,
+# MARAG_OLLAMA_NUM_CTX=2048.
+_ka = os.environ.get("MARAG_OLLAMA_KEEP_ALIVE", "-1")
+KEEP_ALIVE = int(_ka) if _ka.lstrip("-").isdigit() else _ka
+NUM_CTX = int(os.environ.get("MARAG_OLLAMA_NUM_CTX", "4096"))
+
+
+def ollama_payload(model: str, prompt: str, **options) -> dict:
+    """The `/api/generate` body every call site sends; `options` are merged
+    over the shared ones (temperature, num_predict, ...)."""
+    opts: Dict = {"num_ctx": NUM_CTX}
+    opts.update(options)
+    return {"model": model, "prompt": prompt, "stream": False,
+            "keep_alive": KEEP_ALIVE, "options": opts}
 
 _T: Dict = {}
 

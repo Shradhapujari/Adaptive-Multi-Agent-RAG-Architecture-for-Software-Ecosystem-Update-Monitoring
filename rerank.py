@@ -320,8 +320,8 @@ class LLMCascadeReranker(Reranker):
 
     def _generate(self, prompt: str) -> str:
         """One generate call to Ollama. Overridden in tests to avoid network."""
-        payload = json.dumps({"model": self.model, "prompt": prompt, "stream": False,
-                              "options": {"temperature": 0.0, "num_predict": 40}}).encode()
+        payload = json.dumps(tokens.ollama_payload(
+            self.model, prompt, temperature=0.0, num_predict=40)).encode()
         req = urllib.request.Request(f"{self.host}/api/generate", data=payload,
                                      headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
