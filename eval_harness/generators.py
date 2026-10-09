@@ -385,6 +385,67 @@ class SingleAgentGenerator(Generator):
         }
 
 
+class DecideGenerator(Generator):
+    """Baseline retrieval, grounded question, rule-based verdict -- the Phase 2 arm.
+
+    The bet this arm tests: fourteen findings say every arm fetches the same
+    documents, so the output has to change type before any architecture can
+    be told from another. `decide.decide` turns the pool into one of five
+    verdicts, each gated on a rule-checkable evidence obligation, and abstains
+    when none holds. No model call anywhere: if structure does not help as
+    plain Python over the pool we already retrieve, no graph will.
+
+    Retrieval is `RetrieverAgent` on the grounded phrasing, over-fetched like
+    `single_agent_grounded` so the rules have a pool to stand on. `docs` lists
+    the documents the rule actually used first -- that is this arm's ranking,
+    and it is what the verdict cites -- then the rest of the pool, cut to
+    top_k. The decision itself is returned under `decision` and persisted per
+    row, so verdict accuracy, abstention precision and evidence overlap are
+    computable from per_query.jsonl against the annotated sheet.
+    """
+
+    name = "marag_decide"
+    POOL_FACTOR = 6
+
+    def __init__(self, top_k: int = 4, now=None):
+        import multiagent_rag_v3 as marag
+        import grounding as _grounding
+        import vendor as _vendor
+        import decide as _decide
+        self.marag = marag
+        self.retriever = marag.RetrieverAgent()
+        self.top_k = top_k
+        self._now = now
+        self._ground = _grounding.ground
+        self._catalog = _vendor.load_catalog()
+        self._decide = _decide
+
+    def generate(self, query: str) -> Dict:
+        g = self._ground(query, now=self._now, catalog=self._catalog)
+        pool_k = max(self.top_k * self.POOL_FACTOR, 24)
+        with _silenced(self.marag):
+            raw = self.retriever.run(g.retrieval_query or query, top_k=pool_k,
+                                     original_query=query)
+        pool = [normalize_doc(d) for d in raw]
+        dec = self._decide.decide(pool, query, vendors=g.vendor_names)
+        used = set(dec.evidence)
+        docs = ([d for d in pool if d["doc_id"] in used]
+                + [d for d in pool if d["doc_id"] not in used])[:self.top_k]
+        return {
+            "answer": self._decide.render(dec, pool),
+            "docs": docs,
+            "pool": pool,
+            "self_quality": None,
+            "rewritten_query": g.rewritten,
+            "intent": g.intent.label if g.intent else "",
+            "vendors": g.vendor_names,
+            "decision": dec.as_dict(),
+            "rounds": 1,
+            "rerank_spec": getattr(self.retriever, "last_rerank_spec", ""),
+            "rerank_degraded": getattr(self.retriever, "last_rerank_degraded", False),
+        }
+
+
 class RawLLMGenerator(Generator):
     """No retrieval — ask a model directly. The 'other models' comparison column."""
 
@@ -562,6 +623,9 @@ def build_generators(specs: List[str], top_k: int = 4) -> List[Generator]:
                                       (reported as "marag_llm_retry");
                                       "marag_retry" alone keeps the template
                                       answer (reported as "marag_retry")
+      "marag_decide"               -> grounded baseline retrieval, rule-based
+                                      five-verdict decision with evidence
+                                      obligations, no model call (Phase 2)
       "single_agent_template"      -> baseline retrieval rendered as the
                                       EvaluatorAgent template: the fourth cell
                                       of the rendering x retrieval factorial
@@ -597,6 +661,8 @@ def build_generators(specs: List[str], top_k: int = 4) -> List[Generator]:
         elif spec.startswith("single_agent_grounded:"):
             gens.append(GroundedSingleAgentGenerator(
                 make_client(spec.split(":", 1)[1]), top_k))
+        elif spec == "marag_decide":
+            gens.append(DecideGenerator(top_k=top_k))
         elif spec == "single_agent_template":
             gens.append(SingleAgentGenerator(top_k=top_k, render="template"))
         elif spec == "single_agent":
