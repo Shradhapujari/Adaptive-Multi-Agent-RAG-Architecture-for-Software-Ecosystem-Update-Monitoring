@@ -11,7 +11,8 @@ key and the judge against the rows where the annotators agree (the gold the
 judge is meant to reproduce). Ordinal fields (0/1/2) also get the
 quadratic-weighted kappa, which forgives 1-vs-2 more than 0-vs-2.
 
-Per-stratum rows follow, on `asks` and `tier` when present. Strata under
+Per-stratum rows follow, on `asks` and `tier` when present, then every row
+the two annotators disagree on, because the adjudicator reads those. Strata under
 --min-n (default 15) print their n and no kappa: a kappa on 3 pairs is a
 coin toss with a confidence interval, and we would rather say "3 pairs".
 
@@ -137,6 +138,12 @@ def main():
                     report(f"  {strat}={g}", *fn(grs), ordinal)
 
     block("a1 vs a2", labelled, lambda rs: ([r["a1"][args.field] for r in rs], [r["a2"][args.field] for r in rs]))
+    # The adjudicator reads these, not the number.
+    dis = [r for r in labelled if r["a1"][args.field] != r["a2"][args.field]]
+    print(f"disagreements: {len(dis)}")
+    for r in dis:
+        print(f"  id {r['id']:<4} a1={r['a1'][args.field]!s:<22} a2={r['a2'][args.field]!s:<22} "
+              f"{(r.get('query') or '')[:70]}")
     if judge:
         jl = [r for r in labelled if str(r["id"]) in judge]
         block("a1 vs judge", jl, lambda rs: ([r["a1"][args.field] for r in rs], [judge[str(r["id"])] for r in rs]))
