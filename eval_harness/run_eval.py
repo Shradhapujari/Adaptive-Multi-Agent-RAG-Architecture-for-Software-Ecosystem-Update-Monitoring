@@ -55,7 +55,7 @@ from . import benchmarks as bench_mod
 from agent_rules import RULES_ENV
 from .generators import build_generators, rules_arm
 import multiagent_rag_v3 as marag
-from .judge import Judge
+from .judge import Judge, cache_tag
 from .metrics import retrieval_metrics, mean_ci
 from . import report as report_mod
 
@@ -69,13 +69,15 @@ QRELS_CACHE = "qrels_cache.json"
 # 3 — a different question about a different product. Hashing the query text
 # makes the key dataset-independent, and legitimately shares a label when two
 # datasets happen to ask the same question about the same document.
-_KEY_RE = re.compile(r"^[0-9a-f]{12}:[0-9a-f]{12}$")
+# An optional third field names the judge-prompt variant the label was made
+# under (judge.cache_tag), so a prompt change re-judges only the rows it touched.
+_KEY_RE = re.compile(r"^[0-9a-f]{12}:[0-9a-f]{12}(:[a-z0-9]+)?$")
 
 
-def qrels_key(query: str, doc_id: str) -> str:
+def qrels_key(query: str, doc_id: str, tag: str = "") -> str:
     """Cache key for one (question, document) relevance judgment."""
     qh = hashlib.sha1(query.strip().lower().encode("utf-8", "ignore")).hexdigest()[:12]
-    return f"{qh}:{doc_id}"
+    return f"{qh}:{doc_id}" + (f":{tag}" if tag else "")
 
 
 def _load_qrels_cache(results_dir: str) -> dict:
@@ -390,7 +392,7 @@ def run(cfg: EvalConfig) -> str:
         qrels: Dict[str, int] = {}
         if judging:
             for did, d in pool.items():
-                ck = qrels_key(query, did)
+                ck = qrels_key(query, did, cache_tag(d))
                 if ck in qrels_cache:
                     qrels[did] = qrels_cache[ck]
                 else:
