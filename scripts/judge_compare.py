@@ -27,7 +27,7 @@ import argparse, json, os, sys, collections, pathlib, tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from eval_harness.metrics import ndcg_at_k, recall_at_k, mrr, mean_ci   # noqa: E402
+from eval_harness.metrics import ndcg_at_k, recall_at_k, mrr, mean_ci, cohen_kappa   # noqa: E402
 from eval_harness.run_eval import qrels_key                             # noqa: E402
 
 DEFAULT_RUN = ROOT / "results" / "run_1790126271_8fda4edb2d21"
@@ -38,16 +38,7 @@ DEFAULT_B = ROOT.parent / "marag-judge-wt" / "results" / "qrels_cache.json"
 EPS = 0.002
 
 
-def kappa(pairs):
-    """Cohen's kappa over (label_a, label_b) pairs."""
-    n = len(pairs)
-    if not n:
-        return float("nan")
-    po = sum(a == b for a, b in pairs) / n
-    ra = collections.Counter(a for a, _ in pairs)
-    rb = collections.Counter(b for _, b in pairs)
-    pe = sum(ra[k] * rb[k] for k in set(ra) | set(rb)) / (n * n)
-    return 1.0 if pe == 1 else (po - pe) / (1 - pe)
+kappa = cohen_kappa   # one definition, in eval_harness.metrics
 
 
 def load(run_dir, cache_b_path):
