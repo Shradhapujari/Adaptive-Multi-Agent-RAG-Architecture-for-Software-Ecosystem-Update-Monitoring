@@ -1,0 +1,27 @@
+{
+  "n": 100,
+  "run": "results/run_1790126271_8fda4edb2d21",
+  "run_config_sha1": "6d6faf06eac2",
+  "cells": {
+    "cve/community": 6,
+    "cve/news": 8,
+    "cve/tier1": 8,
+    "date/community": 7,
+    "date/news": 9,
+    "date/tier1": 9,
+    "stance/community": 9,
+    "stance/news": 8,
+    "stance/tier1": 9,
+    "version/community": 9,
+    "version/news": 9,
+    "version/tier1": 9
+  },
+  "judge_label_dist": {
+    "0": 37,
+    "1": 35,
+    "2": 28
+  },
+  "questions": 66,
+  "output_sha1": "85eb8b07811a",
+  "judge_key_sha1": "40fd7521855b"
+}
