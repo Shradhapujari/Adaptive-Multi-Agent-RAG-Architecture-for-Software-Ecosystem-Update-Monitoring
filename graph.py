@@ -72,6 +72,7 @@ class State:
     evidence: Optional[Evidence] = None
     values: Tuple[str, ...] = ()        # what the gate found: versions, dates, ...
     degraded: bool = False
+    payload: dict = field(default_factory=dict)   # whatever the gate wants kept (a Decision)
     grounded: Optional[bool] = None     # verify's answer, AMBIGUOUS only
     trace: Tuple[Step, ...] = ()
 
@@ -168,6 +169,17 @@ def classify(query: str, docs: Sequence[dict], degraded: bool = False,
     return Evidence.SUFFICIENT, f"{len(vals)} {kind} value(s) from {len(topical)} on-topic doc(s)", vals
 
 
+# A gate is any callable (query, docs, degraded) -> (Evidence, reason, payload).
+# The attribute gate above is the default; decide.gate() is the verdict rule
+# over the same four classes, so the arm and the demo walk one graph.
+Gate = Callable[[str, Sequence[dict], bool], Tuple[Evidence, str, dict]]
+
+
+def attribute_gate(query: str, docs: Sequence[dict], degraded: bool = False) -> Tuple[Evidence, str, dict]:
+    ev, reason, vals = classify(query, docs, degraded)
+    return ev, reason, {"values": list(vals)}
+
+
 # ───────────────────────────────────────────────────────── transitions
 
 def _after_classify(s: State) -> str:
@@ -196,9 +208,12 @@ def verify_prompt(s: State) -> str:
 
 
 def run(query: str, rewrite: Callable[[str, tuple], str], retrieve: Callable[[str], tuple],
-        llm: Optional[Callable[[str, int], str]] = None, max_rounds: int = MAX_ROUNDS) -> State:
+        llm: Optional[Callable[[str, int], str]] = None, max_rounds: int = MAX_ROUNDS,
+        gate: Optional[Gate] = None) -> State:
     """Walk the graph once. `retrieve` returns (docs, degraded); `llm(prompt,
-    max_tokens)` returns raw text and is called only from `verify`."""
+    max_tokens)` returns raw text and is called only from `verify`; `gate`
+    classifies the pool (default: the attribute gate)."""
+    gate = gate or attribute_gate
     s = State(query=query, asks=asks(query))
     node = "rewrite"
     while node not in TERMINAL:
@@ -213,9 +228,9 @@ def run(query: str, rewrite: Callable[[str, tuple], str], retrieve: Callable[[st
             s = replace(s, docs=tuple(docs), degraded=bool(degraded))
             out = {"n_docs": len(docs), "degraded": bool(degraded)}
         elif node == "classify":
-            ev, reason, vals = classify(query, s.docs, s.degraded, s.asks)
-            s = replace(s, evidence=ev, values=tuple(vals))
-            out = {"evidence": ev.value, "reason": reason, "values": vals}
+            ev, reason, payload = gate(query, s.docs, s.degraded)
+            s = replace(s, evidence=ev, values=tuple(payload.get("values", ())), payload=payload)
+            out = {"evidence": ev.value, "reason": reason, **payload}
         elif node == "verify":
             raw = llm(verify_prompt(s), VERIFY_MAX_TOKENS) if llm else ""
             obj = _extract_json(raw) or {}
@@ -284,6 +299,10 @@ def _demo() -> None:
     s = run("latest Fedora version?", rw, lambda q: ([chat], False), llm=lambda p, n: "I think so, yes.")
     v = [st for st in s.trace if st.node == "verify"][0]
     assert not v.contract_ok and v.edge_taken == "abstain"
+    # A gate of a different kind rides the same edges.
+    always = lambda q, d, deg: (Evidence.SUFFICIENT, "custom", {"verdict": "act"})
+    s = run("anything?", rw, lambda q: ([], False), gate=always)
+    assert s.trace[-1].node == "answer" and s.payload == {"verdict": "act"}
     # Same inputs, same hash chain: the replay proof the trace exists for.
     a = run("latest Fedora version?", rw, lambda q: ([rel], False))
     b = run("latest Fedora version?", rw, lambda q: ([rel], False))

@@ -39,6 +39,7 @@ each question (`qrels_cache_snapshot.json`) rather than the per-run pool.
 from __future__ import annotations
 
 import math
+from collections import Counter
 from typing import Dict, List, Sequence, Tuple
 
 
@@ -125,3 +126,19 @@ def retrieval_metrics(ranked: List[str], qrels: Dict[str, int],
         out[f"ndcg@{k}"] = ndcg_at_k(ranked, qrels, k)
         out[f"precision@{k}"] = precision_at_k(ranked, qrels, k)
     return out
+
+
+def cohen_kappa(pairs: Sequence[Tuple[object, object]]) -> float:
+    """Cohen's kappa over (label_a, label_b) pairs; NaN when there are none.
+
+    Chance agreement is computed from each rater's own marginals, so it works
+    for any label alphabet -- 0/1/2 relevance grades, verdict strings, booleans.
+    """
+    n = len(pairs)
+    if not n:
+        return float("nan")
+    po = sum(a == b for a, b in pairs) / n
+    ra = Counter(a for a, _ in pairs)
+    rb = Counter(b for _, b in pairs)
+    pe = sum(ra[k] * rb[k] for k in set(ra) | set(rb)) / (n * n)
+    return 1.0 if pe == 1 else (po - pe) / (1 - pe)

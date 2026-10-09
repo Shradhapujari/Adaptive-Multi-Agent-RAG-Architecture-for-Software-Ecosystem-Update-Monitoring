@@ -399,7 +399,9 @@ class DecideGenerator(Generator):
     `single_agent_grounded` so the rules have a pool to stand on. `docs` lists
     the documents the rule actually used first -- that is this arm's ranking,
     and it is what the verdict cites -- then the rest of the pool, cut to
-    top_k. The decision itself is returned under `decision` and persisted per
+    top_k. Retrieval and decision run as one walk of graph.run with
+    decide.gate as the classifier, so the arm and the state machine cannot
+    drift apart. The decision itself is returned under `decision` and persisted per
     row, so verdict accuracy, abstention precision and evidence overlap are
     computable from per_query.jsonl against the annotated sheet.
     """
@@ -421,13 +423,28 @@ class DecideGenerator(Generator):
         self._decide = _decide
 
     def generate(self, query: str) -> Dict:
+        import graph
         g = self._ground(query, now=self._now, catalog=self._catalog)
         pool_k = max(self.top_k * self.POOL_FACTOR, 24)
-        with _silenced(self.marag):
-            raw = self.retriever.run(g.retrieval_query or query, top_k=pool_k,
-                                     original_query=query)
-        pool = [normalize_doc(d) for d in raw]
-        dec = self._decide.decide(pool, query, vendors=g.vendor_names)
+        pool: list = []
+
+        def retrieve(q: str):
+            with _silenced(self.marag):
+                raw = self.retriever.run(q, top_k=pool_k, original_query=query)
+            pool[:] = [normalize_doc(d) for d in raw]
+            # ponytail: a fetch is never reported degraded here, so the graph's
+            # retry edge is idle for this arm; wire marag.catalog_status() /
+            # per-source failures in when the harness records them per fetch.
+            return pool, False
+
+        # One graph for the demo and the arm: rewrite -> retrieve -> classify,
+        # with decide.gate as the classifier. No model is passed, so AMBIGUOUS
+        # (documents about the product, no obligation met) abstains; ABSENT
+        # abstains without a retry. The walk is in `decision["path"]` and, with
+        # $MARAG_TRACE set, in the step trace.
+        state = graph.run(query, rewrite=lambda q, tried: g.retrieval_query or q,
+                          retrieve=retrieve, gate=self._decide.gate(g.vendor_names))
+        dec = self._decide.Decision.from_dict(state.payload)
         used = set(dec.evidence)
         docs = ([d for d in pool if d["doc_id"] in used]
                 + [d for d in pool if d["doc_id"] not in used])[:self.top_k]
@@ -439,8 +456,9 @@ class DecideGenerator(Generator):
             "rewritten_query": g.rewritten,
             "intent": g.intent.label if g.intent else "",
             "vendors": g.vendor_names,
-            "decision": dec.as_dict(),
-            "rounds": 1,
+            "decision": dec.as_dict() | {"evidence_class": state.evidence.value,
+                                         "path": [st.node for st in state.trace]},
+            "rounds": len(state.tried),
             "rerank_spec": getattr(self.retriever, "last_rerank_spec", ""),
             "rerank_degraded": getattr(self.retriever, "last_rerank_degraded", False),
         }

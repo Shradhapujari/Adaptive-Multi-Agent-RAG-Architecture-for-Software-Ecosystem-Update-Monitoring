@@ -98,6 +98,12 @@ class Decision:
     def verdict3(self) -> str:
         return COLLAPSE[self.verdict]
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "Decision":
+        return cls(d["verdict"], list(d.get("evidence_doc_ids") or []), dict(d.get("obligations") or {}),
+                   d.get("stop_reason", ""), list(d.get("probes_wanted") or []),
+                   float(d.get("confidence") or 0.0), d.get("rationale", ""))
+
     def as_dict(self) -> dict:
         return {"verdict": self.verdict, "verdict3": self.verdict3,
                 "evidence_doc_ids": list(self.evidence), "obligations": dict(self.obligations),
@@ -219,6 +225,30 @@ def decide(pool: Sequence[dict], question: str, vendors: Iterable[str] = (),
     return Decision("insufficient_evidence", [], obligations, reason, missing, 0.0,
                     "no document about the product" if not about else
                     "documents about the product, none meeting an obligation")
+
+
+# --------------------------------------------------------------- graph gate
+
+_EVIDENCE_BY_STOP = {"no_evidence": "absent", "evidence_insufficient": "ambiguous",
+                     "obligations_met": "sufficient"}
+
+
+def gate(vendors: Iterable[str] = (), k_reports: int = K_REPORTS):
+    """`decide` in the shape graph.run wants: (query, docs, degraded) ->
+    (Evidence, reason, payload). The stop reason is the evidence class --
+    no document about the product is ABSENT, documents that meet no
+    obligation are AMBIGUOUS, an obligation met is SUFFICIENT -- so the
+    verdict rule and the attribute gate take the same edges, and ABSENT on a
+    healthy fetch abstains without a retry here too."""
+    from graph import Evidence
+    vendors = list(vendors)
+
+    def _gate(query: str, docs: Sequence[dict], degraded: bool = False):
+        if degraded:
+            return Evidence.DEGRADED, "fetch degraded", {}
+        d = decide(docs, query, vendors=vendors, k_reports=k_reports)
+        return Evidence(_EVIDENCE_BY_STOP[d.stop_reason]), d.rationale, d.as_dict()
+    return _gate
 
 
 # ------------------------------------------------------------------ rendering
