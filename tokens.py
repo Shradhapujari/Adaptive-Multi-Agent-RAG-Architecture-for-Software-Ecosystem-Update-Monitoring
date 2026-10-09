@@ -18,6 +18,8 @@ another, and a lock here would be protecting nothing.
 """
 from __future__ import annotations
 
+import json
+import os
 from typing import Dict
 
 _T: Dict = {}
@@ -59,6 +61,31 @@ def snapshot() -> dict:
     return out
 
 
+def delta(before: dict, after: dict) -> dict:
+    """Tokens spent between two snapshots -- one graph transition's bill."""
+    return {k: after[k] - before[k] for k in
+            ("calls", "prompt_tokens", "completion_tokens", "embed_calls")}
+
+
+TRACE_ENV = "MARAG_TRACE"
+
+
+def emit(step: dict) -> None:
+    """Append one transition record to the JSONL file $MARAG_TRACE names.
+
+    Off when the variable is unset, so the harness's numbers do not change
+    and nothing is written under results/ by accident. One line per graph
+    transition: node, edge_taken, reason, tokens, dur_ms, contract_ok,
+    state_hash_in/out -- enough to bill a token or a retry to the node that
+    caused it, and to prove two replays walked the same states.
+    """
+    path = os.environ.get(TRACE_ENV)
+    if not path:
+        return
+    with open(path, "a") as f:
+        f.write(json.dumps(step, sort_keys=True, default=str) + "\n")
+
+
 if __name__ == "__main__":
     reset()
     record({"prompt_eval_count": 100, "eval_count": 20}, "rewrite")
@@ -69,4 +96,7 @@ if __name__ == "__main__":
     assert s["by_role"]["rerank"] == {"calls": 1, "prompt_tokens": 50, "completion_tokens": 0}
     reset()
     assert snapshot()["total_tokens"] == 0
+    assert delta({"calls": 1, "prompt_tokens": 10, "completion_tokens": 2, "embed_calls": 0},
+                 {"calls": 3, "prompt_tokens": 50, "completion_tokens": 9, "embed_calls": 1}) == \
+        {"calls": 2, "prompt_tokens": 40, "completion_tokens": 7, "embed_calls": 1}
     print("ok")

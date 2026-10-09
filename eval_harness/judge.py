@@ -132,7 +132,12 @@ class Judge:
             raw = self.client.generate(prompt, temperature=0.0, max_tokens=200)
         except LLMError:
             raw = ""
-        obj = _extract_json(raw) or {}
+        obj = _extract_json(raw)
+        if not obj:
+            # No parseable JSON is no judgment. Scoring it 0.0 charged the arm
+            # for the judge's own failure and dragged every mean down; None is
+            # what report.py and compare.py already skip.
+            return {"faithfulness": None, "answer_relevance": None, "correctness": None}
         out = {
             "faithfulness": _clamp01(obj.get("faithfulness", 0.0)),
             "answer_relevance": _clamp01(obj.get("answer_relevance", 0.0)),
