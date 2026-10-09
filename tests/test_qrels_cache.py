@@ -16,7 +16,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from eval_harness.run_eval import (  # noqa: E402
-    _load_qrels_cache, qrels_key,
+    _load_qrels_cache, qrels_key, _KEY_RE,
 )
 
 DOC = "b2647b642ec6"
@@ -61,3 +61,14 @@ def test_missing_or_corrupt_cache_is_not_fatal(tmp_path):
     assert _load_qrels_cache(str(tmp_path)) == {}
     (tmp_path / "qrels_cache.json").write_text("{not json")
     assert _load_qrels_cache(str(tmp_path)) == {}
+
+
+def test_prompt_variant_tag_separates_only_the_rows_it_touched():
+    """The empty-body prompt change must not void 3,500 cached labels, and
+    must not reuse the stale ones for the rows it re-worded."""
+    from eval_harness.judge import cache_tag
+    assert cache_tag({"text": "has a body"}) == ""
+    assert cache_tag({"text": "  \n"}) == "nobody2"
+    assert qrels_key("q", DOC) == qrels_key("q", DOC, cache_tag({"text": "body"}))
+    assert qrels_key("q", DOC) != qrels_key("q", DOC, cache_tag({"text": ""}))
+    assert _KEY_RE.match(qrels_key("q", DOC, "nobody2"))

@@ -50,6 +50,14 @@ def _clamp01(x) -> float:
     return max(0.0, min(1.0, v))
 
 
+def cache_tag(doc: dict) -> str:
+    """Suffix for a qrels cache key: changes only when the prompt a document
+    receives changes. Empty-body rows were re-worded (see relevance_label),
+    so their old labels are stale; every row with a body keeps its label.
+    """
+    return "" if (doc.get("text") or "").strip() else "nobody2"
+
+
 class Judge:
     def __init__(self, spec: str = "ollama:llama3.1"):
         self.client: LLMClient = make_client(spec)
@@ -64,6 +72,17 @@ class Judge:
         title = doc.get("title", "")
         text = (doc.get("text", "") or "")[:600]
         src = doc.get("source", "?")
+        # Some sources carry no body at all. Every google_news row is a bare
+        # headline -- 431 of 431 in run_1790126271, because Google News RSS
+        # publishes a title and an opaque redirect link and nothing else.
+        # Handing the judge an empty `Content:` field left it guessing whether
+        # the body was missing or merely withheld, and those pairs disagreed
+        # with a second judge 43% of the time against 21% for documents that
+        # had a body. Naming the absence lets it grade the headline on its own
+        # terms instead of grading its own uncertainty.
+        body = (f"Content: {text}" if text.strip() else
+                "Content: (none -- this source publishes headlines only. "
+                "Judge the title alone; do not penalise the missing body.)")
         prompt = (
             "Rate how relevant this document is to the user's software-update "
             "question. Use this scale:\n"
@@ -71,7 +90,7 @@ class Judge:
             "  1 = related (same product/area but not a direct answer)\n"
             "  0 = irrelevant\n\n"
             f'Question: "{query}"\n\n'
-            f"Document (source={src}):\nTitle: {title}\nContent: {text}\n\n"
+            f"Document (source={src}):\nTitle: {title}\n{body}\n\n"
             'Respond with JSON only: {"relevance": <0|1|2>}'
         )
         try:
@@ -113,7 +132,12 @@ class Judge:
             raw = self.client.generate(prompt, temperature=0.0, max_tokens=200)
         except LLMError:
             raw = ""
-        obj = _extract_json(raw) or {}
+        obj = _extract_json(raw)
+        if not obj:
+            # No parseable JSON is no judgment. Scoring it 0.0 charged the arm
+            # for the judge's own failure and dragged every mean down; None is
+            # what report.py and compare.py already skip.
+            return {"faithfulness": None, "answer_relevance": None, "correctness": None}
         out = {
             "faithfulness": _clamp01(obj.get("faithfulness", 0.0)),
             "answer_relevance": _clamp01(obj.get("answer_relevance", 0.0)),
