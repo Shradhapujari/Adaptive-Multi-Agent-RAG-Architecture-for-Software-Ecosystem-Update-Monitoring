@@ -120,3 +120,65 @@ def test_no_vendor_falls_back_to_question_overlap():
     pool = [_d(1, "vendor_releases", "Synology DSM 7.2.2 released", "NAS firmware")]
     assert D.decide(pool, "Synology DSM 7.2.2 upgrade safe?", []).verdict == "safe"
     assert D.decide(pool, "Is my toaster safe?", []).verdict == "insufficient_evidence"
+
+
+# ── an advisory's subject, not merely its words ──────────────────────────────
+# A product name anywhere in an advisory is how the product also gets
+# mentioned in a sentence about something else. Real rows, from the store and
+# the 200-question sheet.
+
+LQ = "Any critical Linux kernel vulnerabilities right now?"
+LV = ["Linux kernel"]
+
+
+def test_an_advisory_about_another_product_is_not_evidence():
+    """CVE-2026-79920, as /api/v/?q=linux returns it: product "linux",
+    version "2.2.16", and a description about Ajenti. It was answering
+    "any critical Linux kernel vulnerabilities?" with `patch_urgently`."""
+    pool = [_d(1, "nvd", "linux v2.2.16 — Ajenti is a Linux & BSD modular server admin panel",
+               "Ajenti is a Linux & BSD modular server admin panel. Prior to version "
+               "2.2.16, any authenticated user can call /api/core/tasks/start")]
+    d = D.decide(pool, LQ, LV)
+    assert d.verdict == "insufficient_evidence", d.rationale
+    assert not d.obligations["advisory_with_cve"]
+
+
+def test_the_products_own_advisory_still_orders_a_patch():
+    pool = [_d(1, "cisa_kev", "[CISA KEV] Linux Kernel Out-of-Bounds Write Vulnerability",
+               "Linux Kernel contains an out-of-bounds write vulnerability in the "
+               "ebtables SNAT target. CVE-2026-1234")]
+    assert D.decide(pool, LQ, LV).verdict == "patch_urgently"
+
+
+def test_a_word_shared_with_another_vendors_advisory_is_not_a_product_match():
+    """From the sheet: a Linux question cited an Apple advisory because
+    "kernel" appears in "kernel privileges", and a MySQL question cited
+    Metabase because "sql" appears in "SQL Injection"."""
+    apple = [_d(1, "cisa_kev", "[CISA KEV] Apple iOS and iPadOS Use-After-Free Vulnerability",
+                "Apple iOS and iPadOS contain a use-after-free vulnerability. An app may "
+                "be able to execute arbitrary code with kernel privileges. CVE-2026-2222")]
+    assert D.decide(apple, LQ, LV).verdict != "patch_urgently"
+    metabase = [_d(1, "cisa_kev", "[CISA KEV] Metabase SQL Injection Vulnerability",
+                   "Metabase contains a SQL Injection vulnerability that allows an "
+                   "unauthenticated remote attacker to inject SQL. CVE-2026-3333")]
+    assert D.decide(metabase, "mysql.connector connection issue", ["MySQL / SQL"]).verdict \
+        != "patch_urgently"
+
+
+def test_an_advisory_with_no_readable_subject_is_left_alone():
+    """NVD's other opener names the product after the predicate-free clause
+    "In the Linux kernel, ...". The rule abstains rather than guessing."""
+    pool = [_d(1, "nvd", "linux v6.19.0 — In the Linux kernel, a vulnerability",
+               "In the Linux kernel, the following vulnerability has been resolved: "
+               "net/mlx5e: fix a leak. CVE-2026-4444")]
+    assert D.decide(pool, LQ, LV).verdict == "patch_urgently"
+
+
+def test_the_subject_rule_does_not_reach_community_posts():
+    """A post opens with whatever its author typed; the convention is the
+    advisory catalogues', not Reddit's."""
+    pool = [_d(1, "reddit_live", "Updates are broken after the Linux kernel upgrade",
+               "Updates are broken for me, the kernel panics on boot", date="2026-10-01"),
+            _d(2, "reddit_live", "Anyone else? Linux kernel update crashes",
+               "same here, it crashes every boot", date="2026-10-02")]
+    assert D.decide(pool, LQ, LV).verdict == "hold"

@@ -133,14 +133,66 @@ def _vendor_tokens(vendors: Iterable[str]) -> set:
     return out
 
 
+# An advisory's subject is whatever stands before its first predicate. Both
+# catalogues write product-first: CISA KEV descriptions are "<product>
+# contains a <weakness>..." almost without exception, and NVD's are
+# "<product> is a ...", "<product> before <version> allows ...", or "In the
+# <product>, ..." -- which has no predicate here and so is left alone.
+_PREDICATE = re.compile(
+    r"\b(?:contains?|is|are|was|were|allows?|before|prior\s+to|suffers|fails|"
+    r"does\s+not|has\s+an?|have\s+an?)\b", re.I)
+
+
+def _subject_names_product(d: dict, vtoks: set) -> bool:
+    """Does the asked product appear in the *subject* of an advisory?
+
+    A product name anywhere in an advisory is not evidence that the advisory
+    is about that product: it is also how the product gets mentioned in a
+    sentence about something else. /api/v/ makes this routine, because it
+    files NVD records under whatever product string the query matched -- the
+    same reason this codebase already distrusts their `versionNumber`.
+    CVE-2026-79920 is stored with `product: "linux"`, `version: "2.2.16"` and
+    the description "Ajenti is a Linux & BSD modular server admin panel",
+    and "Any critical Linux kernel vulnerabilities?" was answered
+    `patch_urgently`, cited to it.
+
+    So for advisory-tier documents only, the product has to be in the clause
+    before the first predicate. Measured over the 200-question sheet: four
+    documents change class, and all four were citing another vendor's
+    advisory -- a MySQL question citing Metabase and Progress MOVEit (the
+    token "sql" appears in "SQL Injection"), an npm question citing TanStack,
+    and a Linux question citing an Apple iOS advisory (the token "kernel"
+    appears in "kernel privileges"). `patch_urgently` over the sheet goes
+    from 25 to 22.
+
+    Confined to advisories because that is where the convention holds and
+    where the damage is worst -- `patch_urgently` outranks every other
+    verdict. A community post opens with whatever its author typed, so the
+    same test there would reject "Updates are broken after the upgrade".
+    """
+    body = str(d.get("text") or d.get("detail") or "").strip()
+    if not body:
+        return True
+    m = _PREDICATE.search(body)
+    if not m or m.start() == 0:          # no readable subject; rule abstains
+        return True
+    subject = body[:m.start()].lower()
+    return any(v in subject for v in vtoks)
+
+
 def _about(d: dict, vtoks: set, qtoks: set) -> bool:
     """Is the document about the asked product? With a known vendor, the vendor
-    name has to appear; without one, fall back to sharing two content tokens
-    with the question. The fallback is deliberately weak -- a document the
-    question's own words do not touch is not evidence about it."""
+    name has to appear -- and for an advisory it has to appear in the subject,
+    for the reason `_subject_names_product` gives. Without a vendor, fall back
+    to sharing two content tokens with the question. The fallback is
+    deliberately weak -- a document the question's own words do not touch is
+    not evidence about it."""
     toks = _tokens(_text(d))
     if vtoks:
-        return bool(toks & vtoks)
+        if not toks & vtoks:
+            return False
+        return (_subject_names_product(d, vtoks)
+                if d.get("source") in ADVISORY else True)
     return len(toks & qtoks) >= 2
 
 

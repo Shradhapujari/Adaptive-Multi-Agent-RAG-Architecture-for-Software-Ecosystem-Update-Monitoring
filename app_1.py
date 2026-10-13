@@ -12,6 +12,11 @@ Agents:
   4. Query Rewriter      → Llama 3.1 via Ollama (local)
   5. Answer Presenter    → prose paragraph with bracketed evidence
                            (eval_harness provider layer; rule-based offline)
+  6. Decision Gate       → decide.gate walked by graph.run: one of five
+                           verdicts over the pool, each gated on a
+                           rule-checkable evidence obligation. Model-free,
+                           and the same code the marag_decide arm is scored
+                           on.
 
 Run:
     pip install streamlit requests
@@ -39,6 +44,8 @@ import answer_agent
 from answer_agent import present_answer
 from store import open_store, caching_fetch
 from grounding import ground
+import decide
+import graph
 import vendor
 import xai
 import yesno
@@ -596,6 +603,67 @@ def _release_rows(docs: list) -> list:
     return out
 
 
+def _decide_pool(results: dict) -> list:
+    """The documents on screen, in the shape `decide.decide` reads.
+
+    Pure function of `results`, so the renderer can rebuild it instead of a
+    second copy of the pool being carried around in session state.
+
+    Two things the harness's `normalize_doc` does not do for this app's own
+    rows. It reads `detail`/`top_comment` for the text, and the demo's
+    community and release rows keep theirs in `body` and `notes`, so a problem
+    report would reach the rule as a bare title. And the rows carry no
+    `source`, which is the field decide keys its source classes off, so the
+    pool a row came from supplies one: a release-feed row is a release note
+    unless it is one of /api/v/'s NVD advisory records, and the CVE feed is
+    Reddit (see `is_security_post`), so its rows are community evidence rather
+    than advisories. Mislabelling those would hand `patch_urgently` -- the
+    verdict with the highest precedence -- to an upvoted post.
+
+    Then `citable_kinds` is applied, which is the same ruling the cited
+    paragraph obeys: "which document kinds the answer may cite for this
+    intent" (intent.py). A verdict is an answer, and this is the one place
+    the two can be kept to one rule. Measured without it, on the store:
+    "Is the latest Linux kernel safe to update?" returned *Patch now* citing
+    two CISA KEV rows -- a release question answered out of the advisory
+    catalogue the pipeline had already excluded from the pool it shows, 49
+    rows of it. Unlike the display pools, this one is allowed to come back
+    empty: a decision over a document the app has ruled uncitable is worse
+    than an abstention.
+    """
+    from eval_harness.generators import doc_id
+    g = results.get("grounding")
+    citable = set(g.citable_kinds if g is not None
+                  else ("release", "cve", "community"))
+    out = []
+    for pool, kind, default in (("community", "community", "reddit_live"),
+                                ("releases", "release", "vendor_releases"),
+                                ("cve", "cve", "reddit_live")):
+        for d in results.get(pool) or []:
+            # An advisory record in the release feed is CVE evidence whatever
+            # pool carried it: /api/v/ returns both kinds under one query, and
+            # the filter that usually separates them restores them when the
+            # pool would otherwise empty (step 4b's `or`), so by here a
+            # release question's pool can still hold NVD rows.
+            row_kind = ("cve" if pool == "releases"
+                        and (d.get("is_cve") or not vendor.is_release_record(d))
+                        else kind)
+            if row_kind not in citable:
+                continue
+            source = d.get("source") or (
+                "nvd" if pool == "releases" and row_kind == "cve" else default)
+            out.append({
+                "doc_id": doc_id(d),
+                "title": d.get("title", ""),
+                "text": " ".join(str(d.get(k) or "") for k in
+                                 ("body", "notes", "detail", "top_comment", "text")).strip(),
+                "source": source,
+                "url": d.get("url", ""),
+                "date": d.get("date", ""),
+            })
+    return out
+
+
 def _short(err: str, limit: int = 90) -> str:
     """One readable clause from an exception string.
 
@@ -940,6 +1008,44 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         results["cve"], grounded, survey_on=survey_on
     )
 
+    # Step 6 — Decision Gate
+    # The output the Phase 2 arm is scored on: not a paragraph over the top-k
+    # but a verdict about the update, each verdict carrying the obligations it
+    # had to meet. Same `decide.gate` walked by the same `graph.run` as
+    # `marag_decide`, so the demo and the measured arm cannot drift -- the
+    # argument every other shared code path here is kept for.
+    #
+    # Two honest differences from the arm, both noted on screen. The arm
+    # over-fetches six times top_k before deciding and this decides over the
+    # documents already shown, so a thin demo pool can abstain where the arm
+    # would not. And `retrieve` returns the pool the three agents above
+    # already fetched rather than fetching again, so the graph's rewrite
+    # retry edge only fires when every feed came back empty -- which is the
+    # one case where fetching again could change the answer.
+    t0 = time.time()
+    pool = _decide_pool(results)
+    shown = sum(len(results.get(k) or []) for k in ("community", "releases", "cve"))
+    # An empty pool is not a degraded fetch: the documents came back and were
+    # ruled uncitable for this question. Only an outage that returned nothing
+    # at all is degraded, and it is the one case a retry could change.
+    degraded = bool(results["errors"]) and not shown
+    state = graph.run(
+        query,
+        rewrite=lambda q, tried: results["grounded_query"] or q,
+        retrieve=lambda q: (pool, degraded),
+        gate=decide.gate(g.vendor_names),
+    )
+    # DEGRADED leaves the payload empty: there is no verdict to render, which
+    # is not the same as a verdict of insufficient evidence.
+    results["decision"] = (
+        decide.Decision.from_dict(state.payload).as_dict()
+        | {"evidence_class": state.evidence.value,
+           "path": [st.node for st in state.trace],
+           "pool_size": len(pool), "shown": shown,
+           "citable_kinds": sorted(g.citable_kinds)}
+        if state.payload else None)
+    results["timing"]["decision"] = round(time.time() - t0, 2)
+
     return results
 
 _CITE = re.compile(r"\s*\[[^\]]*\]")
@@ -1002,6 +1108,55 @@ def _answer_caption(presented, n_cited: int, secs) -> str:
     who = (f"Presented by {presented.model}" if presented.mode == "llm"
            else f"Presented rule-based ({presented.note})")
     return f"{who} · {n_cited} of {len(presented.evidence)} source(s) cited · {secs}s"
+
+
+_VERDICT_BOX = {
+    "patch_urgently":       ("🔴", st.error),
+    "hold":                 ("🟠", st.warning),
+    "update_with_caveat":   ("🟡", st.warning),
+    "safe":                 ("🟢", st.success),
+    "insufficient_evidence": ("⚪", st.info),
+}
+
+
+def _decision_block(results: dict, *, details: bool) -> None:
+    """The verdict, and the obligations it was allowed to stand on.
+
+    The sentence is `decide.render`, so the line here is the same string the
+    `marag_decide` arm is scored on. The obligations are shown because the
+    verdict without them is just another unexplained one-liner: what makes
+    this output type different from the paragraph below it is that every
+    clause behind it was checked against a named document.
+    """
+    dec = results.get("decision")
+    if not dec:
+        return
+    pool = _decide_pool(results)
+    icon, box = _VERDICT_BOX[dec["verdict"]]
+    box(f"{icon} {decide.render(decide.Decision.from_dict(dec), pool)}")
+    if not details:
+        return
+    set_aside = dec["shown"] - dec["pool_size"]
+    st.caption(f"Evidence `{dec['evidence_class']}` · confidence "
+               f"{dec['confidence']:.2f} · stopped on `{dec['stop_reason']}` · "
+               f"path " + " → ".join(dec["path"]) +
+               f" · decided model-free over {dec['pool_size']} of the "
+               f"{dec['shown']} document(s) shown"
+               + (f", {set_aside} not citable for this question (kinds: "
+                  + ", ".join(f"`{k}`" for k in dec["citable_kinds"]) + ")"
+                  if set_aside else ""))
+    with st.expander("Which obligations this verdict had to meet"):
+        for name, met in dec["obligations"].items():
+            st.markdown(("- ✅ " if met else "- ⬜ ") + f"`{name}`")
+        by_id = {d["doc_id"]: d for d in pool}
+        used = [by_id[i] for i in dec["evidence_doc_ids"] if i in by_id]
+        if used:
+            st.markdown("**Documents the rule used**")
+            for d in used:
+                st.markdown(f"- {d['title'][:100]}  ·  `{d['source']}`")
+        if dec["probes_wanted"]:
+            st.caption("Evidence a prober would go looking for next: "
+                       + ", ".join(f"`{p}`" for p in dec["probes_wanted"]))
 
 
 def _n_shipped(rows) -> int:
@@ -1737,6 +1892,10 @@ elif run_btn and query and compare_mode:
         if tc and show_details:
             st.info(f"**Top-voted comment ({tc.get('score', 0)} points, "
                     f"u/{tc.get('author','')}):** {tc.get('body','')[:600]}")
+        # The verdict is this arm's own output, so it belongs in this column
+        # rather than outside the comparison: the baseline has no equivalent,
+        # which is the difference the column is there to show.
+        _decision_block(results, details=False)
         if show_details:
             render_answer(presented, key="cmp")
         else:
@@ -1768,7 +1927,8 @@ elif run_btn and query:
     if show_pipeline:
         st.markdown("---")
         st.markdown("### Manager Agent — Think & Plan")
-        step_col0, step_col1, step_col2, step_col3, step_col4 = st.columns(5)
+        (step_col0, step_col1, step_col2, step_col3, step_col4,
+         step_col5) = st.columns(6)
         with step_col0:
             st.markdown("""<div class="agent-card">
                 <b>Step 0</b><br>Temporal Grounder<br><small>rule-based, offline</small>
@@ -1788,6 +1948,10 @@ elif run_btn and query:
         with step_col4:
             st.markdown("""<div class="agent-card">
                 <b>Step 4</b><br>CVE Agent<br><small>Security Live API</small>
+            </div>""", unsafe_allow_html=True)
+        with step_col5:
+            st.markdown("""<div class="agent-card">
+                <b>Step 5</b><br>Decision Gate<br><small>rule-based, model-free</small>
             </div>""", unsafe_allow_html=True)
         st.markdown("---")
 
@@ -1835,6 +1999,11 @@ elif run_btn and query:
     trace = xai.explain(results["original_query"], presented.text,
                         presented.evidence)
     cited = [s for s in trace.sources if s["used"]]
+
+    # ── DECISION ──────────────────────────────────────────
+    # Above the paragraph, in both views: it is the part of the output a reader
+    # can act on, and it is the claim the paper now makes.
+    _decision_block(results, details=show_details)
 
     # ── ONE-LINE ANSWER ───────────────────────────────────
     # The default view: the question and one sentence. For a yes/no question
