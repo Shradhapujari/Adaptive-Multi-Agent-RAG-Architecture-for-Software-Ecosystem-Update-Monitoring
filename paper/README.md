@@ -71,6 +71,7 @@ is exactly what makes the trap possible.
 | File | Status |
 |---|---|
 | `tosem_amara.tex` | The paper. Self-contained — no `\input`. |
+| `saner2027.tex` | SANER 2027 Agentic AI4SE submission: the same work condensed to the track's 10+2 pages, `IEEEtran` 10pt conference, double-anonymous. Self-contained; needs only `references.bib`, no figure files. Build with `tectonic saner2027.tex --outdir /tmp/build`. Body ends on page 10, references run 10--12. |
 | `references.bib` | The **only** bibliography source; `\bibliography{references}` cites it alone. |
 | `tosem_amara.bbl` | Generated from the above. Typeset directly. See the warning. |
 | `ACM-Reference-Format.bst` | ACM's style file. |
