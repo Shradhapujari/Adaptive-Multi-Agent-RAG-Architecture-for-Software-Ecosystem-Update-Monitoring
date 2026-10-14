@@ -36,6 +36,16 @@ def test_future_rows_are_upcoming_not_latest():
     assert [r["versionNumber"] for r in s["upcoming"]] == ["159.0.0"]
 
 
+def test_shipped_prefers_highest_version_over_newest_date():
+    """Regression: the live feed can backfill an older build under a newer
+    date (Firefox 156.0.0 posted 2026-10-13, two weeks after 157.0.0 shipped
+    2026-09-29). Date-sorted `shipped()` reported the backfilled 156.0.0 as
+    latest; it must report the higher version instead."""
+    rows = [_rel("157.0.0", "20260901"), _rel("156.0.0", "20260914")]
+    assert monitor.shipped(rows, TODAY)[0]["versionNumber"] == "157.0.0"
+    assert monitor.summarize("firefox", rows, TODAY)["latest"]["versionNumber"] == "157.0.0"
+
+
 def test_forecast_uses_median_gap():
     f = monitor.forecast_next(ROWS, TODAY)
     assert f["gap_days"] == 7 and f["date"] == date(2026, 9, 21)
