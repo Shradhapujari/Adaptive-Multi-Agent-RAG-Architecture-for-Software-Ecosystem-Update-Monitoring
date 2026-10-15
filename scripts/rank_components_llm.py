@@ -94,6 +94,14 @@ def kendall_tau(rank_a: dict[str, int], rank_b: dict[str, int], components: list
 
 def main() -> None:
     load_dotenv()
+
+    # Pull the live pipeline ranking BEFORE spending anything on the models.
+    # It is ~30 requests to a feed that has 502'd and timed out before (see
+    # monitor.py's docstring); doing it afterwards meant one transient error
+    # threw away model responses already obtained and paid for, since nothing
+    # reaches disk until write_report() at the end.
+    pipeline_ranked = rank_components()
+
     random.seed(2026_10_15)  # one fixed shuffle, same order shown to every model
     shuffled = COMPONENTS.copy()
     random.shuffle(shuffled)
@@ -123,7 +131,8 @@ def main() -> None:
             except (ValueError, json.JSONDecodeError) as e:
                 last_err = str(e)
                 this_prompt = (f"{prompt}\n\nYour previous answer was invalid: {e}. "
-                                "Return exactly 30 unique names, each exactly once.")
+                                f"Return exactly {len(COMPONENTS)} unique names, "
+                                "each exactly once.")
 
         results[spec] = order
         if order is not None:
@@ -132,7 +141,7 @@ def main() -> None:
         else:
             print(f"--- {spec}: FAILED after retry — {last_err}")
 
-    pipeline_ranked = rank_components()
+    # Assigned last so it stays the rightmost column of the report.
     results["pipeline:releasetrain"] = [c["name"] for c in pipeline_ranked]
 
     out_path = ROOT / "docs" / f"llm_update_order_comparison_{date.today().isoformat()}.md"
