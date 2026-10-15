@@ -143,7 +143,43 @@ _PREDICATE = re.compile(
     r"does\s+not|has\s+an?|have\s+an?)\b", re.I)
 
 
-def _subject_names_product(d: dict, vtoks: set) -> bool:
+# A product name qualified to a different platform is a different product
+# wearing the same name: "Firefox for iOS" is not "Firefox" (desktop) even
+# though the bare token "firefox" is right there in the subject. CVE-2026-
+# 103418 is filed under product "firefox" with the description "Firefox for
+# iOS directly interpolated the page's HTML language attribute ... This
+# vulnerability was fixed in Firefox for iOS 157.1." -- no verb in that
+# sentence up to "was" matches _PREDICATE, so the extracted subject balloons
+# to nearly the whole description, which still contains "firefox" and so
+# passed the check below unqualified, reaching "Is it safe to update Firefox
+# right now?" alongside the real desktop CVE it should have been weighed
+# against. Checked wherever the platform word could appear, not just inside
+# the extracted subject, since a late predicate match (as here) can place it
+# outside that window.
+_PLATFORM_FOR_RE = re.compile(
+    r"\bfor\s+(ios|iphone|ipad|android|windows|macos|linux)\b", re.I)
+_PLATFORM_ALIAS = {"iphone": "ios", "ipad": "ios"}
+
+# Mozilla's advisories name the product after the fact -- "<bug summary>.
+# This vulnerability was fixed in <product> <version>." -- rather than
+# product-first, so the product the fix applies to lives here instead of
+# before any predicate. Capped at 60 chars so a long version/platform list
+# cannot drag in unrelated trailing sentences.
+_FIXED_IN_RE = re.compile(r"\bfixed\s+in\s+([^.\n]{1,60})", re.I)
+
+
+def _platform_mismatch(body: str, vtoks: set, qtoks: set) -> bool:
+    """True when the advisory names a platform-qualified variant the question
+    never asked about -- "firefox" alone asks about no platform in
+    particular, but "firefox for ios" is evidence about iOS specifically."""
+    m = _PLATFORM_FOR_RE.search(body)
+    if not m:
+        return False
+    platform = _PLATFORM_ALIAS.get(m.group(1).lower(), m.group(1).lower())
+    return platform not in vtoks and platform not in qtoks
+
+
+def _subject_names_product(d: dict, vtoks: set, qtoks: set) -> bool:
     """Does the asked product appear in the *subject* of an advisory?
 
     A product name anywhere in an advisory is not evidence that the advisory
@@ -165,6 +201,20 @@ def _subject_names_product(d: dict, vtoks: set) -> bool:
     appears in "kernel privileges"). `patch_urgently` over the sheet goes
     from 25 to 22.
 
+    A platform-qualified subject is checked first and separately, over the
+    whole body rather than just the extracted subject, for the reason
+    `_platform_mismatch` gives.
+
+    Not every advisory source writes product-first, though: Mozilla's own
+    describe the bug first and name the product in a trailing "fixed in
+    <product> <version>" clause instead -- "Mitigation bypass in the File
+    Handling component ... fixed in Firefox 157.0.1" never puts "firefox"
+    before any predicate, and without this fallback that real CVE fails the
+    subject check on a desktop Firefox question, the same question the iOS
+    advisory above was wrongly passing. So a "fixed in" tail is tried second,
+    only to accept a product the subject check missed, never to override a
+    subject that named a different one.
+
     Confined to advisories because that is where the convention holds and
     where the damage is worst -- `patch_urgently` outranks every other
     verdict. A community post opens with whatever its author typed, so the
@@ -173,11 +223,16 @@ def _subject_names_product(d: dict, vtoks: set) -> bool:
     body = str(d.get("text") or d.get("detail") or "").strip()
     if not body:
         return True
+    if _platform_mismatch(body, vtoks, qtoks):
+        return False
     m = _PREDICATE.search(body)
     if not m or m.start() == 0:          # no readable subject; rule abstains
         return True
     subject = body[:m.start()].lower()
-    return any(v in subject for v in vtoks)
+    if any(v in subject for v in vtoks):
+        return True
+    tail = _FIXED_IN_RE.search(body)
+    return bool(tail) and any(v in tail.group(1).lower() for v in vtoks)
 
 
 def _about(d: dict, vtoks: set, qtoks: set) -> bool:
@@ -191,7 +246,7 @@ def _about(d: dict, vtoks: set, qtoks: set) -> bool:
     if vtoks:
         if not toks & vtoks:
             return False
-        return (_subject_names_product(d, vtoks)
+        return (_subject_names_product(d, vtoks, qtoks)
                 if d.get("source") in ADVISORY else True)
     return len(toks & qtoks) >= 2
 

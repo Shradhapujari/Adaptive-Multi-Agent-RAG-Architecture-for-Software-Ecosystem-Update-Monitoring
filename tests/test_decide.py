@@ -174,6 +174,45 @@ def test_an_advisory_with_no_readable_subject_is_left_alone():
     assert D.decide(pool, LQ, LV).verdict == "patch_urgently"
 
 
+FQ = "Is it safe to update Firefox right now?"
+FV = ["firefox"]
+
+
+def test_a_platform_qualified_advisory_is_not_evidence_for_the_bare_product():
+    """CVE-2026-103418, as /api/v/?q=firefox returns it: product "firefox",
+    description opening "Firefox for iOS ...". No verb in the sentence up to
+    "was fixed" matches _PREDICATE, so the subject balloons to nearly the
+    whole description -- which still contains "firefox" and, before the
+    platform check, passed unqualified on a desktop Firefox question."""
+    ios_cve = _d(1, "nvd", "CVE-2026-103418",
+                 "Firefox for iOS directly interpolated the page's HTML language "
+                 "attribute into translation JavaScript, allowing attacker-controlled "
+                 "markup to execute code in Firefox's privileged content world and "
+                 "bypass the page's Content Security Policy. This vulnerability was "
+                 "fixed in Firefox for iOS 157.1.")
+    release = _d(2, "vendor_releases", "Firefox 157.0.0", "Firefox 157.0 release notes")
+    d = D.decide([ios_cve, release], FQ, FV)
+    assert d.verdict == "safe", d.rationale
+    assert not d.obligations["advisory_with_cve"]
+    # The same CVE answers a question that actually asks about iOS.
+    assert D.decide([ios_cve], "Is it safe to update Firefox for iOS?",
+                    ["firefox", "ios"]).verdict == "patch_urgently"
+
+
+def test_an_advisory_naming_the_product_only_in_a_fixed_in_clause_still_counts():
+    """Mozilla's own advisories describe the bug first and name the product
+    in a trailing "fixed in <product> <version>" clause -- never before any
+    predicate -- so the product-first subject check alone rejects a real,
+    on-platform CVE. This is the desktop sibling of CVE-2026-103418 above:
+    without the "fixed in" fallback, removing the iOS advisory's false match
+    left this one as the only advisory in the pool, and it was dropped too,
+    turning a live Firefox CVE into a `safe` verdict."""
+    desktop_cve = _d(1, "nvd", "CVE-2026-106016",
+                      "Mitigation bypass in the File Handling component. This "
+                      "vulnerability was fixed in Firefox 157.0.1.")
+    assert D.decide([desktop_cve], FQ, FV).verdict == "patch_urgently"
+
+
 def test_the_subject_rule_does_not_reach_community_posts():
     """A post opens with whatever its author typed; the convention is the
     advisory catalogues', not Reddit's."""
