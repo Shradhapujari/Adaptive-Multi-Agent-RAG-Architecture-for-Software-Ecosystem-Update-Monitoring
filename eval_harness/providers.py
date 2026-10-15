@@ -10,6 +10,7 @@ Backends:
   - ollama:<model>      local, no API key  (works today: llama3.1, mistral, minimax-m2.7:cloud)
   - openai:<model>      needs OPENAI_API_KEY     (gpt-4o, gpt-4o-mini, ...)
   - anthropic:<model>   needs ANTHROPIC_API_KEY  (claude-*)
+  - gemini:<model>      needs GEMINI_API_KEY     (gemini-2.5-flash, gemini-2.5-pro, ...)
 
 Spec format: "<backend>:<model>", e.g. "ollama:llama3.1", "openai:gpt-4o".
 A bare model name with no colon defaults to the ollama backend.
@@ -138,6 +139,46 @@ class OpenAIClient(LLMClient):
         return resp.choices[0].message.content or ""
 
 
+class GeminiClient(LLMClient):
+    """Google Gemini. Needs GEMINI_API_KEY (or GOOGLE_API_KEY) and `google-genai`.
+
+    The SDK reads either variable itself, so `available()` accepts either.
+    """
+
+    backend = "gemini"
+
+    def __init__(self, model: str):
+        super().__init__(model)
+        self._client = None
+
+    def available(self) -> bool:
+        if not (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
+            return False
+        try:
+            from google import genai  # noqa: F401
+            return True
+        except ImportError:
+            return False
+
+    def _ensure(self):
+        if self._client is None:
+            from google import genai
+            self._client = genai.Client()
+        return self._client
+
+    def _generate(self, prompt, system, temperature, max_tokens) -> str:
+        from google.genai import types
+        client = self._ensure()
+        config = types.GenerateContentConfig(
+            temperature=temperature, max_output_tokens=max_tokens,
+            system_instruction=system or None,
+        )
+        resp = client.models.generate_content(
+            model=self.model, contents=prompt, config=config,
+        )
+        return resp.text or ""
+
+
 class AnthropicClient(LLMClient):
     """Anthropic Messages API. Needs ANTHROPIC_API_KEY and the `anthropic` package."""
 
@@ -177,6 +218,7 @@ _BACKENDS = {
     "ollama": OllamaClient,
     "openai": OpenAIClient,
     "anthropic": AnthropicClient,
+    "gemini": GeminiClient,
 }
 
 
@@ -195,7 +237,7 @@ def make_client(spec: str) -> LLMClient:
 if __name__ == "__main__":
     # Quick smoke test of whichever backends are reachable.
     for spec in ["ollama:llama3.1", "ollama:mistral", "openai:gpt-4o-mini",
-                 "anthropic:claude-sonnet-4-6"]:
+                 "anthropic:claude-sonnet-4-6", "gemini:gemini-2.5-flash"]:
         c = make_client(spec)
         status = "available" if c.available() else "unavailable"
         print(f"{c.spec:35s} {status}")
