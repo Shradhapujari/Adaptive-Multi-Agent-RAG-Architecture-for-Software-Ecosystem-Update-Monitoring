@@ -736,3 +736,18 @@ python -m eval_harness.run_eval \
 
 `MARAG_RERANK=none` with `MARAG_RANK_QUERY=rewritten` is the configuration the
 conference version shipped.
+
+## Update-order ranking baseline (`sec:update-order-baseline`, `tab:update-order-top`, supplementary `tab:update-order-full`)
+
+Not a `run_*` directory — a different script, `scripts/rank_components_llm.py`,
+querying providers directly rather than going through `eval_harness.run_eval`.
+Output: `docs/llm_update_order_comparison_2026-10-15.md` (raw model responses
+for both `llama3.1` attempts, plus the rendered tables). The pipeline column
+comes from `scripts/component_stability_ranking.py` (`rank_components()`), a
+live, non-frozen pull from releasetrain.io made at the same time — re-running
+either script will not reproduce this table, same caveat as every other
+pipeline-ranking number in this repo.
+
+ChatGPT and Gemini are wired into the same script (`SPECS` in
+`rank_components_llm.py`) but were not run for this table: no
+`OPENAI_API_KEY` / `GEMINI_API_KEY` was set on the machine that produced it.
