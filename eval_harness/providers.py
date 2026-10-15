@@ -166,6 +166,36 @@ class GeminiClient(LLMClient):
             self._client = genai.Client()
         return self._client
 
+    @staticmethod
+    def _text_or_raise(resp) -> str:
+        """The response's text, or a diagnostic error if it carries none.
+
+        `resp.text or ""` would hand an empty string back to the harness as a
+        successful generation. That is the wrong default here: on the 2.5
+        models thinking is on by default and thinking tokens count against
+        `max_output_tokens`, so a budget that is merely too small finishes
+        with `MAX_TOKENS`, emits no text part, and would otherwise be scored
+        as the model answering with nothing -- charging a configuration
+        mistake to the model. A safety block looks the same from here.
+
+        Raising is caught by `generate()` and surfaces as an LLMError naming
+        the finish/block reason, which is actionable where "" is not.
+        """
+        try:
+            text = resp.text or ""
+        except Exception:      # some SDK versions raise rather than return None
+            text = ""
+        if text:
+            return text
+        cands = getattr(resp, "candidates", None) or []
+        finish = getattr(cands[0], "finish_reason", None) if cands else None
+        block = getattr(getattr(resp, "prompt_feedback", None), "block_reason", None)
+        raise ValueError(
+            f"no text in response (finish_reason={finish!r}, block_reason={block!r}); "
+            "on 2.5 models thinking tokens count against max_output_tokens, so raise "
+            "max_tokens or set a thinking_budget"
+        )
+
     def _generate(self, prompt, system, temperature, max_tokens) -> str:
         from google.genai import types
         client = self._ensure()
@@ -176,7 +206,7 @@ class GeminiClient(LLMClient):
         resp = client.models.generate_content(
             model=self.model, contents=prompt, config=config,
         )
-        return resp.text or ""
+        return self._text_or_raise(resp)
 
 
 class AnthropicClient(LLMClient):
