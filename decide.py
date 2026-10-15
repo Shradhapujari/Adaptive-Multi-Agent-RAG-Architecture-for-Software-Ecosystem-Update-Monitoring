@@ -287,8 +287,19 @@ def decide(pool: Sequence[dict], question: str, vendors: Iterable[str] = (),
         versioned = any(_version_ok(d, asked) for d in advisories)
         return Decision("patch_urgently", ids(advisories), obligations, "obligations_met",
                         [], 1.0 if versioned else 0.8,
-                        f"{len(advisories)} advisory document(s) with a CVE id about the "
-                        f"product" + (f" on {asked[0]}" if versioned and asked else ""))
+                        # "name" rather than "are about": attribution is a text
+                        # match on the advisory's subject, and two of the seven
+                        # it accepted over the 24 live macOS rows belonged to
+                        # another product that merely runs on macOS (iTerm2,
+                        # OpenSSH). Those are not separable from a genuine row
+                        # by text alone -- "An issue in iTerm2 macOS before
+                        # 3.6.12" and "An issue in macOS before 27.1" differ by
+                        # a word no catalogue holds -- so the sentence claims
+                        # only what was checked and points at the citations,
+                        # which is where a reader catches the rest.
+                        f"{len(advisories)} advisory document(s) with a CVE id name this "
+                        f"product" + (f" on {asked[0]}" if versioned and asked else "")
+                        + "; attribution is by text match, so check the citations")
     if len(reports) >= k_reports and not fix_releases:
         return Decision("hold", ids(reports), obligations, "obligations_met", ["release"],
                         min(1.0, len(reports) / (2 * k_reports)),

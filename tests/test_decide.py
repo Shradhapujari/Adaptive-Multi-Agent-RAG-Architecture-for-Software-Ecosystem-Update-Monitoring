@@ -248,3 +248,20 @@ def test_a_product_named_before_its_platform_is_still_its_own_advisory():
                     ["firefox"]).verdict == "patch_urgently"
     assert D.decide(ff, "Any critical iOS vulnerabilities?",
                     ["Apple iOS"]).verdict != "patch_urgently"
+
+
+def test_the_patch_verdict_does_not_overclaim_its_attribution():
+    """Measured 2026-10-15 over the 24 live macOS advisories: of the 7 the
+    rule accepts, 2 are another product's (iTerm2, OpenSSH naming macOS as
+    the platform they run on). Neither is separable from a genuine row by
+    text alone -- "An issue in iTerm2 macOS before 3.6.12" and "An issue in
+    macOS before 27.1" differ only by a word no catalogue knows.
+
+    So the sentence stops asserting the documents are *about* the product.
+    They name it; whether they are about it is what the citations are for."""
+    pool = [_d(1, "cisa_kev", "[CISA KEV] Linux Kernel Out-of-Bounds Write",
+               "Linux Kernel contains an out-of-bounds write vulnerability. CVE-2026-1234")]
+    d = D.decide(pool, LQ, LV)
+    assert d.verdict == "patch_urgently"
+    assert "about the product" not in d.rationale
+    assert "name" in d.rationale and "citation" in d.rationale
