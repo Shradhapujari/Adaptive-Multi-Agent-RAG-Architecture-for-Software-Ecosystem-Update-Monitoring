@@ -41,6 +41,40 @@ def advisories(rows: List[dict]) -> List[dict]:
     return [r for r in rows if r.get("isCve")]
 
 
+def advisory_is_about(row: dict, product: str) -> bool:
+    """False only when the advisory's own text names a *different* product.
+
+    On `isCve` rows the upstream's `versionProductName` is the ecosystem token
+    the row was indexed under, not the affected product: a Backstage advisory
+    arrives under "kubernetes", a Dokku one under "docker", a "Mocha Telnet
+    Lite for iOS" one under "ios". Measured 2026-10-15 over the live feed, of
+    the 90-day advisories whose text names a product at all, 21 of 21 under
+    `docker` and 13 of 13 under `kubernetes` were about something else.
+
+    Abstains when the text names nothing parseable, which is most rows. That
+    direction is deliberate: carrying an advisory whose subject could not be
+    read overstates risk, and dropping a real one hides it.
+    """
+    # Local import: the extractor lives in the benchmark builder, which is a
+    # script rather than a library. Importing it here keeps one copy of the
+    # patterns instead of a second drifting one.
+    # ponytail: move extract_cve_product to a shared home if a third caller
+    # appears -- a library reaching into a script is the wrong direction.
+    from build_multiecosystem_benchmark import extract_cve_product
+
+    got = extract_cve_product(row.get("versionReleaseNotes") or "")
+    if not got:
+        return True
+    named = got[0].lower()
+    asked = str(product or "").lower().strip()
+    if not asked:
+        return True
+    # Word-boundary both ways, so "macos" matches "macOS Sequoia" but "git"
+    # does not match "GitLab" and "node" does not match "Nodemailer".
+    return (re.search(rf"\b{re.escape(asked)}\b", named) is not None
+            or re.search(rf"\b{re.escape(named)}\b", asked) is not None)
+
+
 def shipped(rows: List[dict], today: date) -> List[dict]:
     """Releases dated on or before today, highest version first (date as
     tiebreak). The feed carries scheduled future rows (Firefox 159 dated
@@ -128,6 +162,10 @@ def risk(rows: List[dict], today: date, installed: str = "") -> dict:
 def summarize(name: str, rows: List[dict], today: Optional[date] = None,
               installed: str = "", days: int = 365) -> dict:
     today = today or date.today()
+    # Drop advisories the feed filed under this product but whose own text is
+    # about a different one -- see advisory_is_about. Done once here, where the
+    # product name is known, so risk/by_month/advisories all see the same rows.
+    rows = [r for r in rows if not r.get("isCve") or advisory_is_about(r, name)]
     ship = shipped(rows, today)
     latest = ship[0] if ship else None
     return {

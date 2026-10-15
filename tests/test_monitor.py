@@ -69,3 +69,39 @@ def test_by_month_buckets_kinds():
     m = monitor.by_month(ROWS, today=TODAY)
     assert m["2026-09"] == {"releases": 2, "advisories": 1}
     assert "2027-01" not in m
+
+
+def _adv(v, d, notes, sev="HIGH"):
+    return {"versionNumber": v, "versionReleaseDate": d, "isCve": True,
+            "versionSeverity": sev, "versionReleaseNotes": notes}
+
+
+def test_advisories_about_another_product_do_not_count():
+    """Regression: on isCve rows the upstream's versionProductName is the
+    ecosystem token the row was indexed under, not the affected product -- a
+    Backstage advisory arrives under "kubernetes", a Dokku one under "docker".
+    Measured 2026-10-15 against the live feed, every one of docker's 21
+    parseable 90-day advisories named a different product, and 13 of 13 of
+    kubernetes'. Counting them inflates the risk score and lists them in the
+    UI under a component they are not about."""
+    rows = [
+        _rel("1.38.0", "20260914"),
+        _adv("1.2.3", "20260910", "Backstage is an open platform. Prior to version 1.2.3, "
+                                  "an attacker can escalate privileges."),
+        _adv("1.38.1", "20260908", "Kubernetes kubelet before 1.38.1 allows node escape."),
+    ]
+    s = monitor.summarize("kubernetes", rows, TODAY)
+    kept = [a["versionNumber"] for a in s["advisories"]]
+    assert kept == ["1.38.1"], f"foreign advisory not dropped: {kept}"
+    assert s["risk"]["recent_advisories"] == 1
+    assert s["risk"]["severity"] == {"HIGH": 1}
+
+
+def test_unattributable_advisories_are_kept():
+    """Only positively-foreign advisories are dropped. When the text does not
+    name a product, the advisory is kept: under-reporting a real advisory is
+    worse than carrying one whose subject could not be parsed."""
+    rows = [_rel("1.38.0", "20260914"),
+            _adv("1.0.0", "20260910", "A flaw allows remote code execution.")]
+    s = monitor.summarize("kubernetes", rows, TODAY)
+    assert s["risk"]["recent_advisories"] == 1
