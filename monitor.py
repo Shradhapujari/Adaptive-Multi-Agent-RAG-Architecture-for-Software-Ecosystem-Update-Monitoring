@@ -42,12 +42,21 @@ def advisories(rows: List[dict]) -> List[dict]:
 
 
 def shipped(rows: List[dict], today: date) -> List[dict]:
-    """Releases dated on or before today, newest first. The feed carries
-    scheduled future rows (Firefox 159 dated 2027-01-19 on 2026-09-14) which
-    are not "the latest version" in any sense a user means."""
+    """Releases dated on or before today, highest version first (date as
+    tiebreak). The feed carries scheduled future rows (Firefox 159 dated
+    2027-01-19 on 2026-09-14) which are not "the latest version" in any sense
+    a user means -- those are dropped by the date filter below.
+
+    Sorting by date instead of version would also be wrong: the feed can
+    backfill an older build's row with a newer date (Firefox 156.0.0 posted
+    on 2026-10-13, two weeks after 157.0.0 shipped), which would make a lower
+    version look like the latest. version_key is only meaningful within one
+    product's own numbering, which is what `rows` already is here.
+    """
     out = [r for r in releases(rows)
            if (d := parse_ymd(r.get("versionReleaseDate"))) and d <= today]
-    return sorted(out, key=lambda r: parse_ymd(r["versionReleaseDate"]), reverse=True)
+    return sorted(out, key=lambda r: (version_key(r.get("versionNumber")),
+                                       parse_ymd(r["versionReleaseDate"])), reverse=True)
 
 
 def forecast_next(rows: List[dict], today: date, n: int = 8) -> Optional[dict]:
