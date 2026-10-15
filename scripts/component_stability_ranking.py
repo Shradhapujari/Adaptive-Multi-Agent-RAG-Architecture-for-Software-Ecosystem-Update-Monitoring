@@ -76,7 +76,10 @@ def latest_stability(rows: list) -> tuple[float | None, int]:
     return (scored[0]["stability"] if scored else None), len(scored)
 
 
-def main() -> None:
+def rank_components() -> list[dict]:
+    """Live-pull every component's risk/stability and sort by update order
+    (highest risk first). Shared by main() and by scripts that need our
+    pipeline's ranking alongside an LLM's, e.g. rank_components_llm.py."""
     ranked = []
     for name in COMPONENTS:
         rows = fetch_component_rows(name)
@@ -96,6 +99,11 @@ def main() -> None:
         })
 
     ranked.sort(key=lambda c: (c["risk_score"], c["severity_raw"]), reverse=True)
+    return ranked
+
+
+def main() -> None:
+    ranked = rank_components()
 
     print(f"Ranked {len(ranked)} components by update order, {date.today().isoformat()}. "
           f"Higher risk = update sooner. `sev` breaks ties at the capped score of 100.\n")

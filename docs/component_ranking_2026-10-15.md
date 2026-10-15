@@ -148,3 +148,68 @@ was a verified no-op. `/api/v/search?q=<name>` is already product-scoped — eve
 `q=linux` row has `versionProductName == "linux"`. The comment claiming it
 de-pooled "six distinct products" described a bug that was not occurring. The
 filter and the helper have both been removed.
+
+## A second ranking: rollout sequencing, not patch urgency
+
+The table above answers "how much known-vulnerability exposure has this
+component accumulated" — higher `risk`/`sev` means more unpatched advisory
+weight sitting on it right now. Asked separately (an SRE/infra-architect
+framing, Claude Sonnet 5, single conversational pass, no retrieval) was a
+different question: **in what order should these 30 be rolled through an
+update cycle to minimize cascading failure and reboot outages** — i.e. blast
+radius and dependency position, not CVE backlog. The two are not competing
+predictions of the same value, so a big delta below is not a disagreement.
+
+| component | risk/sev rank | rollout-order rank | Δ | rollout-order rationale |
+|---|---:|---:|---:|---|
+| neovim | 30 | 1 | +29 | single-user editor, no dependents, instant revert |
+| linux | 2 | 30 | −28 | kernel everything else runs on; most dependents, hardest rollback |
+| brave | 23 | 3 | +20 | sandboxed consumer browser, isolated per device |
+| windows | 4 | 29 | −25 | broad fleet, boot-failure risk, hard rollback |
+| safari | 21 | 2 | +19 | sandboxed consumer browser, isolated per device |
+| opera | 24 | 5 | +19 | isolated browser, smallest install base here |
+| android | 5 | 26 | −21 | large fleet, though vendor-staged rollout tempers it |
+| macos | 8 | 28 | −20 | desktop/server fleet, hard rollback |
+| kubernetes | 6 | 25 | −19 | orchestrates many hosts at once, cluster-wide blast radius |
+| python | 26 | 9 | +17 | interpreter regressions stay in dev/build until something depends on the new version |
+| mongodb | 29 | 13 | +16 | no listed app confirmed to depend on it specifically |
+| node | 25 | 10 | +15 | same as python: dev-environment risk only, pre-deployment |
+| docker | 9 | 24 | −15 | single-host runtime, but every container on that host is exposed |
+| edge | 22 | 4 | +18 | sandboxed consumer browser, isolated per device |
+| ios | 14 | 27 | −13 | Apple's rollout is closer to all-at-once than Android's |
+| home assistant | 27 | 16 | +11 | single app, contained blast radius |
+| nextcloud | 28 | 17 | +11 | single app, contained blast radius |
+| firefox | 16 | 7 | +9 | sandboxed browser, but Gecko has broken extensions/policy more than Chromium forks historically |
+| chrome | 13 | 6 | +7 | sandboxed, but widest browser install base here |
+| grafana | 19 | 12 | +7 | update before the risky infra below so telemetry is live for the rest of the rollout |
+| postgresql | 7 | 15 | −8 | GitLab's datastore; validate before GitLab updates |
+| ubuntu | 15 | 23 | −8 | widest distro footprint; goes after its upstream Debian |
+| debian | 17 | 22 | −5 | base many images inherit from |
+| mysql | 11 | 14 | −3 | WordPress/Nextcloud can sit on it; validate before those |
+| arch | 18 | 20 | −2 | rolling release, smallest/most isolated install base |
+| fedora | 20 | 21 | −1 | faster cadence catches packaging regressions early |
+| rust | 12 | 11 | +1 | no running service here is built on it |
+| git | 10 | 8 | +2 | CLI only; nothing here calls it as a running service |
+| gitlab | 3 | 19 | −16 | depends on postgresql + git; also the CI/CD system teams rely on |
+| wordpress | 1 | 18 | −17 | depends on mysql; plugin ecosystem makes it the most failure-prone app here |
+
+**Why the sign flips for the browsers/editor vs. the OS/kernel/orchestration
+layer**: `risk`/`sev` is near-zero for `neovim`/`safari`/`brave`/`edge`/`opera`
+largely because the advisory feed has little or nothing filed against them
+(see the "four components have no data at all" caveat above — three of those
+four, `edge`/`opera`/`home assistant`/`mongodb`, are the ones with the biggest
+positive deltas here too, for the same underlying reason: no signal either
+way). Low advisory volume reads as "not urgent to patch" in the heuristic and
+as "safe to patch first" in the rollout framing — same input, opposite
+reasons, same direction. `linux`/`windows`/`macos`/`kubernetes` diverge for
+the opposite reason: real advisory volume drives `risk`/`sev` up, while blast
+radius and rollback difficulty drive rollout order down (later).
+
+**This ranking is a single model's reasoning, not a measurement.** It was
+produced in one conversational pass with no retrieval, no cross-model check,
+and no scoring script — contrast with `scripts/rank_components_llm.py`
+(present in this checkout, not yet run against live API keys), which asks
+ChatGPT, Gemini, and local Ollama the same question independently and reports
+Spearman/Kendall agreement. Treat the table above as one qualitative opinion
+worth sanity-checking against that script's output, not as a second data
+point of the same weight as the `risk`/`sev` pull.
