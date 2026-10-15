@@ -88,10 +88,12 @@ unrelated row; its actual stability is 0.84).
 
 Every row from `/api/v/search` already carries its own `stability` field, which
 is what this table uses. That is one fewer HTTP call and 27 real values in place
-of 1 wrong one. `fetch_by_stability` / `match_rt_stability` in the script are
-superseded and should be deleted.
+of 1 wrong one. `fetch_by_stability` and `match_rt_stability` have been deleted
+from the script; `latest_stability` replaces them and also returns the scored-row
+count shown in the last column.
 
-Separately: the `word_match` product filter added to `fetch_component_rows` is a
+Separately: the `word_match` product filter added to `fetch_component_rows` was a
 verified no-op. `/api/v/search?q=<name>` is already product-scoped — all 186
 `q=linux` rows have `versionProductName == "linux"`. The comment claiming it
-de-pooled "six distinct products" describes a bug that was not occurring.
+de-pooled "six distinct products" described a bug that was not occurring. The
+filter and the helper have both been removed.
