@@ -2401,6 +2401,103 @@ implementations agreeing on the same ranked documents. Section~S11 of the
 supplementary material reports them; the one the rest of this paper relies on is
 that no answer stated a version number, release date, or update claim absent
 from its retrieved documents.
+\subsection{A Parametric-Knowledge Baseline for Update Order}\label{sec:update-order-baseline}
+
+The results above hold the corpus fixed and vary the architecture. This
+section instead holds the task fixed --- order a set of components by update
+urgency --- and varies what the system is allowed to know: a model's own
+parametric knowledge, with no retrieval at all, against the live
+advisory feed our pipeline already uses for ranking
+(Section~\ref{sec:datasources}). Thirty components spanning operating
+systems, browsers, databases, language runtimes, and self-hosted
+applications\footnote{The full list and the exact prompt are in
+\texttt{scripts/rank\_components\_llm.py}; it does not include BIOS,
+microcode, or \texttt{glibc} specifically, so the lowest-level item evaluated
+is the Linux kernel.} were shown, in one fixed random order common to every
+system, to \texttt{llama3.1} with no documents attached, and asked to return
+all thirty names as a single ranked list, most urgent to update first. The
+same thirty were ranked by \texttt{monitor.risk}, this project's
+severity-weighted advisory score over the trailing 90 days, pulled live from
+ReleaseTrain at the same time. ChatGPT and Gemini were not run: this
+machine held neither an \texttt{OPENAI\_API\_KEY} nor a
+\texttt{GEMINI\_API\_KEY} at the time of writing, and we report two systems
+rather than invent the other two. The harness is written against the same
+provider interface as the rest of this paper (Section~\ref{sec:method}) and
+needs only a key to extend.
+
+The parser accepted only an exact permutation of all thirty names and
+otherwise fed the parse error back to the model once before giving up; this
+is itself a small finding, since \texttt{llama3.1}'s first attempt returned
+twenty-nine distinct names with \texttt{postgresql} duplicated rather than a
+clean count of thirty, and only its second attempt parsed. The second attempt
+is what the comparison below uses.
+
+\begin{table}[t]
+\caption{The ten components on which the parametric baseline and the live
+feed disagree most. \emph{Rank} is this component's position in each
+system's 30-item ordering, 1 = most urgent; $|\Delta|$ is the absolute
+difference. Full 30-row ranking: Table~S13.}
+\label{tab:update-order-top}
+\begin{tabular}{lrrr}
+\toprule
+Component & \texttt{llama3.1} rank & Pipeline rank & $|\Delta|$ \\
+\midrule
+linux           & 30 & 2  & 28 \\
+mongodb         & 3  & 29 & 26 \\
+android         & 25 & 5  & 20 \\
+neovim          & 11 & 30 & 19 \\
+windows         & 22 & 4  & 18 \\
+node            & 8  & 25 & 17 \\
+python          & 9  & 26 & 17 \\
+home assistant  & 12 & 27 & 15 \\
+nextcloud       & 13 & 28 & 15 \\
+macos           & 23 & 8  & 15 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Agreement between the two orderings over all thirty components is Spearman's
+$\rho$ of $-0.050$ and Kendall's $\tau$ of $-0.039$; treating $\rho$ as a test
+statistic against the null of no monotonic relationship gives $t(28) =
+-0.26$, $p \approx 0.79$. One baseline, one run, thirty items: this is not
+powered to distinguish a small correlation from none, and we do not read it
+as evidence of anticlimactic independence so much as the absence of any
+detectable relationship at this sample size.
+
+The disagreements run in both directions and the directions explain each
+other. \texttt{llama3.1} places the Linux kernel dead last, rank~30 of~30,
+while the live feed currently ranks it second only to \texttt{wordpress} on
+severity-weighted advisory volume --- the model's prior that the kernel is a
+mature, carefully-maintained artifact is not conditioned on this quarter's
+CVE count against it. The same gap opens in the opposite direction for the
+database layer: \texttt{llama3.1} ranks \texttt{postgresql},
+\texttt{mysql}, and \texttt{mongodb} at 1st, 2nd, and 3rd, treating
+``database'' itself as the update-urgent category, while the live feed
+currently shows little advisory activity against these specific products
+and ranks \texttt{mongodb} 29th of 30. \texttt{wordpress}, the single
+component the live feed ranks most urgent, lands at a middling 14th for the
+baseline. In each case the baseline is not weighing the same evidence
+differently; it has no mechanism to weigh evidence from the current window
+at all, and falls back to a category-level prior learned at training time.
+The one cluster where the two systems land close together is browsers:
+\texttt{chrome}, \texttt{firefox}, \texttt{safari}, \texttt{brave},
+\texttt{opera}, and \texttt{edge} sit at pipeline ranks
+13/16/21/23/24/22 and baseline ranks 16/17/18/19/20/21 --- both systems treat
+the browser cluster as middling-to-low urgency, in close to the same
+relative order. That local agreement does not rescue the aggregate
+correlation: the kernel and database inversions run in opposite directions
+and largely cancel.
+
+We read this as one data point, not a benchmark result: a single
+non-retrieval-augmented model's ranking of update urgency and a
+live-advisory-driven ranking are not interchangeable, and the gap is largest
+exactly where it is costliest --- on the component the live feed currently
+flags as highest-risk, the parametric baseline is unremarkable, and on the
+component it currently flags as comparatively quiet, the baseline is most
+alarmed. Completing this comparison with ChatGPT and Gemini, and repeating it
+across seeds for a within-model variance estimate, is future work; the
+instrument is built, the keys are not.
+
 \subsection{Summary of Findings}\label{sec:results-summary}
 
 \begin{enumerate}
