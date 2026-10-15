@@ -46,6 +46,7 @@ from store import open_store, caching_fetch
 from grounding import ground
 import decide
 import graph
+import orchestrator
 import vendor
 import xai
 import yesno
@@ -1071,6 +1072,36 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
 
 _CITE = re.compile(r"\s*\[[^\]]*\]")
 
+# The single-agent *template* answer (EvaluatorAgent's assembled dump, used
+# when no prose model is reachable, arm `single_agent_template`) leads with a
+# metadata block -- Query/Verified/Confidence/Retrieved -- then the answer
+# under an "✅ ANSWER (synthesized by ...):" label. Without stripping it,
+# split_summary returned the echoed "Query: ..." line as the headline, so the
+# compact compare column showed the question back instead of the answer.
+_TMPL_META = re.compile(r"^\s*(?:Query|Verified|Confidence|Retrieved)\s*:", re.I)
+
+
+def _strip_template_header(text: str) -> str:
+    """Drop the template dump's metadata header so its answer is the headline.
+
+    No-op on prose answers (they do not open with the metadata block), so the
+    multi-agent and prose single-agent paths are unaffected. The no-model case
+    keeps its own first content line ("⚠️ NO ANSWER — no local model reachable
+    …"), which is the honest headline there.
+    """
+    lines = (text or "").splitlines()
+    if not (lines and _TMPL_META.match(lines[0])):
+        return text
+    out, in_meta = [], True
+    for ln in lines:
+        if in_meta and (_TMPL_META.match(ln) or not ln.strip()):
+            continue
+        in_meta = False
+        if "synthesized by" in ln.lower() and ln.rstrip().endswith(":"):
+            continue  # the "✅ ANSWER (synthesized by …):" label, not the answer
+        out.append(ln)
+    return "\n".join(out).strip() or text
+
 
 def _one_line(text: str) -> str:
     """The first sentence of a presented answer, citations stripped.
@@ -1081,7 +1112,7 @@ def _one_line(text: str) -> str:
     published half a quote -- `says \u201cI had a similar issue on a Windows 2019
     server.` -- with the closing quote and the citation gone.
     """
-    plain = _CITE.sub("", text or "").strip()
+    plain = _CITE.sub("", _strip_template_header(text or "")).strip()
     head, _items = answer_agent.split_summary(plain)
     return head or answer_agent._one_sentence(plain) or "No answer could be composed."
 
@@ -1450,7 +1481,7 @@ with st.sidebar:
     mode = st.selectbox(
         "Answering mode",
         ["Multi-agent pipeline", "Single agent (paper baseline)",
-         "Compare both side by side"],
+         "Compare both side by side", "Adaptive (orchestrator decides)"],
         # Compare by default. The pipeline on its own answers the question but
         # says nothing about what the coordinating agents bought, which is the
         # only claim this project makes; a visitor who does not already know to
@@ -1464,6 +1495,7 @@ with st.sidebar:
              "screen is the difference the paper measures.")
     single_mode = mode.startswith("Single")
     compare_mode = mode.startswith("Compare")
+    adaptive_mode = mode.startswith("Adaptive")
     # Collapsed: nine controls standing open above the question box read as
     # a configuration screen, and the only one a first-time visitor needs is
     # the mode picker above. Everything here keeps its default, so the demo
@@ -1839,6 +1871,7 @@ col1, col2, col3 = st.columns([2, 1, 1])
 with col1:
     run_btn = st.button("Run Single Agent" if single_mode
                         else "Run Both & Compare" if compare_mode
+                        else "Run Adaptive (orchestrator picks)" if adaptive_mode
                         else "Run Multi-Agent Pipeline",
                         type="primary", use_container_width=True)
 with col2:
@@ -1962,6 +1995,72 @@ elif run_btn and query and compare_mode:
     agent_status_slot.markdown(_agent_table(results, presented, view=agent_view_key))
     presenter_slot.caption(_presenter_caption(presenter_spec(), presented))
     st.session_state["last_answer"] = {"query": query, "reddit_id": reddit_id, "arm": "compare"}
+
+elif run_btn and query and adaptive_mode:
+    # ── ADAPTIVE (ORCHESTRATOR ROUTES) ────────────────────
+    # The thesis: the system decides per question which arm to run, instead of
+    # the user picking a mode. The chosen arm renders exactly as its own mode
+    # does (single -> the baseline's Q/A; multi -> the compact pipeline view
+    # the compare column shows), so adaptivity adds a router, not a new answer
+    # format. The "why" above the answer is the classifier's own trace.
+    arm = orchestrator.route_arm(query)
+    st.markdown("---")
+    label_txt = "Single agent" if arm == "single" else "Multi-agent pipeline"
+    st.info(f"**Orchestrator → {label_txt}** ({orchestrator.route_reason(query)})")
+
+    if arm == "single":
+        with st.spinner("Single agent — retrieve, then answer..."):
+            sa = run_single_agent(query, top_k=result_limit)
+        if not show_details:
+            st.markdown(f"**Q:** {query}")
+            st.success(f"**A:** {_one_line(sa['answer'])}")
+        else:
+            st.markdown("#### Answer")
+            st.success(sa["answer"] or "_(the baseline returned nothing)_")
+            docs = sa.get("docs") or []
+            with st.expander(f"Documents it retrieved ({len(docs)})"):
+                if not docs:
+                    st.caption("None — the raw query matched nothing.")
+                for d in docs:
+                    title = d.get("title") or d.get("product") or "(untitled)"
+                    src = d.get("source") or d.get("kind") or "?"
+                    st.markdown(f"• **{title}**  ·  `{src}`")
+                    if d.get("url"):
+                        st.caption(d["url"])
+        st.caption(f"Arm `{sa['arm']}`" + (f" · model `{sa['model']}`" if sa["model"]
+                   else " · no model reachable, deterministic template rendering")
+                   + f" · {sa['elapsed']}s")
+    else:
+        with st.spinner("grounding, rewriting, 3 fetches, evaluating, presenting..."):
+            t0 = time.time()
+            results = run_pipeline(query, show_steps=False, limit=result_limit,
+                                   yesno_on=yesno_on, unclear_as_no=unclear_as_no,
+                                   survey_on=survey_on, source=source,
+                                   reddit_id=reddit_id)
+            presented = present_answer(results["original_query"], results,
+                                       model_spec=presenter_spec(),
+                                       per_kind=result_limit)
+        _decision_block(results, details=show_details)
+        if show_details:
+            render_answer(presented, key="adaptive")
+        else:
+            line = _answer_line(results, presented.text)
+            if line:
+                led = answer_agent.verdict_lead(results.get("decision"))
+                (st.info if led else st.success)(line)
+        ev = results["evaluation"]
+        st.caption(f"{ev['community_count']} community · {ev['release_count']} "
+                   f"releases · {ev['cve_count']} CVE · quality {ev['quality']:.2f} · "
+                   f"source `{source}` · {round(time.time() - t0, 1)}s")
+        _cat = _catalog_note()
+        if _cat:
+            st.warning(_cat)
+        # The pipeline just ran, so update its sidebar roster/presenter line,
+        # same as the compare and multi branches do.
+        agent_status_slot.markdown(_agent_table(results, presented, view=agent_view_key))
+        presenter_slot.caption(_presenter_caption(presenter_spec(), presented))
+
+    st.session_state["last_answer"] = {"query": query, "reddit_id": reddit_id, "arm": "adaptive"}
 
 elif run_btn and query:
 
