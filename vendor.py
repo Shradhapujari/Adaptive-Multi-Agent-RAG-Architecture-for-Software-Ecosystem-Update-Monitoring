@@ -322,7 +322,11 @@ def classify_record(row: Dict) -> str:
     authoritative when present; the URL host is the fallback, since an NVD or
     MITRE link is never a release announcement.
     """
-    if row.get("isCve") is True:
+    # Both spellings: the raw releasetrain row says `isCve`, and app_1
+    # normalises it to `is_cve`. Reading only the camelCase one classified
+    # every advisory arriving through the app as a release, which is how a CVE
+    # description reached the presenter labelled "Release Notes" (2026-10-14).
+    if row.get("isCve") is True or row.get("is_cve") is True:
         return "advisory"
     url = str(row.get("url") or row.get("versionUrl") or "").lower()
     if "nvd.nist.gov" in url or "cve.org" in url or "cve.mitre.org" in url:

@@ -330,7 +330,20 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
             url=thread.get("url", ""), date=_iso(thread.get("created_utc", "")),
         ))
 
-    for r in (results.get("releases") or [])[:per_kind]:
+    # `decision_advisories` are the advisory rows step 4b set aside so the
+    # verdict could reach them when the question's intent bars citing a CVE
+    # (app_1._decide_pool). The paragraph gets them too, and in their own
+    # slice rather than appended to the releases': crowded out by `per_kind`
+    # they would be absent exactly when they matter most.
+    #
+    # Composing without them is the last link in the 2026-10-14 false green --
+    # a red "Patch now" badge over "It is safe to update Firefox right now."
+    # The presenter was not wrong about its evidence, it was shown the wrong
+    # evidence, and no amount of instructing it to agree with the verdict
+    # fixes a paragraph that cannot see what the verdict stands on.
+    rows = ((results.get("releases") or [])[:per_kind]
+            + (results.get("decision_advisories") or [])[:per_kind])
+    for r in rows:
         # An advisory row is named by its CVE id, not by its versionNumber:
         # that field holds the *affected* version, and citing
         # "Linux v25.642087.0" as a release invites the reader to believe a
@@ -384,8 +397,29 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
     return ev
 
 
+# Verdicts the paragraph may not talk past. `safe` and `insufficient_evidence`
+# are excluded: they are the two a paragraph composed from release notes cannot
+# contradict, and leading with them would prefix every ordinary answer.
+_MUST_LEAD = ("patch_urgently", "hold", "update_with_caveat")
+
+
+def verdict_lead(decision: Optional[Dict]) -> str:
+    """The verdict sentence the paragraph is not allowed to contradict, or "".
+
+    The decision gate is rule-checked against named documents and the
+    paragraph is prose over whatever the question may cite -- which excludes
+    advisories for a non-security intent. So on 2026-10-14 the gate said
+    "Patch now" on a live Firefox CVE while the paragraph under it said "It is
+    safe to update Firefox right now." Where they disagree the verdict wins.
+    """
+    if not decision or decision.get("verdict") not in _MUST_LEAD:
+        return ""
+    from decide import LEAD
+    return f"{LEAD[decision['verdict']]}: {decision.get('rationale', '')}.".strip()
+
+
 def build_cited_prompt(query: str, evidence: List[Evidence],
-                       window_note: str = "") -> str:
+                       window_note: str = "", decision: Optional[Dict] = None) -> str:
     """The presenter's prompt: shared grounding instruction + citation rule."""
     try:
         from eval_harness.generators import SYNTHESIS_INSTRUCTION as base
@@ -395,8 +429,14 @@ def build_cited_prompt(query: str, evidence: List[Evidence],
     ctx = "\n".join(e.line(cite_tag(i)) for i, e in enumerate(evidence)) \
         or "No documents retrieved."
     dated = f"\n\nTime frame asked about: {window_note}" if window_note else ""
-    return (f"{rules_block()}{base}\n{UNTRUSTED_RULE}{CITATION_RULE}\n\nQuestion: {query}{dated}\n\n"
-            f"Sources:\n{ctx}\n\nAnswer:")
+    # Stated before the question, for the reason `feedback_prompt` gives: a
+    # constraint appended after the shape spec is the one llama3.1 ignores.
+    lead = verdict_lead(decision)
+    ruled = (f"\n\nA rule-based safety gate has already decided this question "
+             f"against the advisory feeds: “{lead}” Your answer must "
+             f"not contradict it.") if lead else ""
+    return (f"{rules_block()}{base}\n{UNTRUSTED_RULE}{CITATION_RULE}{ruled}\n\n"
+            f"Question: {query}{dated}\n\nSources:\n{ctx}\n\nAnswer:")
 
 
 _PREAMBLE = re.compile(
@@ -613,11 +653,17 @@ def present_answer(query: str, results: Dict, model_spec: Optional[str] = None,
 
     out = _present(query, results, model_spec, window_note, per_kind)
     text, hits = guardrail.scrub(out.text)
-    if not hits:
+    # The prompt asks the model not to contradict the verdict; this makes it
+    # so whatever the model did, and covers the rule-composed fallback, which
+    # is never shown the prompt at all. Same reason the leak scan is here.
+    lead = verdict_lead(results.get("decision"))
+    if lead and not text.startswith(lead):
+        text = f"{lead} {text}"
+    if not hits and text == out.text:
         return out
-    note = "leak scan: " + ", ".join(hits)
+    note = "leak scan: " + ", ".join(hits) if hits else ""
     return replace(out, text=text,
-                   note=f"{out.note}; {note}" if out.note else note)
+                   note=f"{out.note}; {note}" if out.note and note else note or out.note)
 
 
 def feedback_prompt(prompt: str, answer: str, verdict) -> str:
@@ -653,7 +699,8 @@ def _present(query: str, results: Dict, model_spec: Optional[str] = None,
             from eval_harness.providers import make_client, LLMError
             client = make_client(spec)
             if client.available():
-                prompt = build_cited_prompt(query, evidence, window_note)
+                prompt = build_cited_prompt(query, evidence, window_note,
+                                            decision=results.get("decision"))
                 note = "model returned an empty answer"
                 # One feedback pass: the guardrail's violations go back to the
                 # model by name before the rule-composed fallback is used.

@@ -142,6 +142,17 @@ _PREDICATE = re.compile(
     r"\b(?:contains?|is|are|was|were|allows?|before|prior\s+to|suffers|fails|"
     r"does\s+not|has\s+an?|have\s+an?)\b", re.I)
 
+# "...was fixed in Firefox 157.0.1." The product named as the thing patched,
+# which is how NVD files a weakness-first advisory (the weakness is the
+# subject, the product only shows up in the fix clause). Capture stops at the
+# first comma/period/semicolon, so a cross-vendor row -- "fixed in Metabase
+# 1.2, also affects MySQL" -- keeps only "Metabase 1.2" and is still rejected.
+_FIX_CLAUSE = re.compile(
+    r"\b(?:fixed|patched|resolved|addressed|mitigated)\s+in\s+([^.,;]{0,40})", re.I)
+
+
+_PLATFORM_PREP = re.compile(r"\b(?:on|for)\b", re.I)
+
 
 def _subject_names_product(d: dict, vtoks: set) -> bool:
     """Does the asked product appear in the *subject* of an advisory?
@@ -177,7 +188,33 @@ def _subject_names_product(d: dict, vtoks: set) -> bool:
     if not m or m.start() == 0:          # no readable subject; rule abstains
         return True
     subject = body[:m.start()].lower()
-    return any(v in subject for v in vtoks)
+    # Within the subject, a name after "on"/"for" is the platform the product
+    # runs on, not the product: "VeraCrypt 1.26.29 (FUSE-T build) on macOS
+    # systems allows ..." is a VeraCrypt advisory. Observed 2026-10-15, when a
+    # macOS question returned "Patch now: 10 advisory document(s)" citing
+    # VeraCrypt and Open Computer Use -- both of which name macOS in their
+    # subject honestly, as their platform. Cutting there also keeps "Firefox
+    # for iOS ..." a Firefox advisory rather than an iOS one.
+    #
+    # ponytail: positional heuristic, no parsing. It mis-rejects a genuine
+    # advisory written "Security Update for macOS contains ..." -- the product
+    # after the preposition. Upgrade path is the row's own product field once
+    # /api/v/ can be trusted to carry it (today it files NVD records under
+    # whatever string the query matched, which is why this rule exists).
+    head = _PLATFORM_PREP.split(subject, maxsplit=1)[0]
+    if any(v in head for v in vtoks):
+        return True
+    # Weakness-first fallback: a real advisory whose subject is the flaw still
+    # names the product in its fix clause. This is what let "Is it safe to
+    # update Firefox right now?" fall back to a green on the live feed after
+    # the citable_kinds fix -- the NVD rows read "Mitigation bypass ... fixed
+    # in Firefox 157.0.1", product after the predicate, so the subject test
+    # above dropped 4 of 5 of them as not-about-Firefox.
+    # Same platform-preposition guard as the subject: "fixed in Firefox for
+    # iOS 157.1" is a Firefox advisory, so an iOS question must not match the
+    # "iOS" after "for".
+    return any(v in _PLATFORM_PREP.split(fm.group(1).lower(), maxsplit=1)[0]
+               for fm in _FIX_CLAUSE.finditer(body) for v in vtoks)
 
 
 def _about(d: dict, vtoks: set, qtoks: set) -> bool:
@@ -308,7 +345,7 @@ def gate(vendors: Iterable[str] = (), k_reports: int = K_REPORTS):
 REFUSAL = ("I cannot determine that from the sources retrieved, so I am not "
            "going to state it.")   # same wording as guardrail.REFUSAL, trips is_abstention
 
-_LEAD = {
+LEAD = {
     "patch_urgently": "Patch now",
     "hold": "Hold off on this update",
     "update_with_caveat": "Update, with a caveat",
@@ -323,7 +360,7 @@ def render(decision: Decision, pool: Sequence[dict]) -> str:
     by_id = {d.get("doc_id"): d for d in pool}
     cites = " ".join(f"[{by_id[i].get('title', '')[:60]}]" for i in decision.evidence[:3]
                      if i in by_id)
-    return f"{_LEAD[decision.verdict]}: {decision.rationale}. {cites}".strip()
+    return f"{LEAD[decision.verdict]}: {decision.rationale}. {cites}".strip()
 
 
 # ---------------------------------------------------------------- self-check

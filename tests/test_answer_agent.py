@@ -717,3 +717,60 @@ def test_by_source_groups_evidence_under_the_sections_the_ui_offers():
     assert all(e.kind == "release" for e in groups["Release notes"])
     for section, rows in groups.items():
         assert rows, f"{section} listed with no sources"
+
+
+# --- the paragraph may not contradict the verdict -------------------------
+#
+# 2026-10-14: the decision gate returned "Patch now" on a live Firefox
+# advisory while the paragraph directly beneath it read "It is safe to update
+# Firefox right now." The presenter composes from the citable pool, which
+# excludes advisories, so it never saw the CVE the verdict stood on. Both
+# composition paths need the verdict: the model ignores instructions often
+# enough that the rule-based fallback cannot be the unguarded one.
+
+_PATCH_NOW = {
+    "verdict": "patch_urgently", "verdict3": "act",
+    "evidence_doc_ids": ["a1"], "obligations": {}, "stop_reason": "obligations_met",
+    "probes_wanted": [], "confidence": 1.0,
+    "rationale": "1 advisory document(s) with a CVE id about the product",
+}
+
+
+def test_rule_based_paragraph_leads_with_a_non_safe_verdict():
+    out = present_answer("Is it safe to update Linux right now?",
+                         {**RESULTS, "decision": _PATCH_NOW})
+    assert out.text.startswith("Patch now"), out.text
+
+
+def test_the_prompt_states_a_non_safe_verdict_to_the_model():
+    prompt = build_cited_prompt("Is it safe to update Linux right now?",
+                                collect_evidence(RESULTS),
+                                decision=_PATCH_NOW)
+    assert "Patch now" in prompt
+
+
+def test_a_safe_verdict_does_not_rewrite_the_paragraph():
+    """Only a verdict the paragraph could contradict is worth leading with."""
+    safe = {**_PATCH_NOW, "verdict": "safe", "rationale": "release note present"}
+    out = present_answer("Is it safe to update Linux right now?",
+                         {**RESULTS, "decision": safe})
+    assert not out.text.startswith("Patch now")
+
+
+def test_the_presenter_sees_the_advisories_set_aside_for_the_verdict():
+    """2026-10-14, the last step of the false-green chain. Step 4b parks the
+    NVD rows in `decision_advisories` so the verdict can reach them; the
+    presenter was still composing from the citable pools alone, so it wrote
+    "It is safe to update Firefox right now." under a red "Patch now" badge.
+    It was right about the evidence it was shown -- it was shown the wrong
+    evidence. Prefixing the verdict only hid the sentence; the paragraph has
+    to see the advisory."""
+    results = {**RESULTS, "decision_advisories": [
+        {"product": "Firefox", "version": "157.0.1", "date": "2026-10-06",
+         "is_cve": True, "isCve": True,
+         "notes": "Mitigation bypass in the File Handling component.",
+         "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-5555"}]}
+    ev = collect_evidence(results)
+    advisories = [e for e in ev if e.kind == "advisory"]
+    assert any("157.0.1" in e.title or "157.0.1" in e.detail for e in advisories)
+    assert all(e.security for e in advisories)

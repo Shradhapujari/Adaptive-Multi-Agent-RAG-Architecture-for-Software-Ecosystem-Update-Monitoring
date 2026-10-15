@@ -34,5 +34,9 @@ that measures them (`scripts/phase_rules_ablation.sh`).
 
 - Stay on software updates: releases, changelogs, bug fixes, security
   patches, deprecations.
-- Do not mention exploits or vulnerabilities when the question is about
-  opinion or community experience.
+- When the question is about opinion or community experience, lead with what
+  people reported rather than with advisory detail. Never state that no
+  vulnerability or security issue exists — declining to raise one is not
+  evidence there is none.
+- When the prompt carries a safety gate's verdict, that verdict outranks this
+  section. Never write that an update is safe against it.

@@ -620,16 +620,21 @@ def _decide_pool(results: dict) -> list:
     than advisories. Mislabelling those would hand `patch_urgently` -- the
     verdict with the highest precedence -- to an upvoted post.
 
-    Then `citable_kinds` is applied, which is the same ruling the cited
-    paragraph obeys: "which document kinds the answer may cite for this
-    intent" (intent.py). A verdict is an answer, and this is the one place
-    the two can be kept to one rule. Measured without it, on the store:
-    "Is the latest Linux kernel safe to update?" returned *Patch now* citing
-    two CISA KEV rows -- a release question answered out of the advisory
-    catalogue the pipeline had already excluded from the pool it shows, 49
-    rows of it. Unlike the display pools, this one is allowed to come back
-    empty: a decision over a document the app has ruled uncitable is worse
-    than an abstention.
+    Then `citable_kinds` is applied to release and community rows -- the same
+    ruling the cited paragraph obeys, "which document kinds the answer may
+    cite for this intent" (intent.py) -- so a release question is not answered
+    out of a catalogue the pipeline excluded from the pool it shows.
+
+    Advisory rows are exempt. Applying the ruling to them too produced the
+    false green of 2026-10-14: "Is it safe to update Firefox right now?"
+    matches intent.py's opinion cue `is it (good|bad|safe|stable|worth)`, whose
+    citable kinds are ("community", "release"), so every advisory was dropped
+    here and the verdict came back `safe` -- rationale "no advisory" -- with 11
+    Firefox advisories in the feed, one of them 8 days old. The same pool with
+    advisories admitted decides `patch_urgently` at confidence 1.0. The
+    exclusion is asymmetric: it can only ever manufacture a false green.
+
+    Unlike the display pools, this one is allowed to come back empty.
     """
     from eval_harness.generators import doc_id
     g = results.get("grounding")
@@ -638,7 +643,8 @@ def _decide_pool(results: dict) -> list:
     out = []
     for pool, kind, default in (("community", "community", "reddit_live"),
                                 ("releases", "release", "vendor_releases"),
-                                ("cve", "cve", "reddit_live")):
+                                ("cve", "cve", "reddit_live"),
+                                ("decision_advisories", "cve", "nvd")):
         for d in results.get(pool) or []:
             # An advisory record in the release feed is CVE evidence whatever
             # pool carried it: /api/v/ returns both kinds under one query, and
@@ -648,7 +654,11 @@ def _decide_pool(results: dict) -> list:
             row_kind = ("cve" if pool == "releases"
                         and (d.get("is_cve") or not vendor.is_release_record(d))
                         else kind)
-            if row_kind not in citable:
+            # Advisory evidence is exempt from citable_kinds: that ruling says
+            # what the *paragraph* may cite, and a verdict is a safety
+            # judgement. Withholding a CVE from it is asymmetric -- it can only
+            # ever manufacture a false green, never a false red.
+            if row_kind not in citable and row_kind != "cve":
                 continue
             source = d.get("source") or (
                 "nvd" if pool == "releases" and row_kind == "cve" else default)
@@ -920,8 +930,19 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
 
     if "cve" not in g.citable_kinds:
         shipped = [r for r in results["releases"] if vendor.is_release_record(r)]
-        results["advisories_excluded"] = len(results["releases"]) - len(shipped)
-        results["releases"] = shipped or results["releases"]
+        excluded = [r for r in results["releases"] if not vendor.is_release_record(r)]
+        results["advisories_excluded"] = len(excluded)
+        if shipped:
+            results["releases"] = shipped
+            # Excluded from display, kept for the verdict. Dropping them here
+            # is what made "Is it safe to update Firefox right now?" -- an
+            # `opinion` question -- report "0 CVE" and decide `safe` with 11
+            # live Firefox advisories in the feed. Display and decision want
+            # different things from an NVD row: its versionNumber is an
+            # affected-version string and must not be read as the latest
+            # shipped version, but it is still the advisory a safety verdict
+            # has to account for.
+            results["decision_advisories"] = excluded
     else:
         results["advisories_excluded"] = 0
 
@@ -1063,6 +1084,21 @@ def _one_line(text: str) -> str:
     plain = _CITE.sub("", text or "").strip()
     head, _items = answer_agent.split_summary(plain)
     return head or answer_agent._one_sentence(plain) or "No answer could be composed."
+
+
+def _answer_line(results: dict, text: str) -> str:
+    """The headline sentence to show beneath the verdict, or "".
+
+    `answer_agent.verdict_lead` puts the verdict at the front of the paragraph
+    so the prose cannot contradict it, and `_decision_block` renders that same
+    sentence directly above. Printing it again as the headline showed it twice
+    -- and `st.success` painted "Patch now" green under a red badge. Strip the
+    lead and keep the prose; when the lead was the whole paragraph there is
+    nothing left the block above has not already said.
+    """
+    lead = answer_agent.verdict_lead(results.get("decision"))
+    body = text[len(lead):] if lead and (text or "").startswith(lead) else (text or "")
+    return _one_line(body) if body.strip() else ""
 
 
 def render_answer(presented, *, key: str = "") -> None:
@@ -1899,7 +1935,13 @@ elif run_btn and query and compare_mode:
         if show_details:
             render_answer(presented, key="cmp")
         else:
-            st.success(_one_line(presented.text))
+            line = _answer_line(results, presented.text)
+            if line:
+                # Neutral only when a verdict led the paragraph: a `safe`
+                # verdict adds no lead, and painting those blue too would make
+                # every ordinary answer look qualified.
+                led = answer_agent.verdict_lead(results.get("decision"))
+                (st.info if led else st.success)(line)
         ev = results["evaluation"]
         st.caption(f"{ev['community_count']} community · {ev['release_count']} "
                    f"releases · {ev['cve_count']} CVE · quality {ev['quality']:.2f} · "
@@ -2015,9 +2057,15 @@ elif run_btn and query:
         # (picked from the sidebar). For a typed question a matched thread
         # with two non-committal comments reads "No -- No (2 users)", which
         # answers something else.
-        short = (yesno.verdict_line(yn) if yn is not None and yn["answered"] and reddit_id
-                 else _one_line(presented.text))
-        st.success(short)
+        if yn is not None and yn["answered"] and reddit_id:
+            st.success(yesno.verdict_line(yn))
+        else:
+            # Same de-duplication as the compare column: the verdict block
+            # above already carries the lead sentence.
+            short = _answer_line(results, presented.text)
+            if short:
+                led = answer_agent.verdict_lead(results.get("decision"))
+                (st.info if led else st.success)(short)
         # Nothing else when the model wrote it: the default view is the answer.
         # The exception is an answer the model did NOT write -- a guardrail
         # rejection falls back to rule-composed prose, and showing that with no

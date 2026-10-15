@@ -165,6 +165,30 @@ def test_a_word_shared_with_another_vendors_advisory_is_not_a_product_match():
         != "patch_urgently"
 
 
+def test_a_weakness_first_advisory_naming_the_product_in_its_fix_clause_counts():
+    """The live NVD feed files Firefox advisories weakness-first: the flaw is
+    the subject, the product shows up only in the fix clause. The subject rule
+    dropped these as not-about-Firefox, so after the citable_kinds fix "Is it
+    safe to update Firefox right now?" still fell back to a green on the real
+    feed. Naming the product as the thing patched is a product match."""
+    pool = [_d(1, "nvd", "firefox v157.0.1 — Mitigation bypass in File Handling",
+               "Mitigation bypass in the File Handling component. This "
+               "vulnerability was fixed in Firefox 157.0.1. CVE-2026-106016")]
+    assert D.decide(pool, "Is it safe to update Firefox right now?",
+                    ["firefox"]).verdict == "patch_urgently"
+
+
+def test_a_fix_clause_naming_another_vendor_is_still_not_a_product_match():
+    """The fallback must not re-admit the cross-vendor rows the subject rule
+    exists to reject: the capture stops at the comma, so only "Metabase 1.2"
+    is tested, not the trailing MySQL mention."""
+    pool = [_d(1, "nvd", "metabase — path traversal",
+               "A path traversal vulnerability was fixed in Metabase 1.2, which "
+               "also ships a MySQL connector. CVE-2026-3333")]
+    assert D.decide(pool, "mysql.connector connection issue",
+                    ["MySQL"]).verdict != "patch_urgently"
+
+
 def test_an_advisory_with_no_readable_subject_is_left_alone():
     """NVD's other opener names the product after the predicate-free clause
     "In the Linux kernel, ...". The rule abstains rather than guessing."""
@@ -182,3 +206,45 @@ def test_the_subject_rule_does_not_reach_community_posts():
             _d(2, "reddit_live", "Anyone else? Linux kernel update crashes",
                "same here, it crashes every boot", date="2026-10-02")]
     assert D.decide(pool, LQ, LV).verdict == "hold"
+
+
+# ── a platform the product runs ON is not the product ───────────────────────
+# Observed 2026-10-15 on "MacOS updates with negative community reaction":
+# the gate returned "Patch now: 10 advisory document(s)" and cited VeraCrypt
+# and Open Computer Use. Both pass the subject rule honestly -- "macOS" really
+# is in their subject -- but it is there as the platform they run on, not as
+# the product the advisory is about.
+
+MQ = "MacOS updates with negative community reaction"
+MV = ["macOS"]
+
+
+def test_an_advisory_for_another_product_running_on_the_platform_is_not_evidence():
+    veracrypt = [_d(1, "nvd", "macos v1.26.29 — VeraCrypt 1.26.29 (FUSE-T build) on macOS",
+                    "VeraCrypt 1.26.29 (FUSE-T build) on macOS systems allows a local "
+                    "attacker to bypass the passcode. CVE-2026-7777")]
+    assert D.decide(veracrypt, MQ, MV).verdict != "patch_urgently"
+    ocu = [_d(1, "nvd", "macos v1.0.0 — Open Computer Use through 1.0.0 on macOS",
+              "Open Computer Use through 1.0.0 on macOS contains improper "
+              "authentication. CVE-2026-8888")]
+    assert D.decide(ocu, MQ, MV).verdict != "patch_urgently"
+
+
+def test_the_platforms_own_advisory_still_orders_a_patch():
+    pool = [_d(1, "cisa_kev", "[CISA KEV] Apple macOS Improper Authentication Vulnerability",
+               "Apple macOS contains an improper authentication vulnerability that "
+               "allows a local attacker to obtain sensitive information. CVE-2026-9999")]
+    assert D.decide(pool, MQ, MV).verdict == "patch_urgently"
+
+
+def test_a_product_named_before_its_platform_is_still_its_own_advisory():
+    """"Firefox for iOS ..." is a Firefox advisory, not an iOS one."""
+    row = ("Firefox for iOS directly interpolated the page's HTML language attribute "
+           "into translation JavaScript, allowing attacker-controlled markup to "
+           "execute code. This vulnerability was fixed in Firefox for iOS 157.1. "
+           "CVE-2026-103418")
+    ff = [_d(1, "nvd", "firefox v157.1.0 — Firefox for iOS", row)]
+    assert D.decide(ff, "Is it safe to update Firefox right now?",
+                    ["firefox"]).verdict == "patch_urgently"
+    assert D.decide(ff, "Any critical iOS vulnerabilities?",
+                    ["Apple iOS"]).verdict != "patch_urgently"
