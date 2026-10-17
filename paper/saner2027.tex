@@ -888,6 +888,77 @@ reranker is the configuration to deploy, and the one intervention in this paper
 that is both large and free is the removal of the tier prior --- $+0.227$ nDCG@3
 for every arm, at no additional model call at all.
 
+\section{Extension: A Decision Layer for Update Triage}\label{sec:decision-layer}
+
+A later, less formally evaluated extension of the pipeline, \texttt{decide()},
+moves from what a maintainer should \emph{read} to what they should \emph{do}:
+an agentic verdict over live vendor feeds, community discussion, and the CISA
+KEV catalogue, in place of a static CVE lookup. We report it briefly, not as a
+result on par with Section~\ref{sec:results}, because its central failure is a
+further instance of what Section~\ref{sec:human} describes: a component that
+was individually correct produced a confidently wrong answer at a handoff that
+no automated check could catch.
+
+\textbf{A false-green safety verdict.}\label{sec:false-green}
+The decision layer answered \emph{safe} to ``is it safe to update Firefox right
+now,'' badged green, while 11 Firefox advisories were live, one eight days old.
+Two independent gates each had to fail for this; fixing either alone left the
+bug in place. First, the intent classifier reads ``is it safe/good/stable''
+as an \emph{opinion} question, and the citation rule for opinion questions
+excludes advisories --- so the verdict, computed over that same citable set,
+never saw them and fell through to \emph{safe} with rationale ``no advisory.''
+The fix carries advisory rows to the verdict regardless of intent, leaving the
+citation rule in force only for what the prose may describe. Second, even with
+advisories reaching the verdict, the live NVD feed phrases most records
+\emph{weakness-first} --- naming the product only in a ``\ldots fixed in
+Firefox 157.0.1'' clause, never the sentence's subject --- so the rule matching
+an advisory to the asked-about product rejected these as off-topic and
+reconstructed the same green verdict from otherwise-correct data. The fix
+accepts a product named in that fix clause under the same cross-vendor guard
+already in place, which also keeps a macOS question from crediting macOS with
+an advisory for a third-party tool merely running on it (we also fixed an
+unrelated \texttt{isCve}/\texttt{is\_cve} key mismatch that had silently
+misclassified advisories as releases).
+
+\texttt{patch\_urgently} is unchanged at 22/200 on the frozen benchmark before
+and after the second fix --- it adds live-feed coverage without moving an
+already-scored verdict --- while the live Firefox query now returns
+\texttt{patch\_urgently} instead of \texttt{insufficient\_evidence}. Separately,
+61 of the 200 questions are phrased as release or opinion questions that
+structurally exclude CVE records, leaving \texttt{patch\_urgently} unreachable
+for 30.5\% of the sheet regardless of evidence, independent of this bug.
+
+\textbf{Parametric memory versus a live advisory feed.}\label{sec:update-order-baseline}
+How much of the update urgency a live feed measures is already encoded in a
+general-purpose LLM's training-time knowledge? We ranked the 30 ecosystem
+components tracked throughout this work twice: once by the pipeline's live
+severity-weighted advisory count (\texttt{monitor.risk}, ReleaseTrain/NVD) and
+once by a local Llama~3.1~8B, through Ollama, with no retrieval, ordering the
+same 30 by urgency from its own knowledge. The full ranking is in the
+supplementary material (Table~S13).
+
+Agreement is statistically indistinguishable from zero: Spearman's
+$\rho=-0.050$, Kendall's $\tau=-0.039$; treating $\rho$ as a test statistic,
+$t(28)=-0.26$, $p\approx0.79$. The two rankings disagree most sharply at the
+extremes, in opposite directions. The live feed places \texttt{linux} at rank 2
+--- 126 advisories in the trailing 90 days, second only to \texttt{wordpress}'s
+299 --- while the model ranks it last, 30th; the reverse holds for the database
+cluster, where the model ranks \texttt{postgresql}, \texttt{mysql}, and
+\texttt{mongodb} 1st--3rd as a category prior while the live feed shows almost
+no current advisory activity against them (\texttt{mongodb} at rank 29). The
+one region of agreement, the browser cluster, does not move the global
+correlation, since the kernel and database inversions pull opposite ways and
+largely cancel.
+
+We read this as a static training-time prior with no mechanism to notice that
+this quarter's advisory stream disagrees with it, not as the two systems
+weighting the same evidence differently. At $n=30$ this $\rho$ is not reliably
+distinguishable from a random pairing, so the reading is not a precise
+anti-correlation estimate; it is that substituting parametric memory for a
+live feed in a security-adjacent decision would, here, rank the single
+highest-advisory-volume component as the lowest priority. One baseline model,
+one run --- hosted models and repeated sampling are the natural next step.
+
 \section{Discussion}\label{sec:discussion}
 
 \subsection{What Generalizes}
