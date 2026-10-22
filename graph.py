@@ -37,6 +37,7 @@ import tokens  # noqa: E402
 from eval_harness.benchmarks import (content_tokens, extract_dates,  # noqa: E402
                                      extract_versions)
 from eval_harness.judge import _extract_json  # noqa: E402
+from keywords import QUESTION_STOPWORDS  # noqa: E402
 from yesno import looks_yesno, stance  # noqa: E402
 
 MAX_ROUNDS = max(1, int(os.environ.get("MARAG_MAX_ROUNDS", "2")))
@@ -112,6 +113,47 @@ def asks(question: str) -> str:
     return "other"
 
 
+# ─────────────────────────────────────────────────── adaptive routing
+
+# A comparison or a safety/opinion question needs the full pipeline: it weighs
+# several products, or it turns on what the community reported, not on a single
+# feed value. A bare "latest version of X?" / "when does X ship?" does not.
+_COMPARE_RE = re.compile(
+    r"\b(vs\.?|versus|compare[ds]?|comparison|better than|more (?:stable|reliable|secure)"
+    r"|difference between|which (?:is|one)|or\b.*\bor\b)", re.I)
+
+
+def route_query(question: str) -> Tuple[str, str]:
+    """("fast"|"full", why): how much compute this question earns.
+
+    Fast-path is the ReleaseTrain "short-circuit to a document lookup" shape:
+    a single-product factual lookup (latest version, release date) skips the
+    rewriter, the retry loop and the verifier and reads the release feed once.
+    Everything else -- a comparison, a safety/regression/stance question, or an
+    attribute the gate cannot read -- takes the full multi-agent pipeline.
+
+    Routing only; it changes *how hard* the graph is walked, never the gate.
+    The fast walk is still `run()` with an identity rewrite, `max_rounds=1` and
+    no verifier, so a fast question that turns out AMBIGUOUS/ABSENT abstains
+    rather than guessing -- the same invariant, just without the retries.
+    """
+    kind = asks(question)
+    if _COMPARE_RE.search(question or ""):
+        return "full", "comparison — weighs several products"
+    if kind in ("version", "date"):
+        return "fast", f"single-product {kind} lookup"
+    return "full", f"{kind} question — needs cross-source synthesis"
+
+
+def fast_run(query: str, retrieve: Callable[[str], tuple],
+             gate: Optional[Gate] = None) -> State:
+    """The fast path: one retrieve, classify, answer-or-abstain. No model, no
+    retry, no rewrite. SUFFICIENT returns the feed value; anything else
+    abstains, so the caller can escalate to the full pipeline."""
+    return run(query, rewrite=lambda q, tried: q, retrieve=retrieve,
+               llm=None, max_rounds=1, gate=gate)
+
+
 def _doc_text(d: dict) -> str:
     return " ".join(str(d.get(k) or "") for k in ("title", "text", "detail", "body", "top_comment"))
 
@@ -122,8 +164,14 @@ def on_topic(query: str, docs: Sequence[dict]) -> list:
     Cheap and deterministic. It is the "about the product" test, not a
     relevance score: a doc about the right product that does not state the
     asked attribute is what makes the gate say AMBIGUOUS rather than ABSENT.
+
+    The question's words also drop QUESTION_STOPWORDS: content_tokens keeps
+    "what", "which", "how" (its stoplist is the scorer's, fixed by published
+    numbers), and nearly every document contains one, so "What is the latest
+    version of Zig?" was never ABSENT.
     """
-    words = {t for t in content_tokens(query) if not t[0].isdigit()}
+    words = {t for t in content_tokens(query)
+             if not t[0].isdigit() and t not in QUESTION_STOPWORDS}
     return [d for d in docs if words & set(content_tokens(_doc_text(d)))]
 
 
@@ -265,6 +313,19 @@ def _demo() -> None:
     assert asks("Did the 6.17 kernel break grub on Fedora?") == "stance"
     assert asks("Is CVE-2026-1234 fixed in Fedora?") == "cve"
     assert asks("When is Fedora 45 coming out?") == "date"
+
+    # Routing: factual single-product lookups go fast; comparisons and
+    # safety/stance questions take the full pipeline.
+    assert route_query("What is the latest version of Node.js?")[0] == "fast"
+    assert route_query("When does Fedora 45 ship?")[0] == "fast"
+    assert route_query("Is it safe to update Firefox?")[0] == "full"
+    assert route_query("Which is more stable, Teams or Zoom?")[0] == "full"
+    assert route_query("Did the 6.17 kernel break grub?")[0] == "full"
+    # Fast path abstains rather than guessing when the one fetch is not enough.
+    assert fast_run("latest Fedora version?", lambda q: ([off], False)).trace[-1].node == "abstain"
+    fr = fast_run("latest Fedora version?", lambda q: ([rel], False))
+    assert fr.trace[-1].node == "answer" and fr.values == ("6.17.2",)
+    assert [st.node for st in fr.trace] == ["rewrite", "retrieve", "classify", "answer"]
 
     assert classify("latest Fedora version?", [rel])[0] is Evidence.SUFFICIENT
     assert classify("latest Fedora version?", [chat])[0] is Evidence.AMBIGUOUS   # on-topic, no version

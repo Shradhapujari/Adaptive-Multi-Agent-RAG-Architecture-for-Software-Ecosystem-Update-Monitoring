@@ -177,7 +177,7 @@ Self-Improving Agents, RLAIF}
 
 \maketitle
 
-\section{Introduction}
+\section{Introduction}\label{sec:intro}
 
 Modern software ecosystems produce a diverse collection of documents, including release notes, security advisories, version control records, and online community discussions. These documents contain information about software updates, vulnerabilities, compatibility issues, and deployment considerations. Answering software update--related questions often requires integrating information from multiple sources.
 
@@ -189,6 +189,18 @@ adopts~\cite{javanjafari2023strategies}, and how breaking changes are
 comprehended and detected~\cite{kong2025breaking}. Developers routinely turn to community platforms and web search when documentation is insufficient~\cite{xia2017websearch,zhang2018apimisuse}, and the reliability of what they find there is an active question~\cite{kabir2024stackoverflow,stolee2025codesearch}. The task studied here sits across these sources rather than within any one of them.
 
 Software update information is frequently accessed through natural language questions. Developers, system administrators, and users commonly ask colleagues about software updates or seek information through online community platforms. Answering such questions often requires locating relevant documents, reviewing information from multiple sources, and evaluating the consistency of available documents. Systems that generate accurate source-grounded answers can reduce the effort required to retrieve, read, and synthesize information from software ecosystem documents.
+
+We frame this task within the software maintenance lifecycle specifically:
+automating update triage and vulnerability prioritization for the
+infrastructure maintainers and system administrators who decide, for dozens
+of components at once, which update to apply this week. That framing argues
+against the conventional alternative of scraping a static CVE database and
+presenting its contents: a maintainer's actual question --- is this update
+urgent, and why --- is better answered by an active decision process that
+checks live vendor release feeds, community discussion of real-world impact,
+and authoritative exploitation feeds such as the CISA Known Exploited
+Vulnerabilities catalog (Table~\ref{tab:endpoints}) at query time, than by a
+lookup against a snapshot that is already stale by the time it is read.
 
 Retrieval-Augmented Generation (RAG) systems have emerged as a promising approach for answering such questions by combining document retrieval with large language models to generate answers grounded in external information~\cite{lewis2020rag}. Conventional single-agent RAG systems typically perform query understanding, retrieval, evaluation, and answer generation within a single reasoning process. This can result in vocabulary mismatch between user questions and retrieved documents~\cite{gao2024dmqr}, limited handling of domain-specific terminology, and the absence of feedback mechanisms for correcting retrieval errors \cite{cook2025rag}.
 
@@ -2940,6 +2952,96 @@ retrieved documents --- an observation on a small sample, not a guarantee.
 And retrieval-level adaptation operates without retraining, with interpretable
 learned terms; its magnitude is confounded with corpus drift and is not
 established.
+
+\subsection{Toward a Decision Layer: a Safety-Verdict Bug and Query Routing}\label{sec:decision-layer}
+
+The observations above concern retrieval quality. A separate, less formally
+evaluated extension of the same pipeline uses the live sources of
+Section~\ref{sec:datasources} to drive an explicit update-urgency
+\emph{verdict} rather than only a ranked document list, moving from ``here is
+what we found'' toward the active decision process motivated in
+Section~\ref{sec:intro}. We report two findings from that extension here, not
+as benchmarked results on par with Section~\ref{sec:results-summary} --- they
+have not been subjected to the same ablation and paired-statistics protocol
+--- but because the failure mode of the first is a cautionary instance of the
+same class of defect Section~\ref{sec:human} describes: a component that was
+individually correct produced a confidently wrong answer at the handoff to
+another component, and no automated check caught it.
+
+\textbf{A false-green safety verdict.} The decision layer answered
+\emph{``safe''} to the question ``is it safe to update Firefox right now,''
+badged green, while 11 Firefox advisories were live in the feed, one of them
+eight days old. Two independent gates each had to fail for this to happen,
+and fixing either alone would have left the bug in place. First, the intent
+classifier recognizes ``is it safe/good/stable/worth it'' as an
+\emph{opinion} question, and the rule governing which document kinds an
+answer may cite excludes advisory records for opinion questions; since the
+verdict was computed over the same citable set as the prose, it never saw the
+advisories and fell through to ``safe'' with the rationale ``no advisory.''
+Second, even once advisory rows were carried separately so the verdict could
+see them regardless of intent, the live NVD feed phrases most records
+\emph{weakness-first} --- for example, ``Mitigation bypass in the File
+Handling component. This vulnerability was fixed in Firefox 157.0.1.'' --- so
+the product name never appears in the advisory's grammatical subject, only in
+its fix clause. The rule that matches an advisory to the product being asked
+about required the product name before the first predicate, rejected these
+records as not about Firefox, and reconstructed the same green verdict from
+otherwise-correct data. We also found and fixed a key-name mismatch
+(\texttt{isCve} vs.\ the normalized \texttt{is\_cve}) that had made the
+presenter misclassify every advisory as a release note, which is why the
+system's own ``advisories excluded'' counter had read zero on every run.
+
+The fix admits advisories to the verdict regardless of intent while leaving
+the intent-based citation rule in force for what the \emph{prose} may
+describe in detail, and extends the product-match rule to accept a product
+named in a ``fixed/patched/resolved in \ldots'' clause, under the same
+cross-vendor and platform-preposition guards the subject-matching rule
+already used. The latter guard matters beyond Firefox: on macOS questions, it
+distinguishes the operating system itself from third-party software that
+merely runs on it, crediting a patch-urgency verdict to macOS only when an
+advisory names macOS as the affected product rather than as the platform a
+different product (e.g., a VeraCrypt or Open Computer Use build) happens to
+run on; advisories for iTerm2 or OpenSSH that genuinely implicate those
+products, rather than the platform beneath them, are left attributed to
+them, not to macOS. On a frozen 200-question decision benchmark, the
+\texttt{patch\_urgently} verdict count is unchanged at 22 of 200 before and
+after this fix --- it adds coverage for records the live feed had not
+previously surfaced correctly without moving any verdict the benchmark had
+already scored --- while the live Firefox query now returns
+\texttt{patch\_urgently} instead of \texttt{insufficient\_evidence}. Separately,
+intent-based exclusion of advisory evidence is structural, not incidental: 61
+of the 200 benchmark questions are phrased as release or opinion questions
+that exclude CVE records from the citable set, making \texttt{patch\_urgently}
+unreachable for 30.5\% of the sheet regardless of the evidence available,
+independent of this particular bug.
+
+\textbf{Query routing.} The Orchestrator (Section~\ref{sec:method}) was
+extended with a fast path: a basic factual lookup, such as ``what is the
+latest version of Node.js,'' is classified by the same intent rule used
+above as a release/version question and answered by a single retrieval call
+rather than by the full multi-agent state machine, which is reserved for
+questions --- safety verdicts, comparisons, anything the intent classifier
+does not resolve to a simple lookup --- that need more than one source
+reconciled. This is a latency and token-cost optimization rather than an
+accuracy claim, and we have not measured its effect on either; we report the
+mechanism because it is the same router that the false-green bug exposed a
+defect in, not as a validated result.
+
+\textbf{Bounded web-search fallback.} The same branch addresses the finding
+this paper centres on --- that for 273 of 500 questions no local document
+answers (Section~\ref{sec:results}) --- without weakening the abstention it
+motivates. When the local lake returns no document about the asked product, the
+Orchestrator issues a \emph{single} web search, wraps each snippet as untrusted
+community text under the same NFKC and zero-width input screen and
+\texttt{[untrusted:community]} delimiters applied to the Reddit feed, and
+re-runs the unchanged decision gate over those documents; if the web is also
+empty of a verifiable version, date, or CVE identifier, the system still
+abstains. The web thus enlarges where evidence may be found but never licenses
+an ungrounded answer, and the fallback is excluded from the frozen benchmark
+because a live read during replay would break the byte-identical
+reproducibility of the evaluation protocol (Section~\ref{sec:setup}). We report
+it, like the routing above, as an interactive-demo mechanism rather than a
+measured accuracy gain.
 
 \subsection{Threats to Validity}\label{sec:threats}
 

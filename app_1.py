@@ -736,7 +736,7 @@ def _catalog_note() -> Optional[str]:
 def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
                  yesno_on: bool = True, unclear_as_no: bool = False,
                  survey_on: bool = True, source: str = "agent",
-                 reddit_id: Optional[str] = None) -> dict:
+                 reddit_id: Optional[str] = None, web_fallback: bool = False) -> dict:
     """Main orchestrator — runs all 4 agents and returns results.
 
     `source` picks where documents come from: "lake" hits releasetrain.io
@@ -1066,6 +1066,39 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
            "citable_kinds": sorted(g.citable_kinds)}
         if state.payload else None)
     results["timing"]["decision"] = round(time.time() - t0, 2)
+
+    # GR-1 / GR-2 — adaptive route and bounded web fallback.
+    # The route is a label for the console; the pipeline above already ran, so
+    # it does not gate compute here (the fast path is a separate caller entry).
+    results["route"] = dict(zip(("mode", "why"), graph.route_query(query)))
+    results["web_fallback"] = None
+    # GR-2 fires only when the local lake was ABSENT on a *healthy* fetch: the
+    # documents came back and none was about the asked product. A degraded
+    # fetch is the rewrite-retry case, not a web-search case, and a verdict that
+    # already decided is left alone. One hop, out of the eval harness entirely.
+    if (web_fallback and state.evidence is graph.Evidence.ABSENT and not degraded):
+        t0 = time.time()
+        import websearch
+        web_docs, meta = websearch.fallback(query, limit=limit)
+        results["web_fallback"] = meta
+        if web_docs:
+            results["web"] = web_docs
+            wstate = graph.run(
+                query,
+                rewrite=lambda q, tried: results["grounded_query"] or q,
+                retrieve=lambda q: (web_docs, False),
+                gate=decide.gate(g.vendor_names),
+            )
+            # Still abstains if the web is also empty of a verifiable value:
+            # a payload only exists for SUFFICIENT/AMBIGUOUS-grounded.
+            if wstate.payload:
+                results["decision"] = (
+                    decide.Decision.from_dict(wstate.payload).as_dict()
+                    | {"evidence_class": wstate.evidence.value,
+                       "path": [st.node for st in wstate.trace],
+                       "pool_size": len(web_docs), "shown": shown,
+                       "source": "web", "citable_kinds": sorted(g.citable_kinds)})
+        results["timing"]["web_fallback"] = round(time.time() - t0, 2)
 
     return results
 
@@ -1400,6 +1433,224 @@ def _agent_table(results=None, presented=None, view: str = "detailed") -> str:
     ])
 
 
+# ── DECISION CONSOLE VIEW (Dr. Berhe's two-column / tabbed layout) ─────────
+#
+# One clean input and an "Ask" button, a left column of five tabs, and a right
+# column that is a live system console. Everything here reuses run_pipeline and
+# the render helpers above -- it is a presentation shell over the same engine
+# the classic modes and the measured arm use, not a second pipeline.
+
+_VERDICT_BADGE = {
+    "patch_urgently":        ("🔴", "Patch urgently"),
+    "hold":                  ("🟡", "Hold"),
+    "update_with_caveat":    ("🟡", "Update, with a caveat"),
+    "safe":                  ("🟢", "Safe to update"),
+    "insufficient_evidence": ("⚪", "Not enough evidence"),
+}
+_POOL_TIER = {"releases": "Release Notes", "cve": "CISA KEV / NVD",
+              "decision_advisories": "CISA KEV / NVD",
+              "community": "Reddit / Forums", "web": "Web search"}
+
+
+def _console_log(query: str, results: dict, route: dict) -> str:
+    """The right-column console: one line per orchestration stage."""
+    g = results.get("grounding")
+    dec = results.get("decision") or {}
+    kinds = ", ".join(sorted(getattr(g, "citable_kinds", []) or [])) or "—"
+    vendors = ", ".join(getattr(g, "vendor_names", []) or []) or "none"
+    L = [f'$ ask "{query}"',
+         f"[INTENT]  asks={graph.asks(query)}  citable={kinds}  vendors={vendors}",
+         f"[ROUTING] {route['mode'].upper():4} — {route['why']}"]
+    for pool, label in (("releases", "Release"), ("cve", "Advisory"),
+                        ("community", "Community")):
+        L.append(f"[FETCH]   {label:<9} {len(results.get(pool) or []):>2} docs")
+    wf = results.get("web_fallback")
+    if wf is not None:
+        tag = "fired" if wf["used"] else "no backend (pip install ddgs)"
+        L.append(f"[FETCH]   {'Web':<9} {wf['n']:>2} docs  (GR-2 {tag})")
+    gate = dec.get("evidence_class", "absent")
+    L.append(f"[SUFFICIENCY] evidence={gate}  pool={dec.get('pool_size', 0)}"
+             + (f"  via={dec['source']}" if dec.get("source") else ""))
+    if dec.get("path"):
+        L.append(f"[SUFFICIENCY] path: {' → '.join(dec['path'])}")
+    if dec:
+        L.append(f"[DECIDE]  {dec.get('verdict', '—')}  "
+                 f"cites={dec.get('evidence_doc_ids', [])}  conf={dec.get('confidence', 0)}")
+    else:
+        L.append("[DECIDE]  abstain — insufficient evidence")
+    return "\n".join(L)
+
+
+_VERSION_IN_Q = re.compile(r"\b\d+(?:\.\d+)+\b")
+_CVE_ID = re.compile(r"CVE-\d{4}-\d{4,}", re.I)
+
+
+def _latest_release(rows: list, query: str, today=None) -> Optional[dict]:
+    """The release row a version/date question is asking about, or None.
+
+    A version named in the question picks that row ("When was 26.11.0
+    released?"); otherwise it is the highest shipped version -- the same
+    (version, date) order as monitor.shipped, so a backfilled older build or a
+    scheduled future row is never "the latest". Advisory rows are skipped:
+    their version is an affected-version string.
+    """
+    today = today or datetime.now().date()
+    shipped = [r for r in rows if not r.get("is_cve") and vendor.is_release_record(r)
+               and (d := monitor.parse_ymd(r.get("date"))) and d <= today]
+    named = set(_VERSION_IN_Q.findall(query or ""))
+    hit = [r for r in shipped if str(r.get("version")) in named]
+    pool = hit or shipped
+    if not pool:
+        return None
+    return max(pool, key=lambda r: (monitor.version_key(r.get("version")),
+                                    monitor.parse_ymd(r.get("date"))))
+
+
+def _tab_short(results: dict) -> None:
+    dec = results.get("decision")
+    query = results.get("original_query", "")
+    # A version/date question is answered by the feed value, not the verdict;
+    # the verdict stays underneath as a note, since an advisory is still news.
+    rel = (_latest_release(results.get("releases") or [], query)
+           if graph.asks(query) in ("version", "date") else None)
+    if rel:
+        d = monitor.parse_ymd(rel.get("date"))
+        st.markdown(f"### {rel.get('product') or 'Latest'} v{rel.get('version')}")
+        st.write(f"Released {d.isoformat() if d else rel.get('date')} · source: release notes"
+                 + (f" · [link]({rel['url']})" if rel.get("url") else ""))
+        if dec and dec.get("verdict") not in (None, "safe", "insufficient_evidence"):
+            icon, label = _VERDICT_BADGE.get(dec["verdict"], ("⚪", dec["verdict"]))
+            st.caption(f"Also: {icon} {label} — {dec.get('rationale') or ''}")
+        return
+    if not dec:
+        st.markdown("### ⚪ Not enough evidence")
+        st.caption("No document in the pool is about the asked product, so the "
+                   "system abstains rather than guess.")
+        return
+    icon, label = _VERDICT_BADGE.get(dec["verdict"], ("⚪", dec["verdict"]))
+    st.markdown(f"### {icon} {label}")
+    st.write(dec.get("rationale") or "—")
+    meta = f"confidence {dec.get('confidence', 0):.2f} · {dec.get('stop_reason', '')}"
+    if dec.get("source") == "web":
+        meta += " · via web fallback (GR-2)"
+    st.caption(meta)
+
+
+def _tab_long(results: dict, presented) -> None:
+    lead = answer_agent.verdict_lead(results.get("decision"))
+    if lead:
+        st.info(lead)
+    st.write(presented.text or "No answer could be composed.")
+    st.caption(_answer_caption(presented, 0, results.get("timing", {})))
+
+
+def _source_rows(results: dict) -> list:
+    """One row per document the run used, display pools and the advisories
+    held back from display for the verdict alike. `id` is the doc_id the
+    console's cites list prints, so the two can be read against each other."""
+    from eval_harness.generators import doc_id
+    cited = set((results.get("decision") or {}).get("evidence_doc_ids") or [])
+    rows = []
+    for pool in ("releases", "cve", "decision_advisories", "community", "web"):
+        for d in (results.get(pool) or []):
+            tier = d.get("tier")
+            cves = d.get("cves") or sorted(set(c.upper() for c in _CVE_ID.findall(
+                f"{d.get('title', '')} {d.get('notes', '')}")))
+            did = d.get("doc_id") or doc_id(d)
+            rows.append({
+                # community rows carry a numeric rank in `tier`; show the pool
+                "Tier": tier if isinstance(tier, str) and tier else _POOL_TIER.get(
+                    "cve" if pool == "releases" and d.get("is_cve") else pool, "—"),
+                # narrow columns first: the title runs past a half-width column
+                "Verdict": "cited" if did in cited else "",
+                "Version/CVE": ", ".join(list(d.get("versions", [])) + list(cves))[:40]
+                               or (d.get("version") or d.get("versionNumber") or ""),
+                "Title": (d.get("title") or "")[:80],
+                "id": did,
+            })
+    return rows
+
+
+def _tab_sources(results: dict) -> None:
+    rows = _source_rows(results)
+    if rows:
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+    else:
+        st.caption("No citable documents for this question.")
+
+
+def _tab_guardrails(results: dict, presented) -> None:
+    screened = results.get("screened") or []
+    adv_excl = results.get("advisories_excluded", 0)
+    leak = "leak scan" in (presented.note or "")
+    checks = [
+        ("NFKC + zero-width strip on every retrieved doc", "✅ on"),
+        ("[untrusted:community] wrapping of forum/web text", "✅ on"),
+        ("Egress CVE validation (no id the sources don't name)", "✅ on"),
+        (f"Injection screen — {len(screened)} doc(s) dropped",
+         "⚠️ dropped" if screened else "✅ clean"),
+        (f"Advisories held back from display (kept for verdict): {adv_excl}",
+         "ℹ️" if adv_excl else "—"),
+        ("Secret/credential leak scan on final text",
+         "⚠️ substituted" if leak else "✅ clean"),
+    ]
+    for name, status in checks:
+        st.markdown(f"- **{status}** — {name}")
+    if screened:
+        with st.expander("Dropped documents"):
+            for doc, why in screened:
+                st.caption(f"`{why}` · {(doc.get('title') if isinstance(doc, dict) else str(doc))[:80]}")
+
+
+def _tab_loops(results: dict, query: str) -> None:
+    dec = results.get("decision") or {}
+    path = dec.get("path") or []
+    rounds = max(0, path.count("rewrite"))
+    st.markdown(f"**Sufficiency gate:** `{dec.get('evidence_class', 'absent')}`")
+    st.markdown(f"**Rewrite rounds:** {rounds} / {graph.MAX_ROUNDS}")
+    st.markdown(f"**Graph path:** {' → '.join(path) if path else '— (abstained before gate)'}")
+    st.markdown("**Attribute checked:** `" + graph.asks(query) + "` "
+                "(version · date · stance · cve)")
+    wf = results.get("web_fallback")
+    if wf is not None:
+        st.markdown(f"**GR-2 web fallback:** {'fired, ' + str(wf['n']) + ' docs' if wf['used'] else 'not available'}")
+    st.caption("The gate reads what the documents contain; ABSENT on a healthy "
+               "fetch abstains, only a degraded fetch re-enters rewrite.")
+
+
+def render_ask_view(result_limit: int, source: str) -> None:
+    st.markdown(
+        "<div class='main-header'><h2 style='margin:0'>Software Update Decision Intelligence</h2>"
+        "<p style='margin:.3rem 0 0'>Ask whether an update is safe — grounded in live "
+        "release notes, advisories and community reports.</p></div>",
+        unsafe_allow_html=True)
+    q = st.text_input("Ask", key="ask_query", label_visibility="collapsed",
+                      placeholder='e.g. "Is it safe to update Firefox?"  ·  "Latest Node.js version?"')
+    asked = st.button("Ask", type="primary")
+    if not q or not asked:
+        st.caption("Type a question and press **Ask**.")
+        return
+    route = dict(zip(("mode", "why"), graph.route_query(q)))
+    with st.spinner(f"{route['mode'].upper()} path — {route['why']}…"):
+        results = run_pipeline(q, show_steps=False, limit=result_limit,
+                               source=source, web_fallback=True)
+        presented = present_answer(results["original_query"], results)
+    left, right = st.columns(2, gap="large")
+    with left:
+        t1, t2, t3, t4, t5 = st.tabs(
+            ["Short Answer", "Long Answer", "Sources", "Guardrails", "Feedback Loops"])
+        with t1: _tab_short(results)
+        with t2: _tab_long(results, presented)
+        with t3: _tab_sources(results)
+        with t4: _tab_guardrails(results, presented)
+        with t5: _tab_loops(results, q)
+    with right:
+        st.markdown("**System console**")
+        st.code(_console_log(q, results, route), language="text")
+        st.caption(f"intent → routing → fetch → gate → verdict · "
+                   f"{sum(results.get('timing', {}).values()):.1f}s total")
+
+
 # ── SIDEBAR ───────────────────────────────────────────────
 
 with st.sidebar:
@@ -1449,21 +1700,22 @@ with st.sidebar:
     st.markdown("#### Settings")
     mode = st.selectbox(
         "Answering mode",
-        ["Multi-agent pipeline", "Single agent (paper baseline)",
-         "Compare both side by side"],
+        ["Decision console (new)", "Multi-agent pipeline",
+         "Single agent (paper baseline)", "Compare both side by side"],
         # Compare by default. The pipeline on its own answers the question but
         # says nothing about what the coordinating agents bought, which is the
         # only claim this project makes; a visitor who does not already know to
         # go looking for the baseline never sees it. Costs a second retrieval
         # per ask -- the arms share no work -- and that is the price of the
         # comparison being the default view rather than a setting.
-        index=2,
+        index=0,
         help="The baseline is the evaluation's own `single_agent` arm: raw "
              "query to the retriever and one synthesis call, with every "
              "coordinating agent removed. Same question, so the difference on "
              "screen is the difference the paper measures.")
     single_mode = mode.startswith("Single")
     compare_mode = mode.startswith("Compare")
+    console_mode = mode.startswith("Decision console")
     # Collapsed: nine controls standing open above the question box read as
     # a configuration screen, and the only one a first-time visitor needs is
     # the mode picker above. Everything here keeps its default, so the demo
@@ -1826,6 +2078,12 @@ if view == "Results":
 # them -- is a single Run click away once the box is not empty. `not in`
 # rather than a falsy check: Clear sets the key to "", and re-filling a box
 # the visitor just emptied would fight them.
+# Decision console is the default Ask layout: clean input, five tabs, live
+# console. It owns its own input and renders nothing of the classic view below.
+if console_mode:
+    render_ask_view(result_limit, source)
+    st.stop()
+
 if "main_query" not in st.session_state:
     st.session_state["main_query"] = examples[0]
 

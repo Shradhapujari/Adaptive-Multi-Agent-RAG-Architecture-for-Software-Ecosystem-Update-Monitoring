@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-reference sweep over the paper and its supplement.
+"""Cross-reference sweep over the paper, its supplement, and saner2027.tex.
 
 Three defects have reached the repository from page-limit surgery: four \\cite
 keys that existed in no .bib, a "items 6 and 8" pointer into a seven-item list,
@@ -26,22 +26,30 @@ NOUN = {"sec": {"section", "sections", "subsection"}, "tab": {"table", "tables"}
         "alg": {"algorithm"}, "app": {"appendix"}}
 
 
-def check(main_src, sup_src):
-    """Return a list of complaints. Pure function of the two sources."""
+def check(main_src, sup_src, extra=()):
+    """Return a list of complaints. Pure function of the sources given.
+
+    `extra` is for other self-contained papers that share references.bib but
+    have no supplement of their own (e.g. a condensed conference version):
+    pass [(src, name), ...] and they get the cite-key, ref-noun, item-count,
+    and setup/results/threats drift checks, but not the Table-S<n> pointer
+    checks below, which are specifically about a paper/supplement pair.
+    """
     bad = []
+    sources = [(main_src, "paper"), (sup_src, "supplement"), *extra]
 
     # 1. every \cite key resolves to a @entry in references.bib
     bib = (PAPER / "references.bib").read_text() if (PAPER / "references.bib").exists() else ""
     if bib:
         defined = set(re.findall(r"@\w+\{([^,]+),", bib))
-        for src, name in ((main_src, "paper"), (sup_src, "supplement")):
+        for src, name in sources:
             for group in re.findall(r"\\cite[tp]?\*?(?:\[[^\]]*\])*\{([^}]+)\}", src):
                 for key in (k.strip() for k in group.split(",")):
                     if key and key not in defined:
                         bad.append(f"{name}: \\cite{{{key}}} is in no .bib entry")
 
     # 2. the noun in front of a \ref matches the label's type
-    for src, name in ((main_src, "paper"), (sup_src, "supplement")):
+    for src, name in sources:
         for m in re.finditer(r"(\w+)~\\(?:ref|autoref|Cref|cref)\{([^}]+)\}", src):
             noun, key = m.group(1).lower(), m.group(2)
             prefix = key.split(":")[0]
@@ -64,7 +72,7 @@ def check(main_src, sup_src):
                    "its tables (they will print as 1, 2, 3...)")
 
     # 5. item~N pointers stay inside their list
-    for name, src in (("paper", main_src), ("supplement", sup_src)):
+    for src, name in sources:
         for lo, body in ((m.start(), m.group(1)) for m in
                          re.finditer(r"\\begin\{enumerate\}(.*?)\\end\{enumerate\}", src, re.S)):
             n = body.count(r"\item")
@@ -72,7 +80,10 @@ def check(main_src, sup_src):
                 for v in (x for x in num if x):
                     if int(v) > n:
                         bad.append(f"{name}: 'item~{v}' in a list of {n} items")
+
     bad += check_drift(main_src)
+    for src, name in extra:
+        bad += check_drift(src, name)
     return bad
 
 
@@ -105,7 +116,7 @@ def _counts(text):
     return out
 
 
-def check_drift(src):
+def check_drift(src, name="paper"):
     """Setup and threats must not contradict the results they describe."""
     bad = []
     setup = _section(src, "sec:setup")
@@ -119,7 +130,7 @@ def check_drift(src):
     for m in MODEL.finditer(results):
         tok = m.group(0).lower().replace("~", "").replace(" ", "")
         if tok not in named:
-            bad.append(f"paper: results use {m.group(0)!r}, which "
+            bad.append(f"{name}: results use {m.group(0)!r}, which "
                        f"\\label{{sec:setup}} never names -- setup claims a configuration "
                        f"the results do not follow")
             break
@@ -129,7 +140,7 @@ def check_drift(src):
     # a sample larger than anything the setup or threats admits to
     biggest_claimed = max(_counts(setup) | _counts(threats), default=0)
     if biggest_run > biggest_claimed:
-        bad.append(f"paper: results report {biggest_run} questions; setup and threats "
+        bad.append(f"{name}: results report {biggest_run} questions; setup and threats "
                    f"top out at {biggest_claimed} -- one of them has not been walked "
                    f"forward")
 
@@ -142,7 +153,7 @@ def check_drift(src):
     if sup and biggest_run:
         claimed = int(sup.group(1).replace("{,}", "").replace(",", ""))
         if claimed != biggest_run:
-            bad.append(f"paper: threats calls {claimed} questions the largest evaluation; "
+            bad.append(f"{name}: threats calls {claimed} questions the largest evaluation; "
                        f"the results report {biggest_run}")
     return bad
 
@@ -154,6 +165,13 @@ def selfcheck():
     assert any("S9" in c for c in ok), ok
     assert any("nosuchkey" in c for c in ok), ok
     assert check(r"Figure~\ref{fig:x}", r"\section*{S1\quad A}") == [], "clean input must pass"
+
+    # extra: a self-contained paper with no supplement still gets cite/ref/
+    # item checks and drift checks, under its own name, but not the
+    # Table-S<n> pointer checks (it has nothing to point at)
+    extra_bad = check("", "", extra=[(r"\cite{nosuchkey}", "saner")])
+    assert any("saner: \\cite{nosuchkey}" in c for c in extra_bad), extra_bad
+    assert not any(c.startswith("paper:") or c.startswith("supplement:") for c in extra_bad), extra_bad
 
     # the two drift defects that actually shipped
     drifted = r"""\subsection{Setup}\label{sec:setup} All experiments used Llama~3.1 8B.
@@ -182,7 +200,8 @@ if __name__ == "__main__":
     if "--selfcheck" in sys.argv:
         selfcheck(); sys.exit(0)
     problems = check((PAPER / "tosem_amara.tex").read_text(),
-                     (PAPER / "supplementary.tex").read_text())
+                     (PAPER / "supplementary.tex").read_text(),
+                     extra=[((PAPER / "saner2027.tex").read_text(), "saner")])
     for p in problems:
         print("FAIL", p)
     print(f"{len(problems)} problem(s)")
