@@ -37,6 +37,7 @@ import tokens  # noqa: E402
 from eval_harness.benchmarks import (content_tokens, extract_dates,  # noqa: E402
                                      extract_versions)
 from eval_harness.judge import _extract_json  # noqa: E402
+from keywords import QUESTION_STOPWORDS  # noqa: E402
 from yesno import looks_yesno, stance  # noqa: E402
 
 MAX_ROUNDS = max(1, int(os.environ.get("MARAG_MAX_ROUNDS", "2")))
@@ -163,8 +164,14 @@ def on_topic(query: str, docs: Sequence[dict]) -> list:
     Cheap and deterministic. It is the "about the product" test, not a
     relevance score: a doc about the right product that does not state the
     asked attribute is what makes the gate say AMBIGUOUS rather than ABSENT.
+
+    The question's words also drop QUESTION_STOPWORDS: content_tokens keeps
+    "what", "which", "how" (its stoplist is the scorer's, fixed by published
+    numbers), and nearly every document contains one, so "What is the latest
+    version of Zig?" was never ABSENT.
     """
-    words = {t for t in content_tokens(query) if not t[0].isdigit()}
+    words = {t for t in content_tokens(query)
+             if not t[0].isdigit() and t not in QUESTION_STOPWORDS}
     return [d for d in docs if words & set(content_tokens(_doc_text(d)))]
 
 

@@ -1448,6 +1448,7 @@ _VERDICT_BADGE = {
     "insufficient_evidence": ("⚪", "Not enough evidence"),
 }
 _POOL_TIER = {"releases": "Release Notes", "cve": "CISA KEV / NVD",
+              "decision_advisories": "CISA KEV / NVD",
               "community": "Reddit / Forums", "web": "Web search"}
 
 
@@ -1480,8 +1481,47 @@ def _console_log(query: str, results: dict, route: dict) -> str:
     return "\n".join(L)
 
 
+_VERSION_IN_Q = re.compile(r"\b\d+(?:\.\d+)+\b")
+_CVE_ID = re.compile(r"CVE-\d{4}-\d{4,}", re.I)
+
+
+def _latest_release(rows: list, query: str, today=None) -> Optional[dict]:
+    """The release row a version/date question is asking about, or None.
+
+    A version named in the question picks that row ("When was 26.11.0
+    released?"); otherwise it is the highest shipped version -- the same
+    (version, date) order as monitor.shipped, so a backfilled older build or a
+    scheduled future row is never "the latest". Advisory rows are skipped:
+    their version is an affected-version string.
+    """
+    today = today or datetime.now().date()
+    shipped = [r for r in rows if not r.get("is_cve") and vendor.is_release_record(r)
+               and (d := monitor.parse_ymd(r.get("date"))) and d <= today]
+    named = set(_VERSION_IN_Q.findall(query or ""))
+    hit = [r for r in shipped if str(r.get("version")) in named]
+    pool = hit or shipped
+    if not pool:
+        return None
+    return max(pool, key=lambda r: (monitor.version_key(r.get("version")),
+                                    monitor.parse_ymd(r.get("date"))))
+
+
 def _tab_short(results: dict) -> None:
     dec = results.get("decision")
+    query = results.get("original_query", "")
+    # A version/date question is answered by the feed value, not the verdict;
+    # the verdict stays underneath as a note, since an advisory is still news.
+    rel = (_latest_release(results.get("releases") or [], query)
+           if graph.asks(query) in ("version", "date") else None)
+    if rel:
+        d = monitor.parse_ymd(rel.get("date"))
+        st.markdown(f"### {rel.get('product') or 'Latest'} v{rel.get('version')}")
+        st.write(f"Released {d.isoformat() if d else rel.get('date')} · source: release notes"
+                 + (f" · [link]({rel['url']})" if rel.get("url") else ""))
+        if dec and dec.get("verdict") not in (None, "safe", "insufficient_evidence"):
+            icon, label = _VERDICT_BADGE.get(dec["verdict"], ("⚪", dec["verdict"]))
+            st.caption(f"Also: {icon} {label} — {dec.get('rationale') or ''}")
+        return
     if not dec:
         st.markdown("### ⚪ Not enough evidence")
         st.caption("No document in the pool is about the asked product, so the "
@@ -1504,17 +1544,35 @@ def _tab_long(results: dict, presented) -> None:
     st.caption(_answer_caption(presented, 0, results.get("timing", {})))
 
 
-def _tab_sources(results: dict) -> None:
+def _source_rows(results: dict) -> list:
+    """One row per document the run used, display pools and the advisories
+    held back from display for the verdict alike. `id` is the doc_id the
+    console's cites list prints, so the two can be read against each other."""
+    from eval_harness.generators import doc_id
+    cited = set((results.get("decision") or {}).get("evidence_doc_ids") or [])
     rows = []
-    for pool in ("releases", "cve", "community", "web"):
+    for pool in ("releases", "cve", "decision_advisories", "community", "web"):
         for d in (results.get(pool) or []):
+            tier = d.get("tier")
+            cves = d.get("cves") or sorted(set(c.upper() for c in _CVE_ID.findall(
+                f"{d.get('title', '')} {d.get('notes', '')}")))
+            did = d.get("doc_id") or doc_id(d)
             rows.append({
-                "Tier": d.get("tier") or _POOL_TIER.get(pool, "—"),
-                "Title": (d.get("title") or "")[:80],
-                "Version/CVE": ", ".join(d.get("versions", []) + d.get("cves", []))[:40]
+                # community rows carry a numeric rank in `tier`; show the pool
+                "Tier": tier if isinstance(tier, str) and tier else _POOL_TIER.get(
+                    "cve" if pool == "releases" and d.get("is_cve") else pool, "—"),
+                # narrow columns first: the title runs past a half-width column
+                "Verdict": "cited" if did in cited else "",
+                "Version/CVE": ", ".join(list(d.get("versions", [])) + list(cves))[:40]
                                or (d.get("version") or d.get("versionNumber") or ""),
-                "id": d.get("doc_id") or d.get("redditId") or "",
+                "Title": (d.get("title") or "")[:80],
+                "id": did,
             })
+    return rows
+
+
+def _tab_sources(results: dict) -> None:
+    rows = _source_rows(results)
     if rows:
         st.dataframe(rows, use_container_width=True, hide_index=True)
     else:
