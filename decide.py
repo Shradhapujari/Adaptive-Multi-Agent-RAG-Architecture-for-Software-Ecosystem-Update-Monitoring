@@ -51,6 +51,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from eval_harness.benchmarks import extract_versions
+from guardrail import normalize
 
 VERDICTS = ("patch_urgently", "hold", "update_with_caveat", "safe",
             "insufficient_evidence")
@@ -116,7 +117,9 @@ class Decision:
 # ----------------------------------------------------------------- extraction
 
 def _text(d: dict) -> str:
-    return f"{d.get('title', '')} {d.get('text', '') or d.get('detail', '')}"
+    # Normalized here because every extractor below reads through it: the
+    # injection screen saw NFKC text, the rules used to see the raw bytes.
+    return normalize(f"{d.get('title', '')} {d.get('text', '') or d.get('detail', '')}")
 
 
 def _date(d: dict) -> Optional[str]:

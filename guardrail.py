@@ -471,7 +471,9 @@ def guard(answer: str, evidence: Sequence, question: str = "") -> Tuple[str, Ver
 _INJECTION_PATTERNS = (
     ("override", re.compile(
         r"\b(ignore|disregard|forget)\b[^.\n]{0,40}\b(previous|prior|above|earlier|all)\b"
-        r"[^.\n]{0,25}\b(instruction|prompt|rule|direction)", re.I)),
+        # "bypass" and "command" stay out: "authentication bypass and the
+        # execution of arbitrary commands" is a CISA KEV row, not an order.
+        r"[^.\n]{0,25}\b(instruction|prompt|rule|direction|guidance|guideline|context)", re.I)),
     # "you are now on the 6.8 kernel" is support-thread prose; what is matched
     # is a reassignment to a *role*.
     ("reassign", re.compile(
@@ -479,8 +481,18 @@ _INJECTION_PATTERNS = (
         r"\b(assistant|ai|model|bot|agent|persona|character|chatgpt|dan)\b", re.I)),
     ("new_instructions", re.compile(r"\bnew (system )?(instruction|prompt|directive)s?\s*:", re.I)),
     # A fake turn marker: the document trying to look like the conversation.
+    # "user:" counts too -- a fake user turn is the most direct way to speak
+    # as the user. A markdown header needs the colon, or "### Installation
+    # instructions" in a release note would go.
     ("role_marker", re.compile(
-        r"(?:^|\n)\s*(?:system|assistant)\s*:\s|<\|im_(?:start|end)\|>|</?(?:system|instructions)>", re.I)),
+        r"(?:^|\n)\s*(?:system|assistant|user|human)\s*:\s"
+        r"|(?:^|\n)\s*#{1,6}\s*(?:instruction|system|response)s?\s*:"
+        r"|</?(?:system|instructions)>", re.I)),
+    # The control tokens of the templates this system feeds: Llama 3.1
+    # rewrites, Mistral synthesises, and ChatML is the common third.
+    ("chat_template", re.compile(
+        r"<\|(?:start_header_id|end_header_id|eot_id|begin_of_text|im_start|im_end)\|>"
+        r"|\[/?INST\]|<</?SYS>>", re.I)),
     ("exfiltrate", re.compile(
         r"\b(reveal|repeat|print|output|show|send)\b[^.\n]{0,25}\byour\b"
         r"[^.\n]{0,25}\b(system prompt|instructions|api key|secret|credential)", re.I)),
@@ -493,12 +505,56 @@ _INJECTION_PATTERNS = (
         r"|\binstead,?\s+(?:say|answer|reply|output|respond)(?:\s+(?:that|with)\b|\s*:|\s+[\"\u201c])", re.I)),
 )
 
+# Cyrillic and Greek letters that render as Latin ones. NFKC leaves them alone,
+# so "\u0406gnore" with a Cyrillic \u0406 read as a different word to every pattern.
+# ponytail: a hand list, not Unicode's confusables table; extend it, or take
+# that table, if a payload in another script shows up.
+_CONFUSABLES = str.maketrans({
+    "\u0430": "a", "\u0435": "e", "\u043e": "o", "\u0440": "p", "\u0441": "c", "\u0443": "y", "\u0445": "x",
+    "\u0456": "i", "\u0458": "j", "\u0455": "s", "\u0501": "d", "\u051b": "q", "\u051d": "w", "\u04bb": "h", "\u04cf": "l",
+    "\u0410": "A", "\u0412": "B", "\u0415": "E", "\u041a": "K", "\u041c": "M", "\u041d": "H", "\u041e": "O",
+    "\u0420": "P", "\u0421": "C", "\u0422": "T", "\u0425": "X", "\u0406": "I", "\u0408": "J", "\u0405": "S",
+    "\u03bf": "o", "\u03c1": "p", "\u03bd": "v", "\u03b9": "i", "\u0391": "A", "\u0392": "B", "\u0395": "E",
+    "\u0396": "Z", "\u0397": "H", "\u0399": "I", "\u039a": "K", "\u039c": "M", "\u039d": "N", "\u039f": "O",
+    "\u03a1": "P", "\u03a4": "T", "\u03a5": "Y", "\u03a7": "X",
+})
+_TAG_TO_ASCII = {0xE0000 + c: c for c in range(0x20, 0x7F)}
+
+
+def _normalise(text: str) -> str:
+    """The text as the patterns read it -- for detection only, never shown.
+
+    NFKC folds fullwidth letters; then every format character goes (category
+    Cf: zero-width, bidi controls, soft hyphen) with the variation selectors,
+    and lookalike letters fold to Latin. The printable tag block is decoded to
+    its ASCII letters rather than dropped: a payload spelled wholly in tags is
+    invisible on screen but readable to a model, and stripping it would leave
+    the patterns nothing to match.
+    """
+    text = unicodedata.normalize("NFKC", text).translate(_TAG_TO_ASCII)
+    text = "".join(c for c in text
+                   if unicodedata.category(c) != "Cf" and not "\ufe00" <= c <= "\ufe0f")
+    return text.translate(_CONFUSABLES)
+
+
 # Every text-bearing field a fetched row is known to carry. Screening the
 # concatenation means a payload split across title and body is still caught.
-_ZERO_WIDTH_RE = re.compile(r"[\u200b-\u200f\u2060\ufeff]")
 
 _SCREEN_FIELDS = ("title", "text", "body", "detail", "summary", "description",
                   "selftext", "content", "note", "notes")
+
+
+def normalize(text: str) -> str:
+    """NFKC with zero-width characters removed: the text every rule should read.
+
+    Fullwidth letters and zero-width joiners spell an injection past a plain
+    regex, and they spell a CVE id past one too -- "ＣＶＥ-2026-1234" and
+    "CVE\\u200b-2026-1234" made a KEV row invisible to decide(), which then
+    called the product safe.
+    """
+    # Unlike _normalise, no confusable folding or tag decoding: this text is
+    # read for facts, and invisible tag text must not become a CVE id.
+    return "".join(c for c in unicodedata.normalize("NFKC", text) if unicodedata.category(c) != "Cf")
 
 
 def screen(doc) -> Optional[str]:
@@ -508,9 +564,9 @@ def screen(doc) -> Optional[str]:
     else:
         parts = [str(doc)]
     blob = "\n".join(p for p in parts if p)
-    # Fullwidth letters, confusable scripts and zero-width joiners are how a
+    # Fullwidth letters, confusable scripts and invisible characters are how a
     # payload spells "ignore previous instructions" past a plain regex.
-    blob = _ZERO_WIDTH_RE.sub("", unicodedata.normalize("NFKC", blob))
+    blob = _normalise(blob)
     for name, pattern in _INJECTION_PATTERNS:
         if pattern.search(blob):
             return name

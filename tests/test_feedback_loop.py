@@ -161,6 +161,30 @@ def test_the_avoided_phrasings_reach_the_prompt(monkeypatch):
     assert "Do not reuse" in seen["prompt"]
 
 
+# The query used to be spliced in by f-string and then the whole prompt run
+# through .format(), so a brace in the user's words was read as a template slot.
+@pytest.mark.parametrize("query", ["what changed in {django}?", "set x = {} in config",
+                                   "json {\"a\": 1} broke", "{tried}"])
+@pytest.mark.parametrize("avoid", [(), ("tried {once}",)])
+def test_a_brace_in_the_query_reaches_the_prompt_verbatim(monkeypatch, query, avoid):
+    monkeypatch.setattr(marag, "pause", lambda *a, **k: None)
+    seen = {}
+    monkeypatch.setattr(marag, "call_llama", lambda p: seen.setdefault("prompt", p) and "rewritten q")
+    assert marag.QueryRewriterAgent().run(query, avoid=avoid)["rewritten"] == "rewritten q"
+    assert f'A user asked: "{query}"' in seen["prompt"]
+    assert all(t in seen["prompt"] for t in avoid)
+
+
+# call_llama returns None only when Ollama is unreachable; an empty or blank
+# reply came back as "" and was searched for as the rewritten query.
+@pytest.mark.parametrize("reply", ["", "   ", "\n\t"])
+def test_a_blank_rewrite_falls_back_by_rule(monkeypatch, reply):
+    monkeypatch.setattr(marag, "pause", lambda *a, **k: None)
+    monkeypatch.setattr(marag, "call_llama", lambda p: reply)
+    out = marag.QueryRewriterAgent().run("chrome update")["rewritten"]
+    assert out.startswith("chrome update ") and out.strip() != "chrome update"
+
+
 # ---- the signal reads the pre-floor relevance, not the floored quality ------
 
 def test_retry_signal_fires_on_off_topic_docs_even_from_a_recognised_source(monkeypatch):

@@ -1475,6 +1475,21 @@ class QueryRewriterAgent:
         print(f"  Thinking ...")
         pause()
 
+        # A retry that reissues the phrasing that just came back thin is a
+        # round of latency spent to get the same pool. The rewriter is the only
+        # agent that can produce different vocabulary, so it is told what has
+        # already been tried rather than being asked the same question twice.
+        tried = (
+            "\nThese phrasings were already searched and returned too little:\n"
+            + "\n".join(f"- {t}" for t in avoid)
+            + "\nUse different vocabulary: the vendor's own product names, the "
+              "component names, or the words a changelog would use. Do not "
+              "reuse the phrasings above.\n") if avoid else ""
+
+        # One f-string, no .format() after it: the query is user text, and a
+        # second formatting pass read its braces as slots -- "{django}" raised
+        # KeyError and "{tried}" was silently replaced. Same bytes otherwise,
+        # so recorded snapshots still replay.
         prompt = f"""You are a search query rewriting expert for a software update research system.
 
 A user asked: "{query}"
@@ -1488,25 +1503,15 @@ Rules:
 - Keep it under 20 words
 - Focus on: bug fixes, releases, changelogs, security patches, performance
 - Return ONLY the rewritten query, nothing else
-{{tried}}
+{tried}
 Rewritten query:"""
-
-        # A retry that reissues the phrasing that just came back thin is a
-        # round of latency spent to get the same pool. The rewriter is the only
-        # agent that can produce different vocabulary, so it is told what has
-        # already been tried rather than being asked the same question twice.
-        prompt = prompt.format(tried=(
-            "\nThese phrasings were already searched and returned too little:\n"
-            + "\n".join(f"- {t}" for t in avoid)
-            + "\nUse different vocabulary: the vendor's own product names, the "
-              "component names, or the words a changelog would use. Do not "
-              "reuse the phrasings above.\n") if avoid else "")
 
         rewritten = call_llama(prompt)
 
-        # fallback if Ollama fails
-        if rewritten is None:
-            print(f"  ⚠️  Ollama unavailable — using rule-based fallback")
+        # fallback if Ollama fails -- or answers with nothing: None is the only
+        # failure call_llama reports, and a blank reply searched for "".
+        if rewritten is None or not rewritten.strip():
+            print(f"  ⚠️  Ollama unavailable or returned nothing — using rule-based fallback")
             rewritten = f"{query} {self.FALLBACK_TERMS[len(avoid) % len(self.FALLBACK_TERMS)]}"
 
         # The model can ignore the instruction above and repeat itself. If it

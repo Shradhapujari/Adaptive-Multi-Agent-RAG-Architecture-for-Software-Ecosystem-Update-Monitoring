@@ -55,13 +55,17 @@ class LLMClient:
         return True
 
     def generate(self, prompt: str, system: Optional[str] = None,
-                 temperature: float = 0.0, max_tokens: int = 1024) -> str:
+                 temperature: float = 0.0, max_tokens: int = 1024,
+                 json_schema: Optional[dict] = None) -> str:
+        """`json_schema` constrains decoding where the backend supports it
+        (Ollama `format`); elsewhere it is ignored and the caller still parses."""
+        kw = {"json_schema": json_schema} if json_schema else {}
         try:
-            return self._generate(prompt, system, temperature, max_tokens).strip()
+            return self._generate(prompt, system, temperature, max_tokens, **kw).strip()
         except Exception as e:  # noqa: BLE001 — surface a uniform error string
             raise LLMError(f"{self.spec}: {e}") from e
 
-    def _generate(self, prompt, system, temperature, max_tokens) -> str:
+    def _generate(self, prompt, system, temperature, max_tokens, json_schema=None) -> str:
         raise NotImplementedError
 
 
@@ -86,11 +90,13 @@ class OllamaClient(LLMClient):
         except Exception:
             return False
 
-    def _generate(self, prompt, system, temperature, max_tokens) -> str:
+    def _generate(self, prompt, system, temperature, max_tokens, json_schema=None) -> str:
         payload = tokens.ollama_payload(self.model, prompt,
                                         temperature=temperature, num_predict=max_tokens)
         if system:
             payload["system"] = system
+        if json_schema:
+            payload["format"] = json_schema
         data = json.dumps(payload).encode()
         req = urllib.request.Request(
             f"{self.host}/api/generate", data=data,
@@ -126,7 +132,7 @@ class OpenAIClient(LLMClient):
             self._client = OpenAI()
         return self._client
 
-    def _generate(self, prompt, system, temperature, max_tokens) -> str:
+    def _generate(self, prompt, system, temperature, max_tokens, json_schema=None) -> str:
         client = self._ensure()
         messages = []
         if system:
@@ -196,7 +202,7 @@ class GeminiClient(LLMClient):
             "max_tokens or set a thinking_budget"
         )
 
-    def _generate(self, prompt, system, temperature, max_tokens) -> str:
+    def _generate(self, prompt, system, temperature, max_tokens, json_schema=None) -> str:
         from google.genai import types
         client = self._ensure()
         config = types.GenerateContentConfig(
@@ -233,7 +239,7 @@ class AnthropicClient(LLMClient):
             self._client = anthropic.Anthropic()
         return self._client
 
-    def _generate(self, prompt, system, temperature, max_tokens) -> str:
+    def _generate(self, prompt, system, temperature, max_tokens, json_schema=None) -> str:
         client = self._ensure()
         kwargs = dict(model=self.model, max_tokens=max_tokens,
                       temperature=temperature,
