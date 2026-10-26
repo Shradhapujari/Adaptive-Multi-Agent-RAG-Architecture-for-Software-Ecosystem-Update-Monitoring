@@ -44,6 +44,8 @@ obligation fired, which is what a human gate (Phase 3) routes on.
 """
 from __future__ import annotations
 
+import json
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -153,8 +155,45 @@ _FIX_CLAUSE = re.compile(
 
 _PLATFORM_PREP = re.compile(r"\b(?:on|for)\b", re.I)
 
+# A component built *for* the product, named after it: "MariaDB Connector/
+# Node.js", "the foo Node.js driver", "a WordPress plugin". The product token
+# is there, but another vendor owns the affected artifact.
+_COMPONENT_AFTER = re.compile(
+    r"\s*(?:connectors?|drivers?|modules?|packages?|plugins?|extensions?|add-?ons?"
+    r"|sdks?|bindings?|wrappers?|adapters?)\b", re.I)
 
-def _subject_names_product(d: dict, vtoks: set) -> bool:
+# Hand-curated per-product exclusions (data/vendor_kb.json): names that appear
+# in a product's advisory subjects without the product owning the advisory.
+# Static on purpose -- a list a run could append to would make one question's
+# verdict depend on the questions before it, which the paired tests forbid.
+_KB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "vendor_kb.json")
+try:
+    with open(_KB_PATH, encoding="utf-8") as _f:
+        KB: Dict[str, dict] = {k.lower(): v for k, v in json.load(_f)["products"].items()}
+except (OSError, ValueError, KeyError):
+    KB = {}
+
+
+def _owns(segment: str, vtoks: set, exclude: Sequence[str] = ()) -> bool:
+    """Does `segment` (an advisory subject or fix clause) name the product as
+    the owner of the affected artifact?
+
+    Three ways a product token shows up without owning it: as the platform
+    after "on"/"for" (VeraCrypt on macOS), as the target of a component named
+    after it (Connector/Node.js, "Node.js driver"), or next to a name the
+    knowledge store lists for that product (iTerm2 on macOS)."""
+    head = _PLATFORM_PREP.split(segment.lower(), maxsplit=1)[0]
+    if any(x in head for x in exclude):
+        return False
+    for v in vtoks:
+        for m in re.finditer(re.escape(v), head):
+            if head[:m.start()].endswith("/") or _COMPONENT_AFTER.match(head, m.end()):
+                continue
+            return True
+    return False
+
+
+def _subject_names_product(d: dict, vtoks: set, exclude: Sequence[str] = ()) -> bool:
     """Does the asked product appear in the *subject* of an advisory?
 
     A product name anywhere in an advisory is not evidence that the advisory
@@ -201,8 +240,7 @@ def _subject_names_product(d: dict, vtoks: set) -> bool:
     # after the preposition. Upgrade path is the row's own product field once
     # /api/v/ can be trusted to carry it (today it files NVD records under
     # whatever string the query matched, which is why this rule exists).
-    head = _PLATFORM_PREP.split(subject, maxsplit=1)[0]
-    if any(v in head for v in vtoks):
+    if _owns(subject, vtoks, exclude):
         return True
     # Weakness-first fallback: a real advisory whose subject is the flaw still
     # names the product in its fix clause. This is what let "Is it safe to
@@ -213,11 +251,10 @@ def _subject_names_product(d: dict, vtoks: set) -> bool:
     # Same platform-preposition guard as the subject: "fixed in Firefox for
     # iOS 157.1" is a Firefox advisory, so an iOS question must not match the
     # "iOS" after "for".
-    return any(v in _PLATFORM_PREP.split(fm.group(1).lower(), maxsplit=1)[0]
-               for fm in _FIX_CLAUSE.finditer(body) for v in vtoks)
+    return any(_owns(fm.group(1), vtoks, exclude) for fm in _FIX_CLAUSE.finditer(body))
 
 
-def _about(d: dict, vtoks: set, qtoks: set) -> bool:
+def _about(d: dict, vtoks: set, qtoks: set, exclude: Sequence[str] = ()) -> bool:
     """Is the document about the asked product? With a known vendor, the vendor
     name has to appear -- and for an advisory it has to appear in the subject,
     for the reason `_subject_names_product` gives. Without a vendor, fall back
@@ -228,7 +265,7 @@ def _about(d: dict, vtoks: set, qtoks: set) -> bool:
     if vtoks:
         if not toks & vtoks:
             return False
-        return (_subject_names_product(d, vtoks)
+        return (_subject_names_product(d, vtoks, exclude)
                 if d.get("source") in ADVISORY else True)
     return len(toks & qtoks) >= 2
 
@@ -254,8 +291,11 @@ def decide(pool: Sequence[dict], question: str, vendors: Iterable[str] = (),
     """
     asked = list(versions) if versions is not None else \
         extract_versions(question, multipart_only=True)
+    vendors = list(vendors)
     vtoks, qtoks = _vendor_tokens(vendors), _tokens(question)
-    about = [d for d in pool if d.get("doc_id") and _about(d, vtoks, qtoks)]
+    exclude = [x.lower() for v in vendors
+               for x in KB.get(str(v).lower(), {}).get("not_this_product", ())]
+    about = [d for d in pool if d.get("doc_id") and _about(d, vtoks, qtoks, exclude)]
     on_version = [d for d in about if _version_ok(d, asked)]
 
     # An advisory counts when it is about the product even if it does not name

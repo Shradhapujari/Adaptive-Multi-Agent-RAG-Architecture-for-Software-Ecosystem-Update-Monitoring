@@ -567,7 +567,10 @@ def _selected_spec() -> Optional[str]:
 
 
 def _resolve_spec(explicit: Optional[str]) -> Optional[str]:
-    """Which model to present with: caller > env > whatever is reachable."""
+    """Which model to present with: caller > env > whatever is reachable.
+    "rule-based" asks for no model at all (the console's fast path)."""
+    if explicit == "rule-based":
+        return None
     if explicit:
         return explicit
     return (os.getenv("PRESENTER_MODEL") or os.getenv("MARAG_LLM")

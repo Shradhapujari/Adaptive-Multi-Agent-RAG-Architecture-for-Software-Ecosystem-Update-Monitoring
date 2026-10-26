@@ -265,3 +265,41 @@ def test_the_patch_verdict_does_not_overclaim_its_attribution():
     assert d.verdict == "patch_urgently"
     assert "about the product" not in d.rationale
     assert "name" in d.rationale and "citation" in d.rationale
+
+
+# ---- owner boundary: the product named, another vendor's artifact affected --
+# Observed 2026-10-22: "latest Node.js version?" came back with a red note
+# citing a MariaDB Connector/Node.js advisory.
+
+NQ = "What is the latest version of Node.js?"
+NV = ["node.js"]
+
+
+def test_a_connector_for_the_runtime_is_not_a_runtime_advisory():
+    pool = [_d(1, "nvd", "node.js v3.4.0 — MariaDB Connector/Node.js",
+               "MariaDB Connector/Node.js before 3.4.1 allows SQL injection. CVE-2026-4242")]
+    assert D.decide(pool, NQ, NV).verdict != "patch_urgently"
+
+
+def test_a_driver_named_after_the_runtime_is_not_a_runtime_advisory():
+    pool = [_d(1, "nvd", "node.js — foo Node.js driver",
+               "The foo Node.js driver before 2.0 allows prototype pollution. CVE-2026-4243"),
+            _d(2, "nvd", "node.js — weakness first",
+               "Prototype pollution was fixed in Acme Node.js SDK 1.2. CVE-2026-4244")]
+    assert D.decide(pool, NQ, NV).verdict != "patch_urgently"
+
+
+def test_the_runtimes_own_advisory_still_orders_a_patch():
+    pool = [_d(1, "nvd", "node.js v24.9.1 — HTTP request smuggling",
+               "Node.js before 24.9.1 allows HTTP request smuggling. CVE-2026-4245")]
+    assert D.decide(pool, NQ, NV).verdict == "patch_urgently"
+
+
+def test_the_knowledge_store_excludes_a_product_text_cannot_separate():
+    """iTerm2 and macOS differ by a word no rule can know; the store knows it."""
+    iterm = [_d(1, "nvd", "macos v3.6.11 — iTerm2",
+                "An issue in iTerm2 macOS before 3.6.12 allows code execution. CVE-2026-5151")]
+    assert D.decide(iterm, MQ, ["macos"]).verdict != "patch_urgently"
+    own = [_d(1, "nvd", "macos v27.0 — macOS",
+              "An issue in macOS before 27.1 allows code execution. CVE-2026-5152")]
+    assert D.decide(own, MQ, ["macos"]).verdict == "patch_urgently"

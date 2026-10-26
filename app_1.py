@@ -35,6 +35,7 @@ from contextlib import nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from typing import Dict, List, Optional
 
 from temporal import resolve_temporal, matches_window
@@ -159,6 +160,30 @@ def _rule_based_rewrite(query: str) -> str:
     return rewritten
 
 
+# Temperature 0, so the same prompt earns the same rewrite: ask once per
+# process. An exception is not cached, so an Ollama that comes back is used.
+# ponytail: in-process only; a disk cache if restarts make the rewrite the cost.
+@lru_cache(maxsize=512)
+def _llama_rewrite(prompt: str) -> str:
+    payload = json.dumps({
+        "model": "llama3.1",
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": 0}
+    }).encode()
+    req = urllib.request.Request(
+        OLLAMA_API,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=20) as r:
+        out = json.loads(r.read()).get("response", "").strip()
+    # Llama wraps the rewrite in quotes often enough that the quotes end up in
+    # the `q` parameter; strip them rather than search for them.
+    return out.strip(" \"'").strip()
+
+
 def rewrite_query(query: str) -> Rewrite:
     """Rewrite for retrieval with Llama 3.1, or by rule, saying which."""
     prompt = rules_block() + f"""You are a software update search expert.
@@ -167,25 +192,8 @@ Focus on: bug fixes, security patches, release notes, CVE vulnerabilities, versi
 Query: "{query}"
 Return ONLY the rewritten query in under 15 words, nothing else:"""
 
-    payload = json.dumps({
-        "model": "llama3.1",
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0}
-    }).encode()
-
     try:
-        req = urllib.request.Request(
-            OLLAMA_API,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=20) as r:
-            out = json.loads(r.read()).get("response", "").strip()
-            # Llama wraps the rewrite in quotes often enough that the quotes
-            # end up in the `q` parameter; strip them rather than search for them.
-            out = out.strip(" \"'").strip()
+        out = _llama_rewrite(prompt)
         if out:
             return Rewrite(out, mode="llm", model="llama3.1")
         return Rewrite(_rule_based_rewrite(query), mode="rule-based",
@@ -1102,6 +1110,55 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
 
     return results
 
+
+def run_fast(query: str, limit: int = 5, source: str = "agent") -> Optional[dict]:
+    """GR-1 fast path: a single-product version/date lookup, answered from one
+    release-feed fetch. No rewriter, no community or CVE feed, no model.
+
+    Returns None whenever the question needs the full pipeline -- grounding
+    names no product or several, the feed has no shipped release to read, or
+    the graph does not reach `answer` -- so the caller escalates instead of
+    this path guessing. The advisory rows /api/v/ returns in the same response
+    still go to `decide.gate`, so a live advisory is not hidden by going fast.
+    """
+    t0 = time.time()
+    g = ground(query)
+    if len(g.vendor_names) != 1:
+        return None
+    errors = _reset_fetch_errors()
+    db = get_store()
+    if source == "store" and db is not None:
+        fetch = lambda q, limit=5, **kw: db.search(q, pool="release", limit=limit)  # noqa: E731
+    else:
+        fetch = caching_fetch(None if source == "lake" else db, "release",
+                              fetch_release_notes)
+    rows = fetch(g.vendor_names[0], limit=max(limit * 10, 50)) or []
+    rows = vendor.filter_by_vendor(rows, g.vendors) or rows
+    shipped = [r for r in rows if not r.get("is_cve") and vendor.is_release_record(r)]
+    advisories = [r for r in rows if r not in shipped]
+    if _latest_release(shipped, query) is None:
+        return None
+    results = {"source": source, "original_query": query, "grounded_query": g.rewritten,
+               "grounding": g, "temporal": g.temporal, "rewrite": None, "rewritten_query": "",
+               "community": [], "cve": [], "errors": errors, "screened": [],
+               "releases": sorted(shipped, key=lambda r: monitor.version_key(r.get("version")),
+                                  reverse=True)[:limit],
+               "decision_advisories": advisories, "advisories_excluded": len(advisories),
+               "timing": {}, "web_fallback": None}
+    pool = _decide_pool(results)
+    state = graph.fast_run(query, retrieve=lambda q: (pool, bool(errors) and not rows),
+                           gate=decide.gate(g.vendor_names))
+    if state.trace[-1].node != "answer":
+        return None
+    results["decision"] = (decide.Decision.from_dict(state.payload).as_dict()
+                           | {"evidence_class": state.evidence.value,
+                              "path": [st.node for st in state.trace],
+                              "pool_size": len(pool), "shown": len(results["releases"]),
+                              "citable_kinds": sorted(g.citable_kinds)})
+    results["route"] = {"mode": "fast", "why": graph.route_query(query)[1]}
+    results["timing"]["fast"] = round(time.time() - t0, 2)
+    return results
+
 _CITE = re.compile(r"\s*\[[^\]]*\]")
 
 
@@ -1618,6 +1675,25 @@ def _tab_loops(results: dict, query: str) -> None:
                "fetch abstains, only a degraded fetch re-enters rewrite.")
 
 
+def ask(q: str, limit: int = 5, source: str = "agent"):
+    """(results, presented) for one console question. A fast-routed question
+    tries `run_fast` and escalates to the full pipeline when it returns None;
+    `results["route"]` says which path actually answered."""
+    route = dict(zip(("mode", "why"), graph.route_query(q)))
+    with st.spinner(f"{route['mode'].upper()} path — {route['why']}…"):
+        results = run_fast(q, limit=limit, source=source) if route["mode"] == "fast" else None
+        if results is not None:
+            presented = present_answer(q, results, model_spec="rule-based")
+            presented.note = "fast path — feed value, no model call"
+            return results, presented
+        results = run_pipeline(q, show_steps=False, limit=limit,
+                               source=source, web_fallback=True)
+        if route["mode"] == "fast":
+            route = {"mode": "full", "why": "fast path could not answer — escalated"}
+        results["route"] = route
+        return results, present_answer(results["original_query"], results)
+
+
 def render_ask_view(result_limit: int, source: str) -> None:
     st.markdown(
         "<div class='main-header'><h2 style='margin:0'>Software Update Decision Intelligence</h2>"
@@ -1630,11 +1706,8 @@ def render_ask_view(result_limit: int, source: str) -> None:
     if not q or not asked:
         st.caption("Type a question and press **Ask**.")
         return
-    route = dict(zip(("mode", "why"), graph.route_query(q)))
-    with st.spinner(f"{route['mode'].upper()} path — {route['why']}…"):
-        results = run_pipeline(q, show_steps=False, limit=result_limit,
-                               source=source, web_fallback=True)
-        presented = present_answer(results["original_query"], results)
+    results, presented = ask(q, limit=result_limit, source=source)
+    route = results["route"]
     left, right = st.columns(2, gap="large")
     with left:
         t1, t2, t3, t4, t5 = st.tabs(
