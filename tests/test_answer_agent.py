@@ -774,3 +774,33 @@ def test_the_presenter_sees_the_advisories_set_aside_for_the_verdict():
     advisories = [e for e in ev if e.kind == "advisory"]
     assert any("157.0.1" in e.title or "157.0.1" in e.detail for e in advisories)
     assert all(e.security for e in advisories)
+
+
+def test_the_paragraph_cites_every_advisory_the_verdict_counts():
+    """Live 2026-10-27: the lead said "10 advisory document(s)"; the paragraph
+    could cite 4, and called the CISA KEV half of them community posts."""
+    from eval_harness.generators import doc_id
+    import guardrail
+    nvd = [{"title": f"linux advisory {i}", "url": f"https://nvd.nist.gov/vuln/detail/CVE-2026-9000{i}",
+            "is_cve": True, "product": "linux", "version": "7.3.0", "date": "20261018"}
+           for i in range(6)]
+    kev = [{"title": "[CISA KEV] Linux Kernel Race Condition Vulnerability — Kernel",
+            "url": f"https://nvd.nist.gov/vuln/detail/CVE-2025-3996{i}", "source": "cisa_kev",
+            "subreddit": "CISA US-CERT", "date": "2026-09-18"} for i in range(2)]
+    results = {"releases": nvd, "cve": kev, "community": [],
+               "decision": {"verdict": "patch_urgently",
+                            "evidence_doc_ids": [doc_id(d) for d in nvd + kev]}}
+    ev = collect_evidence(results)
+    adv = [e for e in ev if e.kind == "advisory"]
+    assert len(adv) == 8                                   # uncapped, KEV included
+    assert len({e.label for e in ev}) == len(ev)           # one label per source
+    assert not any("[" in e.title for e in adv)            # "[CISA KEV]" is no citation
+    para = deterministic_paragraph("linux", ev)
+    assert "8 advisory record(s)" in para
+    assert guardrail.check(para, ev).ok, guardrail.check(para, ev).violations
+
+
+def test_one_label_names_one_source():
+    posts = [{"title": t, "url": f"https://reddit.com/{t}", "subreddit": "linux"} for t in "ab"]
+    ev = collect_evidence({"community": posts + [dict(posts[0])]})
+    assert [e.label for e in ev] == ["Community - r/linux", "Community - r/linux #2"]

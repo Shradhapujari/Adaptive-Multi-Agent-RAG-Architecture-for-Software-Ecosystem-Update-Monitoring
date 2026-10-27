@@ -295,6 +295,117 @@ _SEVERITY_RE = re.compile(
     + r"|\b(?:rated|severity(?:\s+of)?)\s+(critical|high|moderate|medium|low)\b", re.I)
 
 
+# A count the answer states about its own sources: "4 advisory record(s)",
+# "returned 1 matching release(s)", "adds three posts". Stored run #77 said
+# "4 advisory record(s) apply" and cited one, "3 post(s)" and cited one -- the
+# reader counted the brackets, then the Sources tab, and got three numbers.
+_NUM_WORDS = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten".split())}
+_NUM_ALT = "|".join(_NUM_WORDS)
+_COUNT_RE = re.compile(
+    # Not a piece of a version or date: the "0" of "v7.2.0 release" is no count.
+    r"(?<![\w.-])(\d{1,3}|" + _NUM_ALT + r")\b(?!\.\d)"
+    # Up to two qualifiers between, never a number or "of": "3 of the 5
+    # releases" counts the 5, and "past 7 days two releases" counts the two.
+    r"((?:\s+(?!of\b|(?:" + _NUM_ALT + r")\b)[A-Za-z][\w-]*){0,2}?)\s+"
+    r"(release(?:\(s\)|s)?|advisor(?:y|ies)|record(?:\(s\)|s)?|post(?:\(s\)|s)?|"
+    r"threads?|comments?|sources?|"
+    r"issues?|problems?|findings?|bugs?|fix(?:es)?|changes?|regressions?|"
+    r"vulnerabilit(?:y|ies)|cves?|updates?)\b", re.I)
+# Which evidence kinds a source noun counts. "advisory record(s)" is advisory
+# because the qualifier is read before the noun.
+_SOURCE_NOUNS = (
+    ("advisor", {"advisory"}),
+    ("release", {"release"}),
+    ("post", {"community", "answer", "cve"}),
+    ("thread", {"community", "answer", "cve"}),
+    ("comment", {"community", "answer", "cve"}),
+    ("source", None),                      # any kind
+)
+# How a label names its kind, for the harness's plain-dict evidence.
+_LABEL_KINDS = (("Release Notes", "release"), ("Security Advisory", "advisory"),
+                ("Security Discussion", "cve"), ("Community", "community"),
+                ("Top comment", "answer"))
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[\"“(]?[A-Z])|\n+")
+
+
+def _kinds(evidence: Sequence) -> dict:
+    """label -> evidence kind, from the item itself or its label's prefix."""
+    out = {}
+    for e in evidence or ():
+        label = str(getattr(e, "label", "") or (e.get("label", "") if isinstance(e, dict) else "")).strip()
+        kind = getattr(e, "kind", "") or (e.get("kind", "") if isinstance(e, dict) else "")
+        if label:
+            out[label] = kind or next((k for p, k in _LABEL_KINDS if label.startswith(p)), "")
+    return out
+
+
+def _counts(text: str, known: dict) -> List[Tuple[int, str, str]]:
+    """(n, qualifiers + noun, matched span) for each count claim in `text`.
+
+    A number after a product name is a version, not a count: "Fedora 44
+    release", "Windows 11 update". A capitalised word or one the sources
+    version marks it so.
+    """
+    out = []
+    for m in _COUNT_RE.finditer(text or ""):
+        raw = m.group(1).lower()
+        n = _NUM_WORDS.get(raw, None)
+        if n is None:
+            if _looks_like_year(raw):
+                continue
+            n = int(raw)
+        prev = re.search(r"([A-Za-z][\w+#.-]*)\s*$", text[:m.start()])
+        if prev and raw.isdigit():
+            word = prev.group(1)
+            if ((word.lower() not in _CONTENT_STOPWORDS and word != word.lower())
+                    or raw in known.get(word.lower(), ())):
+                continue
+        out.append((n, f"{m.group(2)} {m.group(3)}".lower(), m.group(0).strip()))
+    return out
+
+
+def _count_violations(text: str, labels: set, kinds: dict, known: dict) -> List[Violation]:
+    """A count of sources has to equal the sources cited for it.
+
+    Two rules, both from what the reader can check on the page:
+
+    * "N releases / advisories / posts / sources" equals the distinct cited
+      sources of that kind -- in the same sentence, or, for a summary line over
+      a list, in the whole answer.
+    * A headline "N issues / problems / findings" over a numbered list equals
+      the number of items. The prompt's own example said "three problems" over
+      two, and the model copied the arithmetic.
+    """
+    def cited(span: str, want) -> int:
+        tags = {c.strip() for c in _CITE_RE.findall(span)} & labels
+        return len({t for t in tags if want is None or kinds.get(t) in want})
+
+    bad: List[Violation] = []
+    for sentence in _SENTENCE_RE.split(text):
+        for n, noun, span in _counts(sentence, known):
+            want = next((w for key, w in _SOURCE_NOUNS if key in noun), False)
+            if want is False:
+                continue                      # a finding noun: the list rule below
+            got = {cited(sentence, want), cited(text, want)}
+            if n not in got:
+                bad.append(Violation(
+                    "count_mismatch",
+                    f"“{span}” but {min(got)} such source(s) cited — "
+                    f"cite every source you count, or state the number you cite"))
+
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    items = [ln for ln in lines[1:] if _LIST_RE.match(ln)]
+    if items:
+        for n, noun, span in _counts(lines[0], known):
+            if not any(key in noun for key, _ in _SOURCE_NOUNS) and n != len(items):
+                bad.append(Violation(
+                    "count_mismatch",
+                    f"the summary says “{span}” but lists {len(items)} — "
+                    f"make the number match the list"))
+    return bad
+
+
 def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
     """Check a presented answer against the evidence it was built from.
 
@@ -361,6 +472,10 @@ def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
     _known: dict = {}
     for product, v in _named_versions(_ISO_RE.sub(" ", haystack) + " " + given):
         _known.setdefault(product, set()).add(v)
+
+    # A refusal counts nothing it has to cite.
+    if not abstained:
+        bad.extend(_count_violations(text, labels, _kinds(evidence), _known))
 
     known_versions = set(extract_versions(_ISO_RE.sub(" ", haystack), multipart_only=True))
     known_versions |= set(extract_versions(given, multipart_only=True))
@@ -691,8 +806,32 @@ def _demo() -> None:
     # "Chrome 155" against a v155.0.8047 row, and every "fixed 3 bugs".
     # ponytail: this also stops catching an invented bare major ("Fedora 45");
     # dotted forms are what the domain decides on, per extract_versions.
-    counts = "The feed returned 5 release(s); kernel 6.17.2 is in 2 of them [R1]."
+    counts = "The feed returned 2 release(s); kernel 6.17.2 is in 1 of them [R1] [R2]."
     assert check(counts, ev).ok, check(counts, ev).violations
+
+    # Answer count == source count. Stored run #77: "4 advisory record(s)" over
+    # one citation. The same sentence or the whole answer may carry the cites.
+    v = check("The feed returned 5 release(s) [R1].", ev)
+    assert [x.code for x in v.violations] == ["count_mismatch"], v.violations
+    assert check("Two releases shipped: Fedora 44 [R1] and Chrome 155 [R2].", ev).ok
+    assert check("One community post reports grub loss [C1].", ev).ok
+    assert not check("Three posts report grub loss [C1].", ev).ok
+    # A summary over a list: the number is the list's.
+    listed = ("Users report three problems [C1].\n\n"
+              "1. grub is lost [C1].\n2. kernel 6.17.2 regressed [R1].")
+    v = check(listed, ev)
+    assert [x.code for x in v.violations] == ["count_mismatch"], v.violations
+    assert check(listed.replace("three", "two"), ev).ok
+    # A number after a product, or inside a version, is not a count.
+    assert check("The Fedora 44 release is out [R1].", ev).ok
+    assert check("Chrome v155.0.8047 release notes list it [R2].", ev).ok
+    assert check("In the past 7 days two releases shipped [R1] [R2].", ev).ok
+    # The rule-based fallback counts what it cites, so it passes the rule too.
+    from answer_agent import deterministic_paragraph
+    adv = ev + [Evidence(label=f"A{i}", kind="advisory", title=f"CVE-2026-1000{i}")
+                for i in range(4)]
+    para = deterministic_paragraph("linux", adv)
+    assert check(para, adv).ok, (para, check(para, adv).violations)
 
     # The prefix rule: a bare major is checked when the sources version that
     # product, and a source's 155.0.8047 is what makes "Chrome 155" true.

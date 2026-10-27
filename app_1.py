@@ -899,8 +899,16 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         results["cve"] = union_fetch(cve_fetch, phrasings, limit, temporal)
         # Already fetched and screened in step 2. The app's own CVE feed is
         # Reddit; these are the advisory catalogues (CISA KEV, CIRCL) the
-        # terminal reads and this app had no fetcher for.
-        results["cve"] += shared["cve"]
+        # terminal reads and this app had no fetcher for. Deduped on url as
+        # step 3 does: the same KEV entry arriving twice made the verdict say
+        # "10 advisory document(s)" over 8 distinct ones (2026-10-27).
+        _have = {u for u in ((r.get("url") or "").rstrip("/").lower()
+                             for r in results["cve"]) if u}
+        for r in shared["cve"]:
+            u = (r.get("url") or "").rstrip("/").lower()
+            if not u or u not in _have:
+                _have.add(u)
+                results["cve"].append(r)
         results["timing"]["cve"] = round(time.time()-t0, 1)
 
     # Step 4b — Vendor and record-type filter
@@ -1593,20 +1601,38 @@ def _tab_short(results: dict) -> None:
     st.caption(meta)
 
 
+def _answer_urls(results: dict, presented) -> set:
+    """URLs of the sources the presented paragraph actually cites."""
+    if presented is None:
+        return set()
+    trace = xai.explain(results.get("original_query", ""), presented.text, presented.evidence)
+    return {s["url"] for s in trace.sources if s["used"] and s["url"]}
+
+
 def _tab_long(results: dict, presented) -> None:
     lead = answer_agent.verdict_lead(results.get("decision"))
+    text = presented.text or ""
     if lead:
         st.info(lead)
-    st.write(presented.text or "No answer could be composed.")
-    st.caption(_answer_caption(presented, 0, results.get("timing", {})))
+        # present_answer prefixes the lead; shown once, in the box above.
+        text = text[len(lead):].strip() if text.startswith(lead) else text
+    st.write(text or "No answer could be composed.")
+    # Was a hardcoded 0 over a paragraph citing three sources, with the
+    # timing dict printed where the seconds go.
+    trace = xai.explain(results.get("original_query", ""), presented.text, presented.evidence)
+    secs = round(sum((results.get("timing") or {}).values()), 1)
+    st.caption(_answer_caption(presented, sum(s["used"] for s in trace.sources), secs))
 
 
-def _source_rows(results: dict) -> list:
+def _source_rows(results: dict, presented=None) -> list:
     """One row per document the run used, display pools and the advisories
     held back from display for the verdict alike. `id` is the doc_id the
-    console's cites list prints, so the two can be read against each other."""
+    console's cites list prints, so the two can be read against each other.
+    `Verdict` marks what the decision stands on, `Answer` what the paragraph
+    cites -- one column for both showed a paragraph's sources as uncited."""
     from eval_harness.generators import doc_id
     cited = set((results.get("decision") or {}).get("evidence_doc_ids") or [])
+    in_answer = _answer_urls(results, presented)
     rows = []
     for pool in ("releases", "cve", "decision_advisories", "community", "web"):
         for d in (results.get(pool) or []):
@@ -1620,6 +1646,7 @@ def _source_rows(results: dict) -> list:
                     "cve" if pool == "releases" and d.get("is_cve") else pool, "—"),
                 # narrow columns first: the title runs past a half-width column
                 "Verdict": "cited" if did in cited else "",
+                "Answer": "cited" if d.get("url") and d["url"] in in_answer else "",
                 "Version/CVE": ", ".join(list(d.get("versions", [])) + list(cves))[:40]
                                or (d.get("version") or d.get("versionNumber") or ""),
                 "Title": (d.get("title") or "")[:80],
@@ -1628,8 +1655,8 @@ def _source_rows(results: dict) -> list:
     return rows
 
 
-def _tab_sources(results: dict) -> None:
-    rows = _source_rows(results)
+def _tab_sources(results: dict, presented=None) -> None:
+    rows = _source_rows(results, presented)
     if rows:
         st.dataframe(rows, use_container_width=True, hide_index=True)
     else:
@@ -1714,7 +1741,7 @@ def render_ask_view(result_limit: int, source: str) -> None:
             ["Short Answer", "Long Answer", "Sources", "Guardrails", "Feedback Loops"])
         with t1: _tab_short(results)
         with t2: _tab_long(results, presented)
-        with t3: _tab_sources(results)
+        with t3: _tab_sources(results, presented)
         with t4: _tab_guardrails(results, presented)
         with t5: _tab_loops(results, q)
     with right:

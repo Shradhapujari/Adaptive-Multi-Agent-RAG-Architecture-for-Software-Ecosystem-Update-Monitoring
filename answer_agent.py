@@ -149,7 +149,7 @@ CITATION_RULE = (
     "Required shape — this is a FORMAT example only. Its wording, versions, KB "
     "numbers and symptoms are invented and appear in no source: copy the "
     "layout, never the content.\n"
-    "Users report three problems with the latest Edge update [S1].\n"
+    "Users report two problems with the latest Edge update [S1].\n"
     "\n"
     "1. Dark mode options were removed from edge://flags in 144.0.3719.82 [S2].\n"
     "2. The default search engine was hijacked after KB5121767 [S1].\n"
@@ -341,8 +341,31 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
     # The presenter was not wrong about its evidence, it was shown the wrong
     # evidence, and no amount of instructing it to agree with the verdict
     # fixes a paragraph that cannot see what the verdict stands on.
-    rows = ((results.get("releases") or [])[:per_kind]
-            + (results.get("decision_advisories") or [])[:per_kind])
+    releases = results.get("releases") or []
+    held = results.get("decision_advisories") or []
+    posts = results.get("cve") or []
+    # The CVE pool is mostly Reddit, but a CISA KEV or CIRCL row in it is an
+    # advisory -- decide counts it as one, so the paragraph must too, or the
+    # verdict's "10 advisories" reads against "5 advisories and 4 posts".
+    from decide import ADVISORY
+    is_kev = lambda c: c.get("source") in ADVISORY  # noqa: E731
+    rows = releases[:per_kind] + held[:per_kind]
+    kevs = [c for c in posts if is_kev(c)][:per_kind]
+    # When the verdict stands on advisories, the paragraph cites exactly those,
+    # all of them. The lead says "Patch now: 10 advisory document(s)" and the
+    # paragraph under it could cite only `per_kind` -- possibly ones the
+    # verdict had rejected -- so the answer counted 10 and cited 4 (live,
+    # 2026-10-27, "Any critical Linux kernel vulnerabilities right now?").
+    backing = set((results.get("decision") or {}).get("evidence_doc_ids") or [])
+    if backing:
+        from eval_harness.generators import doc_id
+        is_adv = lambda r: vendor.classify_record(r) == "advisory"  # noqa: E731
+        mine = lambda r: (r.get("doc_id") or doc_id(r)) in backing  # noqa: E731
+        verdict_adv = [r for r in releases + held if is_adv(r) and mine(r)]
+        verdict_kev = [c for c in posts if is_kev(c) and mine(c)]
+        if verdict_adv or verdict_kev:
+            rows = [r for r in releases[:per_kind] if not is_adv(r)] + verdict_adv
+            kevs = verdict_kev
     for r in rows:
         # An advisory row is named by its CVE id, not by its versionNumber:
         # that field holds the *affected* version, and citing
@@ -360,7 +383,23 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
             security=advisory or "SECURITY" in (r.get("security") or []),
         ))
 
-    for c in (results.get("cve") or [])[:per_kind]:
+    for c in kevs:
+        # Named by CVE id: two KEV entries share "Linux Kernel Race Condition
+        # Vulnerability" as a title, and one label for two sources is a count
+        # nobody can check. The "[CISA KEV]" tag leaves the title, since a
+        # bracket in a title is read as a citation.
+        date = _iso(c.get("date"))
+        title = _clean(re.sub(r"^\s*\[[^\]]*\]\s*", "", c.get("title", "")), 160)
+        head = vendor.advisory_id(c) or title
+        sub = vendor.attribution(c)
+        ev.append(Evidence(
+            label=f"Security Advisory - {head}" + (f" ({sub})" if sub else "")
+                  + (f", {date}" if date else ""),
+            kind="advisory", title=title, detail=_clean(c.get("detail", "")),
+            url=c.get("url", ""), date=date, security=True,
+        ))
+
+    for c in [c for c in posts if not is_kev(c)][:per_kind]:
         # These come from /api/reddit/query/cve -- Reddit posts, not advisory
         # records. Labelling them "CVE Feed" told the reader a security feed
         # had reported them, which is a claim the row cannot support: the
@@ -394,7 +433,20 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
             url=p.get("url", ""), date=date, sentiment=p.get("sentiment", ""),
         ))
 
-    return ev
+    # One citation, one source. Two r/linux posts without a date were both
+    # "Community - r/linux", so a citation could not say which one it meant
+    # and a count of cited sources came up one short. The same url twice is
+    # one document and is dropped; a shared label on two documents is numbered.
+    out, urls, seen = [], set(), {}
+    for e in ev:
+        if e.url and e.url in urls:
+            continue
+        urls.add(e.url)
+        seen[e.label] = seen.get(e.label, 0) + 1
+        if seen[e.label] > 1:
+            e.label = f"{e.label} #{seen[e.label]}"
+        out.append(e)
+    return out
 
 
 # Verdicts the paragraph may not talk past. `safe` and `insufficient_evidence`
@@ -499,19 +551,23 @@ def deterministic_paragraph(query: str, evidence: List[Evidence],
     scope = f" for {window_note}" if window_note else ""
     parts: List[str] = []
 
+    # Every count below cites every source it counts. "4 advisory record(s)
+    # apply, led by X [one label]" was the answer/source mismatch of stored
+    # run #77, and guardrail.check now refuses it from a model as well.
+    def listed(rows: List[Evidence]) -> str:
+        return _join([f"“{e.title}” [{e.label}]" for e in rows])
+
     if sec:
-        head = _join([f"{e.title} [{e.label}]" for e in sec[:3]])
         parts.append(
-            f"{len(sec)} of the {len(rel)} releases matching this question"
-            f"{scope} are classified as security fixes: {head}.")
+            f"{len(sec)} of the matching releases{scope} are classified as "
+            f"security fixes: {listed(sec)}.")
         lead = sec[0]
         if lead.detail:
             parts.append(f"The most relevant of them reports “{_clean(lead.detail, 160)}” "
                          f"[{lead.label}].")
     elif rel:
-        head = _join([f"{e.title} [{e.label}]" for e in rel[:3]])
         parts.append(f"The release feed returned {len(rel)} matching "
-                     f"release(s){scope}: {head}.")
+                     f"release(s){scope}: {listed(rel)}.")
         if rel[0].detail:
             parts.append(f"The top result notes “{_clean(rel[0].detail, 160)}” "
                          f"[{rel[0].label}].")
@@ -520,14 +576,14 @@ def deterministic_paragraph(query: str, evidence: List[Evidence],
 
     if adv:
         parts.append(f"On the security side, {len(adv)} advisory record(s) "
-                     f"apply, led by “{adv[0].title}” [{adv[0].label}].")
+                     f"apply: {listed(adv)}.")
 
     if cve:
         # Deliberately a separate sentence and a separate count: a Reddit
         # thread and an NVD record are not the same kind of evidence, and one
         # number covering both overstates how much security reporting there is.
-        parts.append(f"Community security discussion adds {len(cve)} post(s), "
-                     f"including “{cve[0].title}” [{cve[0].label}].")
+        parts.append(f"Community security discussion adds {len(cve)} post(s): "
+                     f"{listed(cve)}.")
 
     if com:
         neg = [e for e in com if e.sentiment == "Negative"]
@@ -535,8 +591,8 @@ def deterministic_paragraph(query: str, evidence: List[Evidence],
         # "with no negative reaction reported" was a claim about the endpoint
         # dressed up as a finding about the community.
         mood = " with negative reaction reported" if neg else ""
-        parts.append(f"Community coverage adds {len(com)} post(s){mood}, "
-                     f"including “{com[0].title}” [{com[0].label}].")
+        parts.append(f"Community coverage adds {len(com)} post(s){mood}: "
+                     f"{listed(com)}.")
 
     parts.append("Every statement above is drawn from the bracketed sources; "
                  "nothing outside them was used.")
