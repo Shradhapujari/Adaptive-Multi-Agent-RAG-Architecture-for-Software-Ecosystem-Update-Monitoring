@@ -93,7 +93,7 @@ class _Grounding:
 
 def test_a_safety_question_still_sees_advisories_when_its_intent_excludes_cve():
     """The false green of 2026-10-14. "Is it safe to update Firefox right now?"
-    matches intent.py's opinion cue `is it (good|bad|safe|stable|worth)`, and
+    matched intent.py's old opinion cue `is it (good|bad|safe|stable|worth)`, and
     `_CITABLE["opinion"]` is ("community", "release") -- so every advisory was
     filtered out of the pool before the rule ran, and the verdict came back
     `safe`, rationale "no advisory", while 11 Firefox advisories sat in the

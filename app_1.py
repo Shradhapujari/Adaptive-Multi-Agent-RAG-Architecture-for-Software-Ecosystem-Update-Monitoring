@@ -635,7 +635,7 @@ def _decide_pool(results: dict) -> list:
 
     Advisory rows are exempt. Applying the ruling to them too produced the
     false green of 2026-10-14: "Is it safe to update Firefox right now?"
-    matches intent.py's opinion cue `is it (good|bad|safe|stable|worth)`, whose
+    matched intent.py's old opinion cue `is it (good|bad|safe|stable|worth)`, whose
     citable kinds are ("community", "release"), so every advisory was dropped
     here and the verdict came back `safe` -- rationale "no advisory" -- with 11
     Firefox advisories in the feed, one of them 8 days old. The same pool with
