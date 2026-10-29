@@ -390,6 +390,28 @@ def run_single_agent(query: str, top_k: int = 4) -> dict:
 
 # ── AGENT 3: RELEASE NOTES AGENT ─────────────────────────
 
+def _one_row_per_release(rows: list) -> list:
+    """Release rows with the feed's per-commit rows collapsed.
+
+    For Linux the feed files every kernel commit and merge as a "version": a
+    row linking `/commit/<sha>` is labelled `7.41.0` (from "7.4-rc1"), and the
+    commits made on the v7.3 tag all link its tarball as `7.3.0`. Five of those
+    filled the release panel as five identically titled "releases". Commit rows
+    are dropped, then the first (newest) row is kept per (product, version).
+
+    Never empties the list: a feed that is all commits keeps one row per version
+    rather than showing no release at all.
+    """
+    tags = [v for v in rows if "/commit/" not in (v.get("versionUrl") or "")]
+    seen, out = set(), []
+    for v in tags or rows:
+        key = (v.get("versionProductName"), v.get("versionNumber"))
+        if key not in seen:
+            seen.add(key)
+            out.append(v)
+    return out
+
+
 def fetch_release_notes(query: str, limit: int = 5) -> list:
     """Fetches live software release notes from releasetrain.io."""
     data = _get_json(RELEASES_API, {"q": query, "limit": limit},
@@ -409,7 +431,7 @@ def fetch_release_notes(query: str, limit: int = 5) -> list:
         # decides which may be cited -- a decision that needs both kinds
         # present to be a decision.
         advisories = [v for v in versions if v.get("isCve")]
-        releases = [v for v in versions if not v.get("isCve")]
+        releases = _one_row_per_release([v for v in versions if not v.get("isCve")])
         versions = releases[:limit] + advisories[:limit]
         return [{
             # `rerank.doc_text()` reads title/detail/text, not `notes`, so a row
