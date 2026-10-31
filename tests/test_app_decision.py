@@ -245,3 +245,28 @@ def test_the_apps_own_cve_flag_is_read_by_the_record_classifier():
            "url": "https://www.mozilla.org/en-US/firefox/157.0.1/releasenotes/"}
     assert vendor.classify_record(row) == "advisory"
     assert not vendor.is_release_record(row)
+
+
+def test_the_details_view_drops_the_lead_too(monkeypatch):
+    """With "Show details" on, the compare column went through render_answer,
+    which printed the verdict sentence again under the verdict block."""
+    shown = []
+    monkeypatch.setattr(app_1.st, "success", shown.append)
+    lead = "Patch now: 1 advisory document(s) with a CVE id."
+    presented = type("P", (), {"text": lead, "evidence": []})()
+    app_1.render_answer(presented, lead=lead)
+    assert shown == []
+
+
+# --- which thread may be quoted at the top of the answer ---------------------
+
+def test_a_severity_word_is_not_a_subject():
+    """"critical" passed the subject test on a Windows/Nobara boot-repair
+    thread through its SMART report ("critical warning: 0x00"), and that
+    thread's top comment led the answer to "Any critical Linux updates today?"."""
+    from types import SimpleNamespace
+    linux = SimpleNamespace(name="linux")
+    g = SimpleNamespace(vendors=[linux], terms=["critical", "Linux", "updates"])
+    assert app_1._subject_terms(g) == []
+    g = SimpleNamespace(vendors=[linux], terms=["critical", "kernel", "panic"])
+    assert app_1._subject_terms(g) == ["kernel", "panic"]

@@ -41,8 +41,24 @@ def test_community_only_answers_are_not_labelled_local(monkeypatch):
              "detail": "", "subreddit": "ios", "sentiment": "Neutral", "url": "u1"}]
     local = [{"title": "bundled", "detail": "", "subreddit": "ios",
               "sentiment": "Neutral", "url": "u2"}]     # no source -> "local"
-    assert "live releasetrain.io" in marag.EvaluatorAgent().run(live, "ios 26.4")["answer"]
+    assert "Live community sources" in marag.EvaluatorAgent().run(live, "ios 26.4")["answer"]
     assert "local dataset" in marag.EvaluatorAgent().run(local, "ios 26.4")["answer"]
+
+
+def test_community_only_answers_are_not_verified_or_high(monkeypatch):
+    """"Any critical Linux updates today?" printed VERIFIED / Confidence: HIGH
+    (quality=0.50, the vendor_reddit floor) over google_news and vendor_reddit
+    rows its own body called "not officially verified"."""
+    monkeypatch.setattr(marag, "pause", lambda *a, **k: None)
+    monkeypatch.setattr(marag, "call_llama", lambda *a, **k: None)
+    row = {"title": "Linux updates today", "detail": "", "subreddit": "linux",
+           "sentiment": "Neutral", "url": "u1"}
+    community = [dict(row, source="vendor_reddit"), dict(row, source="google_news", url="u2")]
+    answer = marag.EvaluatorAgent().run(community, "Any critical Linux updates today?")["answer"]
+    assert "VERIFIED" not in answer and "Confidence: HIGH" not in answer
+    official = [dict(row, source="vendor_releases", url="u3")]
+    answer = marag.EvaluatorAgent().run(official, "Any critical Linux updates today?")["answer"]
+    assert "✅ VERIFIED" in answer
 
 
 # ---- the injection screen covers the retriever, not just the app ------------

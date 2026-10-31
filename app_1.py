@@ -608,7 +608,15 @@ def _subject_terms(g) -> list:
     names = {v.name.lower() for v in (g.vendors or ())}
     return [t for t in (g.terms or ())
             if len(t) > 3 and t.lower() not in names
-            and t.lower() not in marag.LLM_GENERIC_TERMS]
+            and t.lower() not in marag.LLM_GENERIC_TERMS
+            and t.lower() not in _SEVERITY_WORDS]
+
+
+# Words that say how bad an update is, not what it is about. "critical" passed
+# the subject test on a Windows/Nobara boot-repair thread through its pasted
+# SMART report ("critical warning: 0x00").
+# ponytail: hand list; widen it when another qualifier lets a thread through.
+_SEVERITY_WORDS = {"critical", "important", "major", "urgent", "serious", "severe"}
 
 
 def _release_rows(docs: list) -> list:
@@ -1043,17 +1051,23 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # comment is the community's answer to *any* software question, and it is
     # what the presenter now leads the answer with. The tally below stays
     # gated -- counting stances only makes sense on a yes/no question.
-    if thread is None:
+    subject = _subject_terms(g)
+    if thread is None and subject:
         # Scoped by the same subject filter the community pool gets, and for
         # the reason its docstring gives: a product match says the row is about
         # the right product, not the right subject. The thread is quoted at the
         # top of the answer, so an off-subject one is the most visible wrong
         # citation the app can make.
+        #
+        # No subject word, no search: with nothing to check the winner against,
+        # "Any critical Linux updates today?" quoted a Windows/Nobara boot-repair
+        # thread at the top of the answer, because it was the best BM25 row
+        # among threads that name Linux.
         thread = yesno.find_thread(
             query,
             scope=lambda rows: vendor.filter_community(rows, g.vendors,
                                                        terms=g.terms),
-            must_mention=_subject_terms(g))
+            must_mention=subject)
     if thread is not None:
         results["thread"] = thread
         results["top_comment"] = yesno.top_comment(thread)
@@ -1221,7 +1235,7 @@ def _answer_line(results: dict, text: str) -> str:
     return _one_line(body) if body.strip() else ""
 
 
-def render_answer(presented, *, key: str = "") -> None:
+def render_answer(presented, *, key: str = "", lead: str = "") -> None:
     """The answer, then the findings, then the sources split by where they came from.
 
     One block, used by both arms, so the two columns cannot drift apart. The
@@ -1229,9 +1243,16 @@ def render_answer(presented, *, key: str = "") -> None:
     findings are for one who wants the specifics; the tabs are for one who
     arrived asking only what the community -- or only what the release notes --
     actually said, and who otherwise had to read all of it to find out.
+
+    `lead` is a verdict sentence already shown above (see `_answer_line`); it is
+    stripped from the headline so the answer does not say it twice.
     """
     head, items = answer_agent.split_summary(presented.text)
-    st.success(_CITE.sub("", head) if head else presented.text)
+    head = _CITE.sub("", head) if head else presented.text
+    if lead and head.startswith(lead):
+        head = head[len(lead):].strip()
+    if head:
+        st.success(head)
 
     if items:
         with st.expander(f"What was found ({len(items)})", expanded=True):
@@ -2313,7 +2334,8 @@ elif run_btn and query and compare_mode:
         # which is the difference the column is there to show.
         _decision_block(results, details=False)
         if show_details:
-            render_answer(presented, key="cmp")
+            render_answer(presented, key="cmp",
+                          lead=answer_agent.verdict_lead(results.get("decision")))
         else:
             line = _answer_line(results, presented.text)
             if line:

@@ -56,6 +56,9 @@ def manager(negative_rounds, cap=None):
     m = marag.ManagerAgent()
     m.rewriter, m.retriever = FakeRewriter(), FakeRetriever()
     m.evaluator = FakeEvaluator(negative_rounds)
+    m.planner = lambda q: {"planner": "stub", "thinking": "",
+                           "detected_vendor": "", "temporal_anchor": "",
+                           "search_strategy": [q], "expected_sources": []}
     if cap is not None:
         m.MAX_ROUNDS = cap
     return m

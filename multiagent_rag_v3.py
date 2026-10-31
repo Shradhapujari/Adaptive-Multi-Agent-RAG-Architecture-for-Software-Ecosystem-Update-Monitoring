@@ -1911,8 +1911,16 @@ class EvaluatorAgent:
         # dataset". Naming the one local case instead cannot rot that way.
         LOCAL_SOURCES = ['local']
         has_live     = any(s not in LOCAL_SOURCES for s in verified_src)
-        confidence   = "HIGH" if quality >= 0.5 else "MEDIUM" if quality >= 0.3 else "LOW"
-        verified_tag = "✅ VERIFIED from live releasetrain.io APIs" if has_live else "⚠️  From local dataset — may not reflect today's data"
+        # Live is not verified: an answer built only from Reddit and Google News
+        # came off live APIs and still said "VERIFIED ... Confidence: HIGH" above
+        # a body listing those same rows as "not officially verified". VERIFIED
+        # needs a Tier-1 (release/advisory) row; HIGH needs one too, and a score
+        # above the 0.50 source floors, which are fetched-something, not measured.
+        confidence   = ("HIGH" if quality > 0.5 and tier1_hits
+                        else "MEDIUM" if quality >= 0.3 else "LOW")
+        verified_tag = ("✅ VERIFIED from live releasetrain.io APIs" if tier1_hits
+                        else "🟡 Live community sources only — not officially verified" if has_live
+                        else "⚠️  From local dataset — may not reflect today's data")
 
         lines = []
         lines.append(f'Query: "{original_query}"')
@@ -2129,6 +2137,76 @@ Answer:"""
 # MANAGER AGENT — ORCHESTRATOR
 # ─────────────────────────────────────────────────────────────
 
+PLAN_SOURCES = ("release_notes", "security_advisories", "community_discussions")
+_INTENT_SOURCES = {"release": ("release_notes",),
+                   "security": ("security_advisories",),
+                   "opinion": ("community_discussions",)}
+
+
+def plan_query(query: str) -> dict:
+    """The Manager's structured plan: vendor, time anchor, keywords, sources.
+
+    The LLM writes the plan, but three fields are not left to it. The time
+    anchor comes from `temporal` whenever the question has a relative term --
+    date arithmetic is what a model gets wrong when its idea of today differs
+    from the host's. The vendor comes from `extract_vendor` when it finds one,
+    because that is what the Retriever will actually search. And the user's
+    exact wording always leads `search_strategy`: replacing it with the
+    expansion is the defect that once cost the multi-agent arm 0.62 nDCG@3.
+    Ollama down or bad JSON degrades to the same rules, never to an error.
+    """
+    import intent as _intent
+    import temporal as _temporal
+    today = _temporal.now().date()
+    # One f-string, doubled braces for the JSON: the query is user text and a
+    # .format() pass would read its braces as slots (see QueryRewriterAgent).
+    prompt = f"""You are the Orchestrator/Manager Agent for the Software Ecosystem Multi-Agent RAG system. Your job is to analyze the user's question, anchor it in time, and plan the retrieval strategy.
+
+User Question: {query}
+Current System Date: {today.isoformat()}
+
+You must strictly execute your planning using this rigid JSON format. Do not write any conversational preamble or text outside of this JSON block:
+
+{{
+  "thinking": "Analyze if the question refers to an existing release, a future version, a known CVE, or a community bug. Identify the specific vendor (e.g., Apple, Google, Microsoft).",
+  "detected_vendor": "String (e.g., 'Apple')",
+  "temporal_anchor": "String (Convert relative terms like 'today' or 'last week' into an absolute date constraint relative to the current system date)",
+  "search_strategy": "List the explicit keywords needed. CRITICAL: You must include the user's exact wording alongside any expanded vendor terms.",
+  "expected_sources": ["release_notes", "security_advisories", "community_discussions"]
+}}"""
+    reply = call_llama(prompt)
+    plan = {}
+    m = re.search(r"\{.*\}", reply or "", re.S)
+    if m:
+        try:
+            plan = json.loads(m.group(0))
+        except ValueError:
+            pass
+    if not isinstance(plan, dict):
+        plan = {}
+    plan["planner"] = "llama3.1" if plan else "rule-based fallback"
+
+    res = _temporal.resolve_temporal(query, now=today)
+    if res.changed or not plan.get("temporal_anchor"):
+        plan["temporal_anchor"] = (res.describe() if res.changed
+                                   else f"none — as of {today.isoformat()}")
+    vendors = extract_vendor(query)
+    if vendors or not plan.get("detected_vendor"):
+        plan["detected_vendor"] = ", ".join(vendors) or "unknown"
+
+    terms = plan.get("search_strategy") or []
+    if isinstance(terms, str):
+        terms = terms.split(",")
+    terms = [str(t).strip() for t in terms if str(t).strip()]
+    plan["search_strategy"] = [query] + [t for t in terms if t != query]
+
+    sources = [s for s in plan.get("expected_sources") or [] if s in PLAN_SOURCES]
+    plan["expected_sources"] = sources or list(
+        _INTENT_SOURCES.get(_intent.classify(query).label, PLAN_SOURCES))
+    plan.setdefault("thinking", "")
+    return plan
+
+
 def plan_rounds(query: str, ceiling: int = None) -> int:
     """How many retrieve-evaluate rounds this question is worth.
 
@@ -2212,11 +2290,19 @@ class ManagerAgent:
         self.rewriter  = QueryRewriterAgent()
         self.retriever = RetrieverAgent()
         self.evaluator = EvaluatorAgent()
+        self.planner   = plan_query
 
     def run(self, query: str) -> str:
         print(f"\n  {self.name}")
         bar()
-        print(f"  Think & Plan:")
+        plan = self.planner(query)
+        print(f"  Think & Plan ({plan['planner']}):")
+        if plan["thinking"]:
+            print(f"    Thinking : {str(plan['thinking'])[:160]}")
+        print(f"    Vendor   : {plan['detected_vendor']}")
+        print(f"    Time     : {plan['temporal_anchor']}")
+        print(f"    Keywords : {' | '.join(plan['search_strategy'])[:160]}")
+        print(f"    Sources  : {', '.join(plan['expected_sources'])}")
         print(f"    Step 1 → delegate to Query Rewriter Agent  (Llama 3.1)")
         print(f"    Step 2 → delegate to Retriever Agent")
         print(f"    Step 3 → delegate to Evaluator Agent (RLAIF)")
