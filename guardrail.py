@@ -138,6 +138,7 @@ def _named_versions(text: str) -> List[Tuple[str, str]]:
 
 
 _CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
+_WORD_RE = re.compile(r"[A-Za-z]{2,}")
 
 
 def _asserts(text: str, question: str = "") -> bool:
@@ -178,6 +179,8 @@ def _asserts(text: str, question: str = "") -> bool:
 # refusal has to carry a citation, and it is read like a weak marker -- it
 # excuses the citation rule only when the sentence states nothing of its own.
 _DECLINE_RE = re.compile(
+    # answer_agent.NOT_FOUND, the presenter's prescribed refusal.
+    r"\bcannot find that information in my source data\b|"
     r"\bno\s+(?:\w+\s+){0,2}sources?\b[^.\n]{0,40}"
     r"\b(?:mention|state|say|report|cover|address|answer|list|contain|show|indicate)"
     r"|\bnone of the (?:\w+\s+){0,2}(?:sources?|documents?|results?|records?|"
@@ -253,8 +256,13 @@ def _truncated(text: str) -> bool:
     a quoted Reddit comment is followed by the real citation that closes after
     it, and only a genuine cut leaves the final "[" with nothing after it.
     """
-    t = text or ""
-    return "[" in t and t.rfind("[") > t.rfind("]")
+    t = (text or "").rstrip()
+    # A cut in prose leaves no bracket at all: the Chrome answer of 2026-10-27
+    # stopped at "...via a crafted HTML" and passed. A finished answer ends on
+    # a full stop, a citation or a closing quote; of 89 stored answers only
+    # run #50, the known cut, did not.
+    return bool(t) and (("[" in t and t.rfind("[") > t.rfind("]"))
+                        or t[-1] not in ".!?])\"”'")
 
 
 _LIST_RE = re.compile(r"^\s*\d+[.)]\s+")
@@ -325,7 +333,7 @@ _SOURCE_NOUNS = (
 # How a label names its kind, for the harness's plain-dict evidence.
 _LABEL_KINDS = (("Release Notes", "release"), ("Security Advisory", "advisory"),
                 ("Security Discussion", "cve"), ("Community", "community"),
-                ("Top comment", "answer"))
+                ("Top comment", "answer"), ("Vendor page", "web"), ("Web", "web"))
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[\"“(]?[A-Z])|\n+")
 
 
@@ -434,7 +442,8 @@ def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
     # excuse it -- a truncated refusal is still truncated.
     if _truncated(text):
         return Verdict(False, [Violation(
-            "truncated", "answer ends mid-citation (unclosed '[')")])
+            "truncated", "answer ends mid-sentence or mid-citation — write fewer, "
+                         "shorter findings so the answer finishes")])
 
     # An unambiguous refusal phrase declines outright. A weak marker --
     # "unknown", "not found", "no information" -- declines only if the text
@@ -461,6 +470,30 @@ def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
     # or a label anyway is asserting, and the assertion is what gets checked.
     if not cited and not abstained:
         bad.append(Violation("uncited", f"{len(labels)} sources given, none cited"))
+    # Every numbered finding carries its own citation, as the prompt demands.
+    # One cited line used to license the rest: a Chrome answer cut by the
+    # token budget ended "9. Improper state validation in Skia in Google
+    # Chrome prior to 153.0.8010.52" -- no bracket left open, so `_truncated`
+    # saw nothing -- and shipped (live, 2026-10-27). An item that reports an
+    # absence asserts nothing and needs no source, same reading as below.
+    if not abstained:
+        for ln in (ln.strip() for ln in text.splitlines()):
+            if not _LIST_RE.match(ln):
+                continue
+            if not _CITE_RE.search(ln) and not _ITEM_NEGATION.search(ln):
+                bad.append(Violation(
+                    "uncited_item",
+                    f"“{ln[:60]}…” has no citation — end every "
+                    f"numbered line with its source's tag, or drop the line"))
+            # "1. CVE-2026-113344 [Security Advisory - ...]." names a record and
+            # says nothing about it: llama3.1's whole answer to "what bugs were
+            # fixed in Chrome" was ten of these (live, 2026-10-27).
+            # Two words is a finding ("kernel regressed"); fewer is an id.
+            elif len(_WORD_RE.findall(_CVE_RE.sub(" ", _CITE_RE.sub(" ", _LIST_RE.sub("", ln))))) < 2:
+                bad.append(Violation(
+                    "bare_item",
+                    f"“{ln[:60]}…” names a record but not what it is "
+                    f"— say what was wrong and in which component"))
     # Declining is allowed to point nowhere; answering is not allowed to point
     # at the source it was handed. The rule-based paragraph this falls back to
     # reports the release and quotes its note, which is the answer the model

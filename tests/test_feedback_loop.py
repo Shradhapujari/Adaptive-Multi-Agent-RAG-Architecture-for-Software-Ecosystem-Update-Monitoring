@@ -173,9 +173,16 @@ def test_a_brace_in_the_query_reaches_the_prompt_verbatim(monkeypatch, query, av
     monkeypatch.setattr(marag, "pause", lambda *a, **k: None)
     seen = {}
     monkeypatch.setattr(marag, "call_llama", lambda p: seen.setdefault("prompt", p) and "rewritten q")
-    assert marag.QueryRewriterAgent().run(query, avoid=avoid)["rewritten"] == "rewritten q"
+    assert marag.QueryRewriterAgent().run(query, avoid=avoid)["rewritten"] == f"{query} rewritten q"
     assert f'A user asked: "{query}"' in seen["prompt"]
     assert all(t in seen["prompt"] for t in avoid)
+
+
+def test_the_model_reply_is_appended_never_substituted(monkeypatch):
+    monkeypatch.setattr(marag, "pause", lambda *a, **k: None)
+    monkeypatch.setattr(marag, "call_llama", lambda p: '"Chrome release notes, CVE"')
+    out = marag.QueryRewriterAgent().run("chrome update")["rewritten"]
+    assert out == "chrome update Chrome release notes, CVE"
 
 
 # call_llama returns None only when Ollama is unreachable; an empty or blank
@@ -201,3 +208,21 @@ def test_retry_signal_fires_on_off_topic_docs_even_from_a_recognised_source(monk
     assert "negative" in r["signal"]    # so the Manager retries
     on_topic = [dict(off_topic[0], title="ubuntu kernel wifi broken after upgrade")]
     assert "positive" in ev.run(on_topic, "ubuntu kernel wifi broken after upgrade")["signal"]
+
+
+# ---- opt-in LLM judge: θ=0.30 on its score, term overlap when it fails ------
+
+@pytest.mark.parametrize("reply, want", [
+    ('{"score": 0.20, "cve_match": false}', "negative"),   # on-topic docs, judge says thin
+    ('noise {"thinking": "ok", "score": 0.85} noise', "positive"),
+    ('{"score": 7}', "positive"),                           # out of range -> term overlap
+    (None, "positive"),                                      # Ollama down -> term overlap
+])
+def test_llm_judge_drives_the_retry_signal(monkeypatch, reply, want):
+    monkeypatch.setattr(marag, "pause", lambda *a, **k: None)
+    monkeypatch.setattr(marag, "call_llama", lambda p, **k: reply)
+    monkeypatch.setattr(marag.EvaluatorAgent, "USE_LLM", True)
+    q = "ubuntu kernel wifi broken after upgrade"
+    docs = [{"source": "vendor_releases", "title": q, "detail": "",
+             "subreddit": "", "sentiment": "Neutral", "url": "u"}]
+    assert want in marag.EvaluatorAgent().run(docs, q)["signal"]

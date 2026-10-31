@@ -1124,6 +1124,18 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # it does not gate compute here (the fast path is a separate caller entry).
     results["route"] = dict(zip(("mode", "why"), graph.route_query(query)))
     results["web_fallback"] = None
+    # The vendor's own release and security pages, searched keylessly
+    # (DuckDuckGo) and kept only from trusted hosts. They feed the answer, not
+    # the verdict: `_decide_pool` does not read `web`, so a search result can
+    # never move a safety decision the feeds made.
+    results["web_search"] = None
+    if web_fallback:
+        t0 = time.time()
+        import websearch
+        web_docs, meta = websearch.trusted(query, g.vendor_names, limit=limit)
+        results["web"] = web_docs
+        results["web_search"] = meta
+        results["timing"]["web_search"] = round(time.time() - t0, 2)
     # GR-2 fires only when the local lake was ABSENT on a *healthy* fetch: the
     # documents came back and none was about the asked product. A degraded
     # fetch is the rewrite-retry case, not a web-search case, and a verdict that
@@ -1134,7 +1146,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         web_docs, meta = websearch.fallback(query, limit=limit)
         results["web_fallback"] = meta
         if web_docs:
-            results["web"] = web_docs
+            results["web"] = (results.get("web") or []) + web_docs
             wstate = graph.run(
                 query,
                 rewrite=lambda q, tried: results["grounded_query"] or q,
@@ -1614,9 +1626,16 @@ def _latest_release(rows: list, query: str, today=None) -> Optional[dict]:
                                     monitor.parse_ymd(r.get("date"))))
 
 
-def _tab_short(results: dict) -> None:
+# A question that asks for a fact -- "what bugs were fixed", "which versions" --
+# is answered with the fact. Leading with the verdict answered "What bugs were
+# fixed in Chrome recently?" with "🔴 Patch urgently" and named no bug.
+_ASKS_WHAT = re.compile(r"^\s*(?:what|which|list|show|tell me|how many|summari[sz]e)\b", re.I)
+
+
+def _tab_short(results: dict, presented=None) -> None:
     dec = results.get("decision")
     query = results.get("original_query", "")
+    st.caption(f"**Q:** {query}")
     # A version/date question is answered by the feed value, not the verdict;
     # the verdict stays underneath as a note, since an advisory is still news.
     rel = (_latest_release(results.get("releases") or [], query)
@@ -1630,6 +1649,18 @@ def _tab_short(results: dict) -> None:
             icon, label = _VERDICT_BADGE.get(dec["verdict"], ("⚪", dec["verdict"]))
             st.caption(f"Also: {icon} {label} — {dec.get('rationale') or ''}")
         return
+    line = _answer_line(results, presented.text) if presented is not None else ""
+    if _ASKS_WHAT.match(query) and presented is not None:
+        # Composed from the advisory rows when there are any, so the count is
+        # the Sources tab's; the model's headline otherwise.
+        line = answer_agent.summary_line(presented.evidence) or line
+    if line and _ASKS_WHAT.match(query):
+        st.markdown(f"### {line}")
+        if dec and dec.get("verdict") not in (None, "safe", "insufficient_evidence"):
+            icon, label = _VERDICT_BADGE.get(dec["verdict"], ("⚪", dec["verdict"]))
+            st.caption(f"Also: {icon} {label} — {dec.get('rationale') or ''}")
+        st.caption("Details, CVEs and patches: Detailed Answer tab.")
+        return
     if not dec:
         st.markdown("### ⚪ Not enough evidence")
         st.caption("No document in the pool is about the asked product, so the "
@@ -1638,6 +1669,8 @@ def _tab_short(results: dict) -> None:
     icon, label = _VERDICT_BADGE.get(dec["verdict"], ("⚪", dec["verdict"]))
     st.markdown(f"### {icon} {label}")
     st.write(dec.get("rationale") or "—")
+    if line:
+        st.markdown(f"**Answer:** {line}")
     meta = f"confidence {dec.get('confidence', 0):.2f} · {dec.get('stop_reason', '')}"
     if dec.get("source") == "web":
         meta += " · via web fallback (GR-2)"
@@ -1665,6 +1698,18 @@ def _tab_long(results: dict, presented) -> None:
     trace = xai.explain(results.get("original_query", ""), presented.text, presented.evidence)
     secs = round(sum((results.get("timing") or {}).values()), 1)
     st.caption(_answer_caption(presented, sum(s["used"] for s in trace.sources), secs))
+    # The detail behind the paragraph, as the sources state it: every CVE with
+    # what was wrong and the fixed-in version, the releases that ship the
+    # patches, the vendor's own pages.
+    tables = answer_agent.details(presented.evidence)
+    link = {"Link": st.column_config.LinkColumn("Link", display_text="open")}
+    for key, title in (("security", "Security fixes — CVE / advisory"),
+                       ("patches", "Patches — releases"),
+                       ("pages", "Vendor pages (trusted web, DuckDuckGo)")):
+        if tables[key]:
+            st.markdown(f"#### {title} ({len(tables[key])})")
+            st.dataframe(tables[key], hide_index=True, use_container_width=True,
+                         column_config=link)
 
 
 def _source_rows(results: dict, presented=None) -> list:
@@ -1738,6 +1783,11 @@ def _tab_loops(results: dict, query: str) -> None:
     st.markdown(f"**Graph path:** {' → '.join(path) if path else '— (abstained before gate)'}")
     st.markdown("**Attribute checked:** `" + graph.asks(query) + "` "
                 "(version · date · stance · cve)")
+    ws = results.get("web_search")
+    if ws is not None:
+        st.markdown(f"**Trusted web search (DuckDuckGo, no API key):** "
+                    + (f"{ws['n']} page(s) kept from {', '.join(ws['hosts'])}" if ws["backend"]
+                       else "not available — `pip install ddgs`"))
     wf = results.get("web_fallback")
     if wf is not None:
         st.markdown(f"**GR-2 web fallback:** {'fired, ' + str(wf['n']) + ' docs' if wf['used'] else 'not available'}")
@@ -1770,9 +1820,12 @@ def render_ask_view(result_limit: int, source: str) -> None:
         "<p style='margin:.3rem 0 0'>Ask whether an update is safe — grounded in live "
         "release notes, advisories and community reports.</p></div>",
         unsafe_allow_html=True)
-    q = st.text_input("Ask", key="ask_query", label_visibility="collapsed",
-                      placeholder='e.g. "Is it safe to update Firefox?"  ·  "Latest Node.js version?"')
-    asked = st.button("Ask", type="primary")
+    # A form, so Enter asks too; outside one, Enter only reran the page and
+    # cleared the previous answer.
+    with st.form("ask_form", border=False):
+        q = st.text_input("Ask", key="ask_query", label_visibility="collapsed",
+                          placeholder='e.g. "Is it safe to update Firefox?"  ·  "Latest Node.js version?"')
+        asked = st.form_submit_button("Ask", type="primary")
     if not q or not asked:
         st.caption("Type a question and press **Ask**.")
         return
@@ -1781,8 +1834,8 @@ def render_ask_view(result_limit: int, source: str) -> None:
     left, right = st.columns(2, gap="large")
     with left:
         t1, t2, t3, t4, t5 = st.tabs(
-            ["Short Answer", "Long Answer", "Sources", "Guardrails", "Feedback Loops"])
-        with t1: _tab_short(results)
+            ["Basic Answer", "Detailed Answer", "Sources", "Guardrails", "Feedback Loops"])
+        with t1: _tab_short(results, presented)
         with t2: _tab_long(results, presented)
         with t3: _tab_sources(results, presented)
         with t4: _tab_guardrails(results, presented)

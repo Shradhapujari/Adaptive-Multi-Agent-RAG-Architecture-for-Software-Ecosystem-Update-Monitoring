@@ -1488,31 +1488,35 @@ class QueryRewriterAgent:
 
         # One f-string, no .format() after it: the query is user text, and a
         # second formatting pass read its braces as slots -- "{django}" raised
-        # KeyError and "{tried}" was silently replaced. Same bytes otherwise,
-        # so recorded snapshots still replay.
-        prompt = f"""You are a search query rewriting expert for a software update research system.
+        # KeyError and "{tried}" was silently replaced. The prompt changed to
+        # additive expansion on 2026-10-27, so snapshots recorded before then
+        # no longer replay this call.
+        prompt = f"""You are an expert Query Expansion Agent for Software Ecosystems. Your job is to look at the user's original query and output software synonyms, technical vendor terminology, or related CVE/patch tracking keywords.
+
+CRITICAL RULE: Do not replace, rephrase, or substitute the user's original query. Your output must only contain auxiliary expansion terms that will be APPENDED alongside the original query.
+
+Output format constraints:
+- Provide your expanded terms strictly as a comma-separated list of raw words or brief phrases.
+- Do not output full sentences, preambles, or conversational filler.
+- Example Output: "iOS update, patch notes, security advisory, CVE, vulnerability"
 
 A user asked: "{query}"
-
-Your job:
-1. Identify if the query is vague or uses shorthand
-2. Rewrite it to match technical document vocabulary
-3. Make it specific enough to find relevant software update posts
-
-Rules:
-- Keep it under 20 words
-- Focus on: bug fixes, releases, changelogs, security patches, performance
-- Return ONLY the rewritten query, nothing else
 {tried}
-Rewritten query:"""
+Expansion terms:"""
 
-        rewritten = call_llama(prompt)
+        # The example in the prompt is quoted, so the model often quotes back.
+        terms = (call_llama(prompt) or "").strip(" \t\n\"'")
 
         # fallback if Ollama fails -- or answers with nothing: None is the only
         # failure call_llama reports, and a blank reply searched for "".
-        if rewritten is None or not rewritten.strip():
+        if not terms:
             print(f"  ⚠️  Ollama unavailable or returned nothing — using rule-based fallback")
-            rewritten = f"{query} {self.FALLBACK_TERMS[len(avoid) % len(self.FALLBACK_TERMS)]}"
+            terms = self.FALLBACK_TERMS[len(avoid) % len(self.FALLBACK_TERMS)]
+
+        # Additive by construction, not by instruction: the model is asked not
+        # to rephrase the query, but a substitution that drops the user's words
+        # is the defect this guards against, so the query is always kept here.
+        rewritten = f"{query} {terms}"
 
         # The model can ignore the instruction above and repeat itself. If it
         # does, the round is worthless as issued, so widen by rule instead --
@@ -1822,12 +1826,61 @@ class RetrieverAgent:
 # AGENT 3 — EVALUATOR (unchanged — RLAIF scoring)
 # ─────────────────────────────────────────────────────────────
 
+def judge_retrieval(query: str, docs: list):
+    """The Retrieval Evaluator's LLM verdict on the pool, or None.
+
+    None when Ollama is down or the reply is not the JSON asked for, with a
+    score in [0, 1] -- the caller then falls back to term overlap rather than
+    retrying (or not) on a number the model never gave.
+    """
+    context = "\n".join(
+        f"[{i}] ({d.get('source', '?')}) {d.get('title', '')} -- "
+        f"{str(d.get('detail', ''))[:300]}"
+        for i, d in enumerate(docs, 1)) or "(none)"
+    # One f-string, doubled braces for the JSON: the query is user text and a
+    # .format() pass would read its braces as slots (see QueryRewriterAgent).
+    prompt = f"""You are the Retrieval Evaluator Agent. Your task is to look at the user's original query and evaluate the raw quality of the documents pulled into the retrieval union.
+
+User Query: {query}
+Retrieved Documents:
+{context}
+
+Evaluate the documents strictly against the user query and output a final quality score between 0.0 and 1.0. Use the following internal scoring rubric:
+- 0.0 to 0.29: The documents completely miss the version number or vendor core issue.
+- 0.30 to 0.69: Partial match; contains relevant vendor community threads or release updates but lacks exact confirmation.
+- 0.70 to 1.00: Direct, high-fidelity match containing the specific version notes, CVE advisory, or active community problem.
+
+You must output your analysis in this exact JSON format:
+{{
+  "thinking": "Analyze if the context contains explicit mentions of the version number and features requested by the user.",
+  "release_notes_match": true/false,
+  "community_match": true/false,
+  "cve_match": true/false,
+  "score": 0.00
+}}"""
+    m = re.search(r"\{.*\}", call_llama(prompt) or "", re.S)
+    try:
+        out = json.loads(m.group(0))
+        score = float(out["score"])
+    except (AttributeError, ValueError, TypeError, KeyError):
+        return None
+    if not 0.0 <= score <= 1.0:          # also rejects NaN
+        return None
+    out["score"] = score
+    return out
+
+
 class EvaluatorAgent:
     name = "📊  Evaluator Agent"
 
     # Fraction of the question's terms the best retrieved document must
     # share, before any source floor, for the Manager not to retry.
     RETRY_THRESHOLD = float(os.environ.get("MARAG_RETRY_THRESHOLD", "0.15"))
+    # θ for the LLM judge's score: below the rubric's partial-match band, retry.
+    LLM_RETRY_THRESHOLD = float(os.environ.get("MARAG_LLM_RETRY_THRESHOLD", "0.30"))
+    # Opt-in: every published arm measured the deterministic score, and the
+    # judge adds an Ollama call per round.
+    USE_LLM = os.environ.get("MARAG_LLM_EVALUATOR") == "1"
 
     def run(self, docs: list, original_query: str) -> dict:
         print(f"\n  {self.name}")
@@ -1887,10 +1940,16 @@ class EvaluatorAgent:
         # Finding 12: min 0.300 over 500 questions against a 0.15 threshold).
         # `relevance` is the term-overlap score before any floor; `quality`
         # keeps the floors so the reported self_quality is unchanged.
-        signal = ("✅ positive" if relevance >= self.RETRY_THRESHOLD
-                  else "⚠️  negative — manager will retry")
+        judged = judge_retrieval(original_query, docs) if self.USE_LLM and docs else None
+        if judged:
+            ok = judged["score"] >= self.LLM_RETRY_THRESHOLD
+        else:
+            ok = relevance >= self.RETRY_THRESHOLD
+        signal = "✅ positive" if ok else "⚠️  negative — manager will retry"
 
         print(f"  Quality  : {quality:.2f} / 1.0")
+        if judged:
+            print(f"  LLM judge: {judged['score']:.2f} (θ={self.LLM_RETRY_THRESHOLD:.2f})")
         print(f"  RLAIF    : {signal}")
         pause()
 
@@ -2131,7 +2190,7 @@ Answer:"""
             src_str = ", ".join(verified_src)
             lines.append(f"  Data sourced from: {src_str} | releasetrain.io")
         return {"quality": quality, "relevance": relevance, "signal": signal,
-                "answer": "\n".join(lines)}
+                "llm_eval": judged, "answer": "\n".join(lines)}
 
 # ─────────────────────────────────────────────────────────────
 # MANAGER AGENT — ORCHESTRATOR

@@ -804,3 +804,18 @@ def test_one_label_names_one_source():
     posts = [{"title": t, "url": f"https://reddit.com/{t}", "subreddit": "linux"} for t in "ab"]
     ev = collect_evidence({"community": posts + [dict(posts[0])]})
     assert [e.label for e in ev] == ["Community - r/linux", "Community - r/linux #2"]
+
+
+def test_thinking_block_is_dropped_and_not_found_passes(monkeypatch):
+    _no_env(monkeypatch)
+    # Reasoning names a version no source has; it must not reach the guardrail.
+    stub = _StubClient("<thinking>Maybe 9.9.9 fixes it.</thinking>\n"
+                       + answer_agent.NOT_FOUND)
+    _patch_client(monkeypatch, stub)
+    out = present_answer("q", RESULTS, model_spec="stub:model")
+    assert out.mode == "llm", out.note
+    assert out.text == answer_agent.NOT_FOUND
+    assert "<thinking>" in stub.prompt
+    # Cut off mid-reasoning: no answer, so the rule-composed paragraph.
+    _patch_client(monkeypatch, _StubClient("<thinking>The sources say"))
+    assert present_answer("q", RESULTS, model_spec="stub:model").mode == "rule-based"

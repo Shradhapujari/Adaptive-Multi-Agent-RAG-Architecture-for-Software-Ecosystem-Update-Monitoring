@@ -110,6 +110,10 @@ def test_agreement_on_an_absent_metric_reports_nothing():
 
 # ── context reconstruction ───────────────────────────────────────────────
 
-def test_contexts_prefer_stored_docs_and_fall_back_to_doc_ids():
+def test_contexts_prefer_stored_docs_then_the_index_and_never_fake_text():
     assert J.contexts_of({"docs": [{"title": "T", "text": "X"}]}) == ["T: X"]
-    assert J.contexts_of({"doc_ids": ["abc"]}) == ["doc:abc"]
+    # An id is not evidence: the second judge must read what the first read.
+    assert J.contexts_of({"doc_ids": ["abc"]}) is None
+    idx = {"abc": {"title": "T", "text": "X"}}
+    assert J.contexts_of({"doc_ids": ["abc"]}, idx) == ["T: X"]
+    assert J.contexts_of({"doc_ids": ["abc", "zzz"]}, idx) is None
