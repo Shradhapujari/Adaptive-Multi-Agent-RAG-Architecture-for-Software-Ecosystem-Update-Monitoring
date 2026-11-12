@@ -93,6 +93,10 @@ _UNSEARCHABLE = frozenset({
     "you", "your", "update", "updates", "release", "releases", "security",
     "patch", "patches", "bug", "bugs", "fix", "fixes", "issue", "issues",
     "software", "vulnerability", "vulnerabilities", "cve", "recent", "support",
+    # Catalog entries that are everyday words: "weather in Paris" grounded to a
+    # product called weather, "is it safe" to one called safe.
+    # ponytail: a stopword list; a word-frequency check if more keep turning up.
+    "weather", "safe", "community",
 })
 
 # Query words that name a product without being the catalog's spelling of it.

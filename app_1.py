@@ -1716,6 +1716,21 @@ def _md_escape(text: str) -> str:
     return re.sub(r"([\\`*_{}\[\]()<>#!|~$])", r"\\\1", text or "")
 
 
+def _off_topic_note(query: str) -> Optional[str]:
+    """Why the console declines `query` before fetching anything, or None.
+
+    `Grounding.needs_clarification` -- no product and no confident software
+    intent -- was already computed and only ever printed as a warning above an
+    answer drawn from an unscoped search. The console stops there instead.
+    """
+    if not ground(query).needs_clarification:
+        return None
+    name = vendor.suggest(query)
+    return ("This doesn't look like a question about a software update, so I "
+            "haven't searched." + (f" Did you mean **{vendor.pretty(name)}**?" if name else
+            " Name a product, e.g. “Is it safe to update Firefox?”"))
+
+
 def _tab_short(results: dict, presented=None) -> None:
     dec = results.get("decision")
     query = results.get("original_query", "")
@@ -2021,6 +2036,13 @@ def render_ask_view(result_limit: int, source: str) -> None:
     if not q or not asked:
         with st.expander("How it works"):
             _render_mermaid(_pipeline_mermaid())
+        return
+    note = _off_topic_note(q)
+    if note:
+        with st.container(border=True):
+            st.caption(f"**Q:** {_md_escape(q)}")
+            st.markdown("### ⚪ Not a software update question")
+            st.markdown(note)
         return
     results, presented = ask(q, limit=result_limit, source=source)
 
