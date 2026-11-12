@@ -275,3 +275,32 @@ def test_doc_kind_matches_the_names_citable_kinds_uses():
              doc_kind({"source": "vendor_reddit", "url": "https://reddit.com/x"}),
              doc_kind({"source": "cve", "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-1"})}
     assert kinds <= set(intent.citable_kinds(intent.classify("hello")))
+
+
+@pytest.mark.parametrize("product,expected", [
+    ("Edge", "edge"), ("iOS", "ios"), ("Chrome", "chrome"), ("Node.js", "node.js"),
+    ("Windows", "windows"), ("macOS", "macos"), ("Firefox", "firefox"),
+])
+def test_is_it_safe_names_only_the_product(tmp_path, product, expected):
+    # /api/c/names has a real "safe" entry, so every "is it safe to update X?"
+    # grounded to [X, "safe"] -- two vendors, which kept it off the
+    # single-product fast path and put "safe" in decide()'s vendor tokens.
+    from grounding import ground
+    cache = tmp_path / "names.json"
+    cache.write_text('["safe", "edge", "ios", "chrome", "node.js", "windows", '
+                     '"macos", "firefox"]')
+    catalog = load_catalog(path=str(cache), fetch=False)
+    assert ground(f"Is it safe to update {product}?",
+                  catalog=catalog).vendor_names == [expected]
+
+
+def test_generic_catalogue_words_do_not_crowd_out_the_product(tmp_path):
+    # A real Reddit question from the decision sheet: "weather", "settings" and
+    # "new tab page" are catalogue rows, and they were detected instead of
+    # Firefox, so the real Firefox documents stopped counting as on-topic.
+    cache = tmp_path / "names.json"
+    cache.write_text('["firefox", "weather", "settings", "new tab page", "server", "pro"]')
+    catalog = load_catalog(path=str(cache), fetch=False)
+    q = ("Firefox 151: Weather from New Tab Page disappeared and there's no "
+         "option in settings anymore. How to get it back?")
+    assert [v.name for v in detect_vendors(q, catalog)] == ["firefox"]
