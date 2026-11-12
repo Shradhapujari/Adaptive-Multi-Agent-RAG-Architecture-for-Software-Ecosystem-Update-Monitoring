@@ -35,6 +35,7 @@ from contextlib import nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from typing import Dict, List, Optional
 
 from temporal import resolve_temporal, matches_window
@@ -159,6 +160,30 @@ def _rule_based_rewrite(query: str) -> str:
     return rewritten
 
 
+# Temperature 0, so the same prompt earns the same rewrite: ask once per
+# process. An exception is not cached, so an Ollama that comes back is used.
+# ponytail: in-process only; a disk cache if restarts make the rewrite the cost.
+@lru_cache(maxsize=512)
+def _llama_rewrite(prompt: str) -> str:
+    payload = json.dumps({
+        "model": "llama3.1",
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": 0}
+    }).encode()
+    req = urllib.request.Request(
+        OLLAMA_API,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=20) as r:
+        out = json.loads(r.read()).get("response", "").strip()
+    # Llama wraps the rewrite in quotes often enough that the quotes end up in
+    # the `q` parameter; strip them rather than search for them.
+    return out.strip(" \"'").strip()
+
+
 def rewrite_query(query: str) -> Rewrite:
     """Rewrite for retrieval with Llama 3.1, or by rule, saying which."""
     prompt = rules_block() + f"""You are a software update search expert.
@@ -167,25 +192,8 @@ Focus on: bug fixes, security patches, release notes, CVE vulnerabilities, versi
 Query: "{query}"
 Return ONLY the rewritten query in under 15 words, nothing else:"""
 
-    payload = json.dumps({
-        "model": "llama3.1",
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0}
-    }).encode()
-
     try:
-        req = urllib.request.Request(
-            OLLAMA_API,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=20) as r:
-            out = json.loads(r.read()).get("response", "").strip()
-            # Llama wraps the rewrite in quotes often enough that the quotes
-            # end up in the `q` parameter; strip them rather than search for them.
-            out = out.strip(" \"'").strip()
+        out = _llama_rewrite(prompt)
         if out:
             return Rewrite(out, mode="llm", model="llama3.1")
         return Rewrite(_rule_based_rewrite(query), mode="rule-based",
@@ -382,6 +390,28 @@ def run_single_agent(query: str, top_k: int = 4) -> dict:
 
 # ── AGENT 3: RELEASE NOTES AGENT ─────────────────────────
 
+def _one_row_per_release(rows: list) -> list:
+    """Release rows with the feed's per-commit rows collapsed.
+
+    For Linux the feed files every kernel commit and merge as a "version": a
+    row linking `/commit/<sha>` is labelled `7.41.0` (from "7.4-rc1"), and the
+    commits made on the v7.3 tag all link its tarball as `7.3.0`. Five of those
+    filled the release panel as five identically titled "releases". Commit rows
+    are dropped, then the first (newest) row is kept per (product, version).
+
+    Never empties the list: a feed that is all commits keeps one row per version
+    rather than showing no release at all.
+    """
+    tags = [v for v in rows if "/commit/" not in (v.get("versionUrl") or "")]
+    seen, out = set(), []
+    for v in tags or rows:
+        key = (v.get("versionProductName"), v.get("versionNumber"))
+        if key not in seen:
+            seen.add(key)
+            out.append(v)
+    return out
+
+
 def fetch_release_notes(query: str, limit: int = 5) -> list:
     """Fetches live software release notes from releasetrain.io."""
     data = _get_json(RELEASES_API, {"q": query, "limit": limit},
@@ -401,7 +431,7 @@ def fetch_release_notes(query: str, limit: int = 5) -> list:
         # decides which may be cited -- a decision that needs both kinds
         # present to be a decision.
         advisories = [v for v in versions if v.get("isCve")]
-        releases = [v for v in versions if not v.get("isCve")]
+        releases = _one_row_per_release([v for v in versions if not v.get("isCve")])
         versions = releases[:limit] + advisories[:limit]
         return [{
             # `rerank.doc_text()` reads title/detail/text, not `notes`, so a row
@@ -578,7 +608,15 @@ def _subject_terms(g) -> list:
     names = {v.name.lower() for v in (g.vendors or ())}
     return [t for t in (g.terms or ())
             if len(t) > 3 and t.lower() not in names
-            and t.lower() not in marag.LLM_GENERIC_TERMS]
+            and t.lower() not in marag.LLM_GENERIC_TERMS
+            and t.lower() not in _SEVERITY_WORDS]
+
+
+# Words that say how bad an update is, not what it is about. "critical" passed
+# the subject test on a Windows/Nobara boot-repair thread through its pasted
+# SMART report ("critical warning: 0x00").
+# ponytail: hand list; widen it when another qualifier lets a thread through.
+_SEVERITY_WORDS = {"critical", "important", "major", "urgent", "serious", "severe"}
 
 
 def _release_rows(docs: list) -> list:
@@ -627,7 +665,7 @@ def _decide_pool(results: dict) -> list:
 
     Advisory rows are exempt. Applying the ruling to them too produced the
     false green of 2026-10-14: "Is it safe to update Firefox right now?"
-    matches intent.py's opinion cue `is it (good|bad|safe|stable|worth)`, whose
+    matched intent.py's old opinion cue `is it (good|bad|safe|stable|worth)`, whose
     citable kinds are ("community", "release"), so every advisory was dropped
     here and the verdict came back `safe` -- rationale "no advisory" -- with 11
     Firefox advisories in the feed, one of them 8 days old. The same pool with
@@ -891,8 +929,16 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         results["cve"] = union_fetch(cve_fetch, phrasings, limit, temporal)
         # Already fetched and screened in step 2. The app's own CVE feed is
         # Reddit; these are the advisory catalogues (CISA KEV, CIRCL) the
-        # terminal reads and this app had no fetcher for.
-        results["cve"] += shared["cve"]
+        # terminal reads and this app had no fetcher for. Deduped on url as
+        # step 3 does: the same KEV entry arriving twice made the verdict say
+        # "10 advisory document(s)" over 8 distinct ones (2026-10-27).
+        _have = {u for u in ((r.get("url") or "").rstrip("/").lower()
+                             for r in results["cve"]) if u}
+        for r in shared["cve"]:
+            u = (r.get("url") or "").rstrip("/").lower()
+            if not u or u not in _have:
+                _have.add(u)
+                results["cve"].append(r)
         results["timing"]["cve"] = round(time.time()-t0, 1)
 
     # Step 4b — Vendor and record-type filter
@@ -1005,17 +1051,23 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # comment is the community's answer to *any* software question, and it is
     # what the presenter now leads the answer with. The tally below stays
     # gated -- counting stances only makes sense on a yes/no question.
-    if thread is None:
+    subject = _subject_terms(g)
+    if thread is None and subject:
         # Scoped by the same subject filter the community pool gets, and for
         # the reason its docstring gives: a product match says the row is about
         # the right product, not the right subject. The thread is quoted at the
         # top of the answer, so an off-subject one is the most visible wrong
         # citation the app can make.
+        #
+        # No subject word, no search: with nothing to check the winner against,
+        # "Any critical Linux updates today?" quoted a Windows/Nobara boot-repair
+        # thread at the top of the answer, because it was the best BM25 row
+        # among threads that name Linux.
         thread = yesno.find_thread(
             query,
             scope=lambda rows: vendor.filter_community(rows, g.vendors,
                                                        terms=g.terms),
-            must_mention=_subject_terms(g))
+            must_mention=subject)
     if thread is not None:
         results["thread"] = thread
         results["top_comment"] = yesno.top_comment(thread)
@@ -1072,6 +1124,18 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # it does not gate compute here (the fast path is a separate caller entry).
     results["route"] = dict(zip(("mode", "why"), graph.route_query(query)))
     results["web_fallback"] = None
+    # The vendor's own release and security pages, searched keylessly
+    # (DuckDuckGo) and kept only from trusted hosts. They feed the answer, not
+    # the verdict: `_decide_pool` does not read `web`, so a search result can
+    # never move a safety decision the feeds made.
+    results["web_search"] = None
+    if web_fallback:
+        t0 = time.time()
+        import websearch
+        web_docs, meta = websearch.trusted(query, g.vendor_names, limit=limit)
+        results["web"] = web_docs
+        results["web_search"] = meta
+        results["timing"]["web_search"] = round(time.time() - t0, 2)
     # GR-2 fires only when the local lake was ABSENT on a *healthy* fetch: the
     # documents came back and none was about the asked product. A degraded
     # fetch is the rewrite-retry case, not a web-search case, and a verdict that
@@ -1082,7 +1146,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         web_docs, meta = websearch.fallback(query, limit=limit)
         results["web_fallback"] = meta
         if web_docs:
-            results["web"] = web_docs
+            results["web"] = (results.get("web") or []) + web_docs
             wstate = graph.run(
                 query,
                 rewrite=lambda q, tried: results["grounded_query"] or q,
@@ -1100,6 +1164,55 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
                        "source": "web", "citable_kinds": sorted(g.citable_kinds)})
         results["timing"]["web_fallback"] = round(time.time() - t0, 2)
 
+    return results
+
+
+def run_fast(query: str, limit: int = 5, source: str = "agent") -> Optional[dict]:
+    """GR-1 fast path: a single-product version/date lookup, answered from one
+    release-feed fetch. No rewriter, no community or CVE feed, no model.
+
+    Returns None whenever the question needs the full pipeline -- grounding
+    names no product or several, the feed has no shipped release to read, or
+    the graph does not reach `answer` -- so the caller escalates instead of
+    this path guessing. The advisory rows /api/v/ returns in the same response
+    still go to `decide.gate`, so a live advisory is not hidden by going fast.
+    """
+    t0 = time.time()
+    g = ground(query)
+    if len(g.vendor_names) != 1:
+        return None
+    errors = _reset_fetch_errors()
+    db = get_store()
+    if source == "store" and db is not None:
+        fetch = lambda q, limit=5, **kw: db.search(q, pool="release", limit=limit)  # noqa: E731
+    else:
+        fetch = caching_fetch(None if source == "lake" else db, "release",
+                              fetch_release_notes)
+    rows = fetch(g.vendor_names[0], limit=max(limit * 10, 50)) or []
+    rows = vendor.filter_by_vendor(rows, g.vendors) or rows
+    shipped = [r for r in rows if not r.get("is_cve") and vendor.is_release_record(r)]
+    advisories = [r for r in rows if r not in shipped]
+    if _latest_release(shipped, query) is None:
+        return None
+    results = {"source": source, "original_query": query, "grounded_query": g.rewritten,
+               "grounding": g, "temporal": g.temporal, "rewrite": None, "rewritten_query": "",
+               "community": [], "cve": [], "errors": errors, "screened": [],
+               "releases": sorted(shipped, key=lambda r: monitor.version_key(r.get("version")),
+                                  reverse=True)[:limit],
+               "decision_advisories": advisories, "advisories_excluded": len(advisories),
+               "timing": {}, "web_fallback": None}
+    pool = _decide_pool(results)
+    state = graph.fast_run(query, retrieve=lambda q: (pool, bool(errors) and not rows),
+                           gate=decide.gate(g.vendor_names))
+    if state.trace[-1].node != "answer":
+        return None
+    results["decision"] = (decide.Decision.from_dict(state.payload).as_dict()
+                           | {"evidence_class": state.evidence.value,
+                              "path": [st.node for st in state.trace],
+                              "pool_size": len(pool), "shown": len(results["releases"]),
+                              "citable_kinds": sorted(g.citable_kinds)})
+    results["route"] = {"mode": "fast", "why": graph.route_query(query)[1]}
+    results["timing"]["fast"] = round(time.time() - t0, 2)
     return results
 
 _CITE = re.compile(r"\s*\[[^\]]*\]")
@@ -1134,7 +1247,7 @@ def _answer_line(results: dict, text: str) -> str:
     return _one_line(body) if body.strip() else ""
 
 
-def render_answer(presented, *, key: str = "") -> None:
+def render_answer(presented, *, key: str = "", lead: str = "") -> None:
     """The answer, then the findings, then the sources split by where they came from.
 
     One block, used by both arms, so the two columns cannot drift apart. The
@@ -1142,9 +1255,16 @@ def render_answer(presented, *, key: str = "") -> None:
     findings are for one who wants the specifics; the tabs are for one who
     arrived asking only what the community -- or only what the release notes --
     actually said, and who otherwise had to read all of it to find out.
+
+    `lead` is a verdict sentence already shown above (see `_answer_line`); it is
+    stripped from the headline so the answer does not say it twice.
     """
     head, items = answer_agent.split_summary(presented.text)
-    st.success(_CITE.sub("", head) if head else presented.text)
+    head = _CITE.sub("", head) if head else presented.text
+    if lead and head.startswith(lead):
+        head = head[len(lead):].strip()
+    if head:
+        st.success(head)
 
     if items:
         with st.expander(f"What was found ({len(items)})", expanded=True):
@@ -1506,9 +1626,16 @@ def _latest_release(rows: list, query: str, today=None) -> Optional[dict]:
                                     monitor.parse_ymd(r.get("date"))))
 
 
-def _tab_short(results: dict) -> None:
+# A question that asks for a fact -- "what bugs were fixed", "which versions" --
+# is answered with the fact. Leading with the verdict answered "What bugs were
+# fixed in Chrome recently?" with "🔴 Patch urgently" and named no bug.
+_ASKS_WHAT = re.compile(r"^\s*(?:what|which|list|show|tell me|how many|summari[sz]e)\b", re.I)
+
+
+def _tab_short(results: dict, presented=None) -> None:
     dec = results.get("decision")
     query = results.get("original_query", "")
+    st.caption(f"**Q:** {query}")
     # A version/date question is answered by the feed value, not the verdict;
     # the verdict stays underneath as a note, since an advisory is still news.
     rel = (_latest_release(results.get("releases") or [], query)
@@ -1522,6 +1649,18 @@ def _tab_short(results: dict) -> None:
             icon, label = _VERDICT_BADGE.get(dec["verdict"], ("⚪", dec["verdict"]))
             st.caption(f"Also: {icon} {label} — {dec.get('rationale') or ''}")
         return
+    line = _answer_line(results, presented.text) if presented is not None else ""
+    if _ASKS_WHAT.match(query) and presented is not None:
+        # Composed from the advisory rows when there are any, so the count is
+        # the Sources tab's; the model's headline otherwise.
+        line = answer_agent.summary_line(presented.evidence) or line
+    if line and _ASKS_WHAT.match(query):
+        st.markdown(f"### {line}")
+        if dec and dec.get("verdict") not in (None, "safe", "insufficient_evidence"):
+            icon, label = _VERDICT_BADGE.get(dec["verdict"], ("⚪", dec["verdict"]))
+            st.caption(f"Also: {icon} {label} — {dec.get('rationale') or ''}")
+        st.caption("Details, CVEs and patches: Detailed Answer tab.")
+        return
     if not dec:
         st.markdown("### ⚪ Not enough evidence")
         st.caption("No document in the pool is about the asked product, so the "
@@ -1530,26 +1669,58 @@ def _tab_short(results: dict) -> None:
     icon, label = _VERDICT_BADGE.get(dec["verdict"], ("⚪", dec["verdict"]))
     st.markdown(f"### {icon} {label}")
     st.write(dec.get("rationale") or "—")
+    if line:
+        st.markdown(f"**Answer:** {line}")
     meta = f"confidence {dec.get('confidence', 0):.2f} · {dec.get('stop_reason', '')}"
     if dec.get("source") == "web":
         meta += " · via web fallback (GR-2)"
     st.caption(meta)
 
 
+def _answer_urls(results: dict, presented) -> set:
+    """URLs of the sources the presented paragraph actually cites."""
+    if presented is None:
+        return set()
+    trace = xai.explain(results.get("original_query", ""), presented.text, presented.evidence)
+    return {s["url"] for s in trace.sources if s["used"] and s["url"]}
+
+
 def _tab_long(results: dict, presented) -> None:
     lead = answer_agent.verdict_lead(results.get("decision"))
+    text = presented.text or ""
     if lead:
         st.info(lead)
-    st.write(presented.text or "No answer could be composed.")
-    st.caption(_answer_caption(presented, 0, results.get("timing", {})))
+        # present_answer prefixes the lead; shown once, in the box above.
+        text = text[len(lead):].strip() if text.startswith(lead) else text
+    st.write(text or "No answer could be composed.")
+    # Was a hardcoded 0 over a paragraph citing three sources, with the
+    # timing dict printed where the seconds go.
+    trace = xai.explain(results.get("original_query", ""), presented.text, presented.evidence)
+    secs = round(sum((results.get("timing") or {}).values()), 1)
+    st.caption(_answer_caption(presented, sum(s["used"] for s in trace.sources), secs))
+    # The detail behind the paragraph, as the sources state it: every CVE with
+    # what was wrong and the fixed-in version, the releases that ship the
+    # patches, the vendor's own pages.
+    tables = answer_agent.details(presented.evidence)
+    link = {"Link": st.column_config.LinkColumn("Link", display_text="open")}
+    for key, title in (("security", "Security fixes — CVE / advisory"),
+                       ("patches", "Patches — releases"),
+                       ("pages", "Vendor pages (trusted web, DuckDuckGo)")):
+        if tables[key]:
+            st.markdown(f"#### {title} ({len(tables[key])})")
+            st.dataframe(tables[key], hide_index=True, use_container_width=True,
+                         column_config=link)
 
 
-def _source_rows(results: dict) -> list:
+def _source_rows(results: dict, presented=None) -> list:
     """One row per document the run used, display pools and the advisories
     held back from display for the verdict alike. `id` is the doc_id the
-    console's cites list prints, so the two can be read against each other."""
+    console's cites list prints, so the two can be read against each other.
+    `Verdict` marks what the decision stands on, `Answer` what the paragraph
+    cites -- one column for both showed a paragraph's sources as uncited."""
     from eval_harness.generators import doc_id
     cited = set((results.get("decision") or {}).get("evidence_doc_ids") or [])
+    in_answer = _answer_urls(results, presented)
     rows = []
     for pool in ("releases", "cve", "decision_advisories", "community", "web"):
         for d in (results.get(pool) or []):
@@ -1563,6 +1734,7 @@ def _source_rows(results: dict) -> list:
                     "cve" if pool == "releases" and d.get("is_cve") else pool, "—"),
                 # narrow columns first: the title runs past a half-width column
                 "Verdict": "cited" if did in cited else "",
+                "Answer": "cited" if d.get("url") and d["url"] in in_answer else "",
                 "Version/CVE": ", ".join(list(d.get("versions", [])) + list(cves))[:40]
                                or (d.get("version") or d.get("versionNumber") or ""),
                 "Title": (d.get("title") or "")[:80],
@@ -1571,8 +1743,8 @@ def _source_rows(results: dict) -> list:
     return rows
 
 
-def _tab_sources(results: dict) -> None:
-    rows = _source_rows(results)
+def _tab_sources(results: dict, presented=None) -> None:
+    rows = _source_rows(results, presented)
     if rows:
         st.dataframe(rows, use_container_width=True, hide_index=True)
     else:
@@ -1611,11 +1783,35 @@ def _tab_loops(results: dict, query: str) -> None:
     st.markdown(f"**Graph path:** {' → '.join(path) if path else '— (abstained before gate)'}")
     st.markdown("**Attribute checked:** `" + graph.asks(query) + "` "
                 "(version · date · stance · cve)")
+    ws = results.get("web_search")
+    if ws is not None:
+        st.markdown(f"**Trusted web search (DuckDuckGo, no API key):** "
+                    + (f"{ws['n']} page(s) kept from {', '.join(ws['hosts'])}" if ws["backend"]
+                       else "not available — `pip install ddgs`"))
     wf = results.get("web_fallback")
     if wf is not None:
         st.markdown(f"**GR-2 web fallback:** {'fired, ' + str(wf['n']) + ' docs' if wf['used'] else 'not available'}")
     st.caption("The gate reads what the documents contain; ABSENT on a healthy "
                "fetch abstains, only a degraded fetch re-enters rewrite.")
+
+
+def ask(q: str, limit: int = 5, source: str = "agent"):
+    """(results, presented) for one console question. A fast-routed question
+    tries `run_fast` and escalates to the full pipeline when it returns None;
+    `results["route"]` says which path actually answered."""
+    route = dict(zip(("mode", "why"), graph.route_query(q)))
+    with st.spinner(f"{route['mode'].upper()} path — {route['why']}…"):
+        results = run_fast(q, limit=limit, source=source) if route["mode"] == "fast" else None
+        if results is not None:
+            presented = present_answer(q, results, model_spec="rule-based")
+            presented.note = "fast path — feed value, no model call"
+            return results, presented
+        results = run_pipeline(q, show_steps=False, limit=limit,
+                               source=source, web_fallback=True)
+        if route["mode"] == "fast":
+            route = {"mode": "full", "why": "fast path could not answer — escalated"}
+        results["route"] = route
+        return results, present_answer(results["original_query"], results)
 
 
 def render_ask_view(result_limit: int, source: str) -> None:
@@ -1624,24 +1820,24 @@ def render_ask_view(result_limit: int, source: str) -> None:
         "<p style='margin:.3rem 0 0'>Ask whether an update is safe — grounded in live "
         "release notes, advisories and community reports.</p></div>",
         unsafe_allow_html=True)
-    q = st.text_input("Ask", key="ask_query", label_visibility="collapsed",
-                      placeholder='e.g. "Is it safe to update Firefox?"  ·  "Latest Node.js version?"')
-    asked = st.button("Ask", type="primary")
+    # A form, so Enter asks too; outside one, Enter only reran the page and
+    # cleared the previous answer.
+    with st.form("ask_form", border=False):
+        q = st.text_input("Ask", key="ask_query", label_visibility="collapsed",
+                          placeholder='e.g. "Is it safe to update Firefox?"  ·  "Latest Node.js version?"')
+        asked = st.form_submit_button("Ask", type="primary")
     if not q or not asked:
         st.caption("Type a question and press **Ask**.")
         return
-    route = dict(zip(("mode", "why"), graph.route_query(q)))
-    with st.spinner(f"{route['mode'].upper()} path — {route['why']}…"):
-        results = run_pipeline(q, show_steps=False, limit=result_limit,
-                               source=source, web_fallback=True)
-        presented = present_answer(results["original_query"], results)
+    results, presented = ask(q, limit=result_limit, source=source)
+    route = results["route"]
     left, right = st.columns(2, gap="large")
     with left:
         t1, t2, t3, t4, t5 = st.tabs(
-            ["Short Answer", "Long Answer", "Sources", "Guardrails", "Feedback Loops"])
-        with t1: _tab_short(results)
+            ["Basic Answer", "Detailed Answer", "Sources", "Guardrails", "Feedback Loops"])
+        with t1: _tab_short(results, presented)
         with t2: _tab_long(results, presented)
-        with t3: _tab_sources(results)
+        with t3: _tab_sources(results, presented)
         with t4: _tab_guardrails(results, presented)
         with t5: _tab_loops(results, q)
     with right:
@@ -2191,7 +2387,8 @@ elif run_btn and query and compare_mode:
         # which is the difference the column is there to show.
         _decision_block(results, details=False)
         if show_details:
-            render_answer(presented, key="cmp")
+            render_answer(presented, key="cmp",
+                          lead=answer_agent.verdict_lead(results.get("decision")))
         else:
             line = _answer_line(results, presented.text)
             if line:

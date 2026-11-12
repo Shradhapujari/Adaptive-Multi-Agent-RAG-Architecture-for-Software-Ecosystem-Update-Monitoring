@@ -45,6 +45,8 @@ def _model(monkeypatch, payload=None, exc=None):
             raise exc
         return _Resp(payload)
     monkeypatch.setattr(app_1.urllib.request, "urlopen", urlopen)
+    # A new transport is a new model: drop rewrites cached from the last one.
+    app_1._llama_rewrite.cache_clear()
 
 
 def test_a_model_rewrite_is_labelled_as_one(monkeypatch):

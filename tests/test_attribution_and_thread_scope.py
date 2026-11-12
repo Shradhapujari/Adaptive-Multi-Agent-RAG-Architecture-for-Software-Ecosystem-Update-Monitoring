@@ -59,7 +59,8 @@ def test_citations_do_not_call_a_press_article_a_subreddit():
     labels = [e.label for e in ev]
     assert any(l.startswith("Community - Wccftech") for l in labels), labels
     assert any(l.startswith("Community - r/windows") for l in labels), labels
-    assert any(l.startswith("Security Discussion - CISA") for l in labels), labels
+    # A KEV entry is an advisory, as decide counts it, not a discussion post.
+    assert any(l.startswith("Security Advisory - ") and "(CISA)" in l for l in labels), labels
     assert not any("r/Wccftech" in l or "r/CISA" in l for l in labels), labels
 
 

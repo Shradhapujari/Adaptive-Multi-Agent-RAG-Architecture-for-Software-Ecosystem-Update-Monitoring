@@ -65,6 +65,14 @@ _CUES: Dict[str, List[Tuple[str, int]]] = {
         (r"\battack\w*", 2), (r"\bpatched?\b", 1), (r"\bcritical\b", 2),
         (r"\badvisor(?:y|ies)\b", 2), (r"\bhard(?:en|ening)\b", 1),
         (r"\bunsafe\b", 1), (r"\binsecure\b", 2),
+        # "Is it safe to update X?" is the security question a user actually
+        # asks. It was an opinion cue, and opinion cannot cite `cve`, so the
+        # answer was built from a pool with every advisory filtered out -- the
+        # false green of 2026-10-14. Question shapes only: a bare "safe" also
+        # fires on "type-safe", "safe mode" and "safe to delete".
+        (r"\b(?:how safe|stay safe|is (?:it|this|that)(?: now| still| actually)? safe"
+         r"|safe to (?:update|upgrade|install|patch|run|use)"
+         r"|(?:update|upgrade|install)\w* safe)\b", 3),
     ],
     "release": [
         (r"\blatest\b", 2), (r"\bnewest\b", 2), (r"\bcurrent\b", 1),
@@ -91,7 +99,7 @@ _CUES: Dict[str, List[Tuple[str, int]]] = {
         (r"\banyone else\b", 3), (r"\bam i the only\b", 3),
         (r"\bhate[sd]?\b", 2), (r"\blove[sd]?\b", 2), (r"\bannoying\b", 2),
         (r"\bfrustrat\w*", 2), (r"\bexperience\w*", 1), (r"\bfeel(?:s|ing)?\b", 1),
-        (r"\bis it (?:good|bad|safe|stable|worth)\b", 3),
+        (r"\bis it (?:good|bad|stable|worth)\b", 3),
         (r"\bwhy (?:do|does|is) everyone\b", 2), (r"\bdisappoint\w*", 2),
         (r"\breaction\b", 2), (r"\bbacklash\b", 3), (r"\bcomplain\w*", 2),
         (r"\bsentiment\b", 2), (r"\bnegative\b", 2), (r"\bpositive\b", 1),

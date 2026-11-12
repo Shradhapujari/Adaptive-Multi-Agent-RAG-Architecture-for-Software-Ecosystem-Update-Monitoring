@@ -1,0 +1,20 @@
+{
+  "_schema": {
+    "products": "keyed by the canonical product name vendor.detect_vendors returns (lowercase)",
+    "owner": "who ships the product; an advisory counts only if this owner's artifact is affected",
+    "repo": "the official source repository, when there is one",
+    "not_this_product": "names that sit in this product's advisory subjects while another vendor owns the affected artifact; read by decide._owns",
+    "_not_here": "aliases live in vendor._ALIASES and subreddit->product in vendor._SUBREDDIT_VENDOR; not duplicated"
+  },
+  "products": {
+    "node.js": {
+      "owner": "OpenJS Foundation",
+      "repo": "https://github.com/nodejs/node",
+      "not_this_product": ["mariadb", "mysql2", "node-postgres"]
+    },
+    "macos": {
+      "owner": "Apple",
+      "not_this_product": ["iterm2", "openssh", "veracrypt"]
+    }
+  }
+}

@@ -104,6 +104,34 @@ def test_opinion_answer_leads_with_community():
     assert w["community"] > w["release"] and w["community"] > w["cve"]
 
 
+@pytest.mark.parametrize("query", [
+    "Is it safe to update Firefox right now?",
+    "Is it safe to install iOS 26.1?",
+    "Is it now safe to upgrade from 25.10 to 26.04?",
+    "Is Ubuntu 24.04 safe to upgrade to?",
+    "Synology DSM 7.2.2 upgrade safe?",
+])
+def test_a_safety_question_may_cite_advisories(query):
+    # The false green of 2026-10-14: "is it safe" was an opinion cue, and
+    # opinion cannot cite `cve`, so the answer to "is it safe to update?" was
+    # built from a pool the advisories had been filtered out of.
+    r = classify(query)
+    assert r.label == "security"
+    assert "cve" in citable_kinds(r)
+
+
+@pytest.mark.parametrize("query", [
+    "How to safely delete the another desktop environment from my system?",
+    "Laptop only boots into safe mode after the update",
+    "Generating type-safe Postgres client code from .sql files",
+    "GPU Offload in Rust: Portable, Safe, and Fast",
+    "Duplicate docker images, are they safe to delete?",
+    "Is it stable enough to update Ubuntu 24.04?",
+])
+def test_safe_as_a_word_is_not_a_security_question(query):
+    assert classify_label(query) != "security"
+
+
 def test_security_answer_leads_with_advisories():
     w = pool_weights(classify("Any CVEs in OpenSSL?"))
     assert w["cve"] >= w["release"] and w["cve"] > w["community"]

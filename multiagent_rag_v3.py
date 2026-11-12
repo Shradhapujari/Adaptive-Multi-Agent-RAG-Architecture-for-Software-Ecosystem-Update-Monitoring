@@ -1475,39 +1475,48 @@ class QueryRewriterAgent:
         print(f"  Thinking ...")
         pause()
 
-        prompt = f"""You are a search query rewriting expert for a software update research system.
-
-A user asked: "{query}"
-
-Your job:
-1. Identify if the query is vague or uses shorthand
-2. Rewrite it to match technical document vocabulary
-3. Make it specific enough to find relevant software update posts
-
-Rules:
-- Keep it under 20 words
-- Focus on: bug fixes, releases, changelogs, security patches, performance
-- Return ONLY the rewritten query, nothing else
-{{tried}}
-Rewritten query:"""
-
         # A retry that reissues the phrasing that just came back thin is a
         # round of latency spent to get the same pool. The rewriter is the only
         # agent that can produce different vocabulary, so it is told what has
         # already been tried rather than being asked the same question twice.
-        prompt = prompt.format(tried=(
+        tried = (
             "\nThese phrasings were already searched and returned too little:\n"
             + "\n".join(f"- {t}" for t in avoid)
             + "\nUse different vocabulary: the vendor's own product names, the "
               "component names, or the words a changelog would use. Do not "
-              "reuse the phrasings above.\n") if avoid else "")
+              "reuse the phrasings above.\n") if avoid else ""
 
-        rewritten = call_llama(prompt)
+        # One f-string, no .format() after it: the query is user text, and a
+        # second formatting pass read its braces as slots -- "{django}" raised
+        # KeyError and "{tried}" was silently replaced. The prompt changed to
+        # additive expansion on 2026-10-27, so snapshots recorded before then
+        # no longer replay this call.
+        prompt = f"""You are an expert Query Expansion Agent for Software Ecosystems. Your job is to look at the user's original query and output software synonyms, technical vendor terminology, or related CVE/patch tracking keywords.
 
-        # fallback if Ollama fails
-        if rewritten is None:
-            print(f"  ⚠️  Ollama unavailable — using rule-based fallback")
-            rewritten = f"{query} {self.FALLBACK_TERMS[len(avoid) % len(self.FALLBACK_TERMS)]}"
+CRITICAL RULE: Do not replace, rephrase, or substitute the user's original query. Your output must only contain auxiliary expansion terms that will be APPENDED alongside the original query.
+
+Output format constraints:
+- Provide your expanded terms strictly as a comma-separated list of raw words or brief phrases.
+- Do not output full sentences, preambles, or conversational filler.
+- Example Output: "iOS update, patch notes, security advisory, CVE, vulnerability"
+
+A user asked: "{query}"
+{tried}
+Expansion terms:"""
+
+        # The example in the prompt is quoted, so the model often quotes back.
+        terms = (call_llama(prompt) or "").strip(" \t\n\"'")
+
+        # fallback if Ollama fails -- or answers with nothing: None is the only
+        # failure call_llama reports, and a blank reply searched for "".
+        if not terms:
+            print(f"  ⚠️  Ollama unavailable or returned nothing — using rule-based fallback")
+            terms = self.FALLBACK_TERMS[len(avoid) % len(self.FALLBACK_TERMS)]
+
+        # Additive by construction, not by instruction: the model is asked not
+        # to rephrase the query, but a substitution that drops the user's words
+        # is the defect this guards against, so the query is always kept here.
+        rewritten = f"{query} {terms}"
 
         # The model can ignore the instruction above and repeat itself. If it
         # does, the round is worthless as issued, so widen by rule instead --
@@ -1817,12 +1826,61 @@ class RetrieverAgent:
 # AGENT 3 — EVALUATOR (unchanged — RLAIF scoring)
 # ─────────────────────────────────────────────────────────────
 
+def judge_retrieval(query: str, docs: list):
+    """The Retrieval Evaluator's LLM verdict on the pool, or None.
+
+    None when Ollama is down or the reply is not the JSON asked for, with a
+    score in [0, 1] -- the caller then falls back to term overlap rather than
+    retrying (or not) on a number the model never gave.
+    """
+    context = "\n".join(
+        f"[{i}] ({d.get('source', '?')}) {d.get('title', '')} -- "
+        f"{str(d.get('detail', ''))[:300]}"
+        for i, d in enumerate(docs, 1)) or "(none)"
+    # One f-string, doubled braces for the JSON: the query is user text and a
+    # .format() pass would read its braces as slots (see QueryRewriterAgent).
+    prompt = f"""You are the Retrieval Evaluator Agent. Your task is to look at the user's original query and evaluate the raw quality of the documents pulled into the retrieval union.
+
+User Query: {query}
+Retrieved Documents:
+{context}
+
+Evaluate the documents strictly against the user query and output a final quality score between 0.0 and 1.0. Use the following internal scoring rubric:
+- 0.0 to 0.29: The documents completely miss the version number or vendor core issue.
+- 0.30 to 0.69: Partial match; contains relevant vendor community threads or release updates but lacks exact confirmation.
+- 0.70 to 1.00: Direct, high-fidelity match containing the specific version notes, CVE advisory, or active community problem.
+
+You must output your analysis in this exact JSON format:
+{{
+  "thinking": "Analyze if the context contains explicit mentions of the version number and features requested by the user.",
+  "release_notes_match": true/false,
+  "community_match": true/false,
+  "cve_match": true/false,
+  "score": 0.00
+}}"""
+    m = re.search(r"\{.*\}", call_llama(prompt) or "", re.S)
+    try:
+        out = json.loads(m.group(0))
+        score = float(out["score"])
+    except (AttributeError, ValueError, TypeError, KeyError):
+        return None
+    if not 0.0 <= score <= 1.0:          # also rejects NaN
+        return None
+    out["score"] = score
+    return out
+
+
 class EvaluatorAgent:
     name = "📊  Evaluator Agent"
 
     # Fraction of the question's terms the best retrieved document must
     # share, before any source floor, for the Manager not to retry.
     RETRY_THRESHOLD = float(os.environ.get("MARAG_RETRY_THRESHOLD", "0.15"))
+    # θ for the LLM judge's score: below the rubric's partial-match band, retry.
+    LLM_RETRY_THRESHOLD = float(os.environ.get("MARAG_LLM_RETRY_THRESHOLD", "0.30"))
+    # Opt-in: every published arm measured the deterministic score, and the
+    # judge adds an Ollama call per round.
+    USE_LLM = os.environ.get("MARAG_LLM_EVALUATOR") == "1"
 
     def run(self, docs: list, original_query: str) -> dict:
         print(f"\n  {self.name}")
@@ -1882,10 +1940,16 @@ class EvaluatorAgent:
         # Finding 12: min 0.300 over 500 questions against a 0.15 threshold).
         # `relevance` is the term-overlap score before any floor; `quality`
         # keeps the floors so the reported self_quality is unchanged.
-        signal = ("✅ positive" if relevance >= self.RETRY_THRESHOLD
-                  else "⚠️  negative — manager will retry")
+        judged = judge_retrieval(original_query, docs) if self.USE_LLM and docs else None
+        if judged:
+            ok = judged["score"] >= self.LLM_RETRY_THRESHOLD
+        else:
+            ok = relevance >= self.RETRY_THRESHOLD
+        signal = "✅ positive" if ok else "⚠️  negative — manager will retry"
 
         print(f"  Quality  : {quality:.2f} / 1.0")
+        if judged:
+            print(f"  LLM judge: {judged['score']:.2f} (θ={self.LLM_RETRY_THRESHOLD:.2f})")
         print(f"  RLAIF    : {signal}")
         pause()
 
@@ -1906,8 +1970,16 @@ class EvaluatorAgent:
         # dataset". Naming the one local case instead cannot rot that way.
         LOCAL_SOURCES = ['local']
         has_live     = any(s not in LOCAL_SOURCES for s in verified_src)
-        confidence   = "HIGH" if quality >= 0.5 else "MEDIUM" if quality >= 0.3 else "LOW"
-        verified_tag = "✅ VERIFIED from live releasetrain.io APIs" if has_live else "⚠️  From local dataset — may not reflect today's data"
+        # Live is not verified: an answer built only from Reddit and Google News
+        # came off live APIs and still said "VERIFIED ... Confidence: HIGH" above
+        # a body listing those same rows as "not officially verified". VERIFIED
+        # needs a Tier-1 (release/advisory) row; HIGH needs one too, and a score
+        # above the 0.50 source floors, which are fetched-something, not measured.
+        confidence   = ("HIGH" if quality > 0.5 and tier1_hits
+                        else "MEDIUM" if quality >= 0.3 else "LOW")
+        verified_tag = ("✅ VERIFIED from live releasetrain.io APIs" if tier1_hits
+                        else "🟡 Live community sources only — not officially verified" if has_live
+                        else "⚠️  From local dataset — may not reflect today's data")
 
         lines = []
         lines.append(f'Query: "{original_query}"')
@@ -2118,11 +2190,81 @@ Answer:"""
             src_str = ", ".join(verified_src)
             lines.append(f"  Data sourced from: {src_str} | releasetrain.io")
         return {"quality": quality, "relevance": relevance, "signal": signal,
-                "answer": "\n".join(lines)}
+                "llm_eval": judged, "answer": "\n".join(lines)}
 
 # ─────────────────────────────────────────────────────────────
 # MANAGER AGENT — ORCHESTRATOR
 # ─────────────────────────────────────────────────────────────
+
+PLAN_SOURCES = ("release_notes", "security_advisories", "community_discussions")
+_INTENT_SOURCES = {"release": ("release_notes",),
+                   "security": ("security_advisories",),
+                   "opinion": ("community_discussions",)}
+
+
+def plan_query(query: str) -> dict:
+    """The Manager's structured plan: vendor, time anchor, keywords, sources.
+
+    The LLM writes the plan, but three fields are not left to it. The time
+    anchor comes from `temporal` whenever the question has a relative term --
+    date arithmetic is what a model gets wrong when its idea of today differs
+    from the host's. The vendor comes from `extract_vendor` when it finds one,
+    because that is what the Retriever will actually search. And the user's
+    exact wording always leads `search_strategy`: replacing it with the
+    expansion is the defect that once cost the multi-agent arm 0.62 nDCG@3.
+    Ollama down or bad JSON degrades to the same rules, never to an error.
+    """
+    import intent as _intent
+    import temporal as _temporal
+    today = _temporal.now().date()
+    # One f-string, doubled braces for the JSON: the query is user text and a
+    # .format() pass would read its braces as slots (see QueryRewriterAgent).
+    prompt = f"""You are the Orchestrator/Manager Agent for the Software Ecosystem Multi-Agent RAG system. Your job is to analyze the user's question, anchor it in time, and plan the retrieval strategy.
+
+User Question: {query}
+Current System Date: {today.isoformat()}
+
+You must strictly execute your planning using this rigid JSON format. Do not write any conversational preamble or text outside of this JSON block:
+
+{{
+  "thinking": "Analyze if the question refers to an existing release, a future version, a known CVE, or a community bug. Identify the specific vendor (e.g., Apple, Google, Microsoft).",
+  "detected_vendor": "String (e.g., 'Apple')",
+  "temporal_anchor": "String (Convert relative terms like 'today' or 'last week' into an absolute date constraint relative to the current system date)",
+  "search_strategy": "List the explicit keywords needed. CRITICAL: You must include the user's exact wording alongside any expanded vendor terms.",
+  "expected_sources": ["release_notes", "security_advisories", "community_discussions"]
+}}"""
+    reply = call_llama(prompt)
+    plan = {}
+    m = re.search(r"\{.*\}", reply or "", re.S)
+    if m:
+        try:
+            plan = json.loads(m.group(0))
+        except ValueError:
+            pass
+    if not isinstance(plan, dict):
+        plan = {}
+    plan["planner"] = "llama3.1" if plan else "rule-based fallback"
+
+    res = _temporal.resolve_temporal(query, now=today)
+    if res.changed or not plan.get("temporal_anchor"):
+        plan["temporal_anchor"] = (res.describe() if res.changed
+                                   else f"none — as of {today.isoformat()}")
+    vendors = extract_vendor(query)
+    if vendors or not plan.get("detected_vendor"):
+        plan["detected_vendor"] = ", ".join(vendors) or "unknown"
+
+    terms = plan.get("search_strategy") or []
+    if isinstance(terms, str):
+        terms = terms.split(",")
+    terms = [str(t).strip() for t in terms if str(t).strip()]
+    plan["search_strategy"] = [query] + [t for t in terms if t != query]
+
+    sources = [s for s in plan.get("expected_sources") or [] if s in PLAN_SOURCES]
+    plan["expected_sources"] = sources or list(
+        _INTENT_SOURCES.get(_intent.classify(query).label, PLAN_SOURCES))
+    plan.setdefault("thinking", "")
+    return plan
+
 
 def plan_rounds(query: str, ceiling: int = None) -> int:
     """How many retrieve-evaluate rounds this question is worth.
@@ -2207,11 +2349,19 @@ class ManagerAgent:
         self.rewriter  = QueryRewriterAgent()
         self.retriever = RetrieverAgent()
         self.evaluator = EvaluatorAgent()
+        self.planner   = plan_query
 
     def run(self, query: str) -> str:
         print(f"\n  {self.name}")
         bar()
-        print(f"  Think & Plan:")
+        plan = self.planner(query)
+        print(f"  Think & Plan ({plan['planner']}):")
+        if plan["thinking"]:
+            print(f"    Thinking : {str(plan['thinking'])[:160]}")
+        print(f"    Vendor   : {plan['detected_vendor']}")
+        print(f"    Time     : {plan['temporal_anchor']}")
+        print(f"    Keywords : {' | '.join(plan['search_strategy'])[:160]}")
+        print(f"    Sources  : {', '.join(plan['expected_sources'])}")
         print(f"    Step 1 → delegate to Query Rewriter Agent  (Llama 3.1)")
         print(f"    Step 2 → delegate to Retriever Agent")
         print(f"    Step 3 → delegate to Evaluator Agent (RLAIF)")

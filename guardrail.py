@@ -138,6 +138,7 @@ def _named_versions(text: str) -> List[Tuple[str, str]]:
 
 
 _CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
+_WORD_RE = re.compile(r"[A-Za-z]{2,}")
 
 
 def _asserts(text: str, question: str = "") -> bool:
@@ -178,6 +179,8 @@ def _asserts(text: str, question: str = "") -> bool:
 # refusal has to carry a citation, and it is read like a weak marker -- it
 # excuses the citation rule only when the sentence states nothing of its own.
 _DECLINE_RE = re.compile(
+    # answer_agent.NOT_FOUND, the presenter's prescribed refusal.
+    r"\bcannot find that information in my source data\b|"
     r"\bno\s+(?:\w+\s+){0,2}sources?\b[^.\n]{0,40}"
     r"\b(?:mention|state|say|report|cover|address|answer|list|contain|show|indicate)"
     r"|\bnone of the (?:\w+\s+){0,2}(?:sources?|documents?|results?|records?|"
@@ -253,8 +256,13 @@ def _truncated(text: str) -> bool:
     a quoted Reddit comment is followed by the real citation that closes after
     it, and only a genuine cut leaves the final "[" with nothing after it.
     """
-    t = text or ""
-    return "[" in t and t.rfind("[") > t.rfind("]")
+    t = (text or "").rstrip()
+    # A cut in prose leaves no bracket at all: the Chrome answer of 2026-10-27
+    # stopped at "...via a crafted HTML" and passed. A finished answer ends on
+    # a full stop, a citation or a closing quote; of 89 stored answers only
+    # run #50, the known cut, did not.
+    return bool(t) and (("[" in t and t.rfind("[") > t.rfind("]"))
+                        or t[-1] not in ".!?])\"”'")
 
 
 _LIST_RE = re.compile(r"^\s*\d+[.)]\s+")
@@ -295,6 +303,117 @@ _SEVERITY_RE = re.compile(
     + r"|\b(?:rated|severity(?:\s+of)?)\s+(critical|high|moderate|medium|low)\b", re.I)
 
 
+# A count the answer states about its own sources: "4 advisory record(s)",
+# "returned 1 matching release(s)", "adds three posts". Stored run #77 said
+# "4 advisory record(s) apply" and cited one, "3 post(s)" and cited one -- the
+# reader counted the brackets, then the Sources tab, and got three numbers.
+_NUM_WORDS = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten".split())}
+_NUM_ALT = "|".join(_NUM_WORDS)
+_COUNT_RE = re.compile(
+    # Not a piece of a version or date: the "0" of "v7.2.0 release" is no count.
+    r"(?<![\w.-])(\d{1,3}|" + _NUM_ALT + r")\b(?!\.\d)"
+    # Up to two qualifiers between, never a number or "of": "3 of the 5
+    # releases" counts the 5, and "past 7 days two releases" counts the two.
+    r"((?:\s+(?!of\b|(?:" + _NUM_ALT + r")\b)[A-Za-z][\w-]*){0,2}?)\s+"
+    r"(release(?:\(s\)|s)?|advisor(?:y|ies)|record(?:\(s\)|s)?|post(?:\(s\)|s)?|"
+    r"threads?|comments?|sources?|"
+    r"issues?|problems?|findings?|bugs?|fix(?:es)?|changes?|regressions?|"
+    r"vulnerabilit(?:y|ies)|cves?|updates?)\b", re.I)
+# Which evidence kinds a source noun counts. "advisory record(s)" is advisory
+# because the qualifier is read before the noun.
+_SOURCE_NOUNS = (
+    ("advisor", {"advisory"}),
+    ("release", {"release"}),
+    ("post", {"community", "answer", "cve"}),
+    ("thread", {"community", "answer", "cve"}),
+    ("comment", {"community", "answer", "cve"}),
+    ("source", None),                      # any kind
+)
+# How a label names its kind, for the harness's plain-dict evidence.
+_LABEL_KINDS = (("Release Notes", "release"), ("Security Advisory", "advisory"),
+                ("Security Discussion", "cve"), ("Community", "community"),
+                ("Top comment", "answer"), ("Vendor page", "web"), ("Web", "web"))
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[\"“(]?[A-Z])|\n+")
+
+
+def _kinds(evidence: Sequence) -> dict:
+    """label -> evidence kind, from the item itself or its label's prefix."""
+    out = {}
+    for e in evidence or ():
+        label = str(getattr(e, "label", "") or (e.get("label", "") if isinstance(e, dict) else "")).strip()
+        kind = getattr(e, "kind", "") or (e.get("kind", "") if isinstance(e, dict) else "")
+        if label:
+            out[label] = kind or next((k for p, k in _LABEL_KINDS if label.startswith(p)), "")
+    return out
+
+
+def _counts(text: str, known: dict) -> List[Tuple[int, str, str]]:
+    """(n, qualifiers + noun, matched span) for each count claim in `text`.
+
+    A number after a product name is a version, not a count: "Fedora 44
+    release", "Windows 11 update". A capitalised word or one the sources
+    version marks it so.
+    """
+    out = []
+    for m in _COUNT_RE.finditer(text or ""):
+        raw = m.group(1).lower()
+        n = _NUM_WORDS.get(raw, None)
+        if n is None:
+            if _looks_like_year(raw):
+                continue
+            n = int(raw)
+        prev = re.search(r"([A-Za-z][\w+#.-]*)\s*$", text[:m.start()])
+        if prev and raw.isdigit():
+            word = prev.group(1)
+            if ((word.lower() not in _CONTENT_STOPWORDS and word != word.lower())
+                    or raw in known.get(word.lower(), ())):
+                continue
+        out.append((n, f"{m.group(2)} {m.group(3)}".lower(), m.group(0).strip()))
+    return out
+
+
+def _count_violations(text: str, labels: set, kinds: dict, known: dict) -> List[Violation]:
+    """A count of sources has to equal the sources cited for it.
+
+    Two rules, both from what the reader can check on the page:
+
+    * "N releases / advisories / posts / sources" equals the distinct cited
+      sources of that kind -- in the same sentence, or, for a summary line over
+      a list, in the whole answer.
+    * A headline "N issues / problems / findings" over a numbered list equals
+      the number of items. The prompt's own example said "three problems" over
+      two, and the model copied the arithmetic.
+    """
+    def cited(span: str, want) -> int:
+        tags = {c.strip() for c in _CITE_RE.findall(span)} & labels
+        return len({t for t in tags if want is None or kinds.get(t) in want})
+
+    bad: List[Violation] = []
+    for sentence in _SENTENCE_RE.split(text):
+        for n, noun, span in _counts(sentence, known):
+            want = next((w for key, w in _SOURCE_NOUNS if key in noun), False)
+            if want is False:
+                continue                      # a finding noun: the list rule below
+            got = {cited(sentence, want), cited(text, want)}
+            if n not in got:
+                bad.append(Violation(
+                    "count_mismatch",
+                    f"“{span}” but {min(got)} such source(s) cited — "
+                    f"cite every source you count, or state the number you cite"))
+
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    items = [ln for ln in lines[1:] if _LIST_RE.match(ln)]
+    if items:
+        for n, noun, span in _counts(lines[0], known):
+            if not any(key in noun for key, _ in _SOURCE_NOUNS) and n != len(items):
+                bad.append(Violation(
+                    "count_mismatch",
+                    f"the summary says “{span}” but lists {len(items)} — "
+                    f"make the number match the list"))
+    return bad
+
+
 def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
     """Check a presented answer against the evidence it was built from.
 
@@ -323,7 +442,8 @@ def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
     # excuse it -- a truncated refusal is still truncated.
     if _truncated(text):
         return Verdict(False, [Violation(
-            "truncated", "answer ends mid-citation (unclosed '[')")])
+            "truncated", "answer ends mid-sentence or mid-citation — write fewer, "
+                         "shorter findings so the answer finishes")])
 
     # An unambiguous refusal phrase declines outright. A weak marker --
     # "unknown", "not found", "no information" -- declines only if the text
@@ -350,6 +470,30 @@ def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
     # or a label anyway is asserting, and the assertion is what gets checked.
     if not cited and not abstained:
         bad.append(Violation("uncited", f"{len(labels)} sources given, none cited"))
+    # Every numbered finding carries its own citation, as the prompt demands.
+    # One cited line used to license the rest: a Chrome answer cut by the
+    # token budget ended "9. Improper state validation in Skia in Google
+    # Chrome prior to 153.0.8010.52" -- no bracket left open, so `_truncated`
+    # saw nothing -- and shipped (live, 2026-10-27). An item that reports an
+    # absence asserts nothing and needs no source, same reading as below.
+    if not abstained:
+        for ln in (ln.strip() for ln in text.splitlines()):
+            if not _LIST_RE.match(ln):
+                continue
+            if not _CITE_RE.search(ln) and not _ITEM_NEGATION.search(ln):
+                bad.append(Violation(
+                    "uncited_item",
+                    f"“{ln[:60]}…” has no citation — end every "
+                    f"numbered line with its source's tag, or drop the line"))
+            # "1. CVE-2026-113344 [Security Advisory - ...]." names a record and
+            # says nothing about it: llama3.1's whole answer to "what bugs were
+            # fixed in Chrome" was ten of these (live, 2026-10-27).
+            # Two words is a finding ("kernel regressed"); fewer is an id.
+            elif len(_WORD_RE.findall(_CVE_RE.sub(" ", _CITE_RE.sub(" ", _LIST_RE.sub("", ln))))) < 2:
+                bad.append(Violation(
+                    "bare_item",
+                    f"“{ln[:60]}…” names a record but not what it is "
+                    f"— say what was wrong and in which component"))
     # Declining is allowed to point nowhere; answering is not allowed to point
     # at the source it was handed. The rule-based paragraph this falls back to
     # reports the release and quotes its note, which is the answer the model
@@ -361,6 +505,10 @@ def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
     _known: dict = {}
     for product, v in _named_versions(_ISO_RE.sub(" ", haystack) + " " + given):
         _known.setdefault(product, set()).add(v)
+
+    # A refusal counts nothing it has to cite.
+    if not abstained:
+        bad.extend(_count_violations(text, labels, _kinds(evidence), _known))
 
     known_versions = set(extract_versions(_ISO_RE.sub(" ", haystack), multipart_only=True))
     known_versions |= set(extract_versions(given, multipart_only=True))
@@ -471,7 +619,9 @@ def guard(answer: str, evidence: Sequence, question: str = "") -> Tuple[str, Ver
 _INJECTION_PATTERNS = (
     ("override", re.compile(
         r"\b(ignore|disregard|forget)\b[^.\n]{0,40}\b(previous|prior|above|earlier|all)\b"
-        r"[^.\n]{0,25}\b(instruction|prompt|rule|direction)", re.I)),
+        # "bypass" and "command" stay out: "authentication bypass and the
+        # execution of arbitrary commands" is a CISA KEV row, not an order.
+        r"[^.\n]{0,25}\b(instruction|prompt|rule|direction|guidance|guideline|context)", re.I)),
     # "you are now on the 6.8 kernel" is support-thread prose; what is matched
     # is a reassignment to a *role*.
     ("reassign", re.compile(
@@ -479,8 +629,18 @@ _INJECTION_PATTERNS = (
         r"\b(assistant|ai|model|bot|agent|persona|character|chatgpt|dan)\b", re.I)),
     ("new_instructions", re.compile(r"\bnew (system )?(instruction|prompt|directive)s?\s*:", re.I)),
     # A fake turn marker: the document trying to look like the conversation.
+    # "user:" counts too -- a fake user turn is the most direct way to speak
+    # as the user. A markdown header needs the colon, or "### Installation
+    # instructions" in a release note would go.
     ("role_marker", re.compile(
-        r"(?:^|\n)\s*(?:system|assistant)\s*:\s|<\|im_(?:start|end)\|>|</?(?:system|instructions)>", re.I)),
+        r"(?:^|\n)\s*(?:system|assistant|user|human)\s*:\s"
+        r"|(?:^|\n)\s*#{1,6}\s*(?:instruction|system|response)s?\s*:"
+        r"|</?(?:system|instructions)>", re.I)),
+    # The control tokens of the templates this system feeds: Llama 3.1
+    # rewrites, Mistral synthesises, and ChatML is the common third.
+    ("chat_template", re.compile(
+        r"<\|(?:start_header_id|end_header_id|eot_id|begin_of_text|im_start|im_end)\|>"
+        r"|\[/?INST\]|<</?SYS>>", re.I)),
     ("exfiltrate", re.compile(
         r"\b(reveal|repeat|print|output|show|send)\b[^.\n]{0,25}\byour\b"
         r"[^.\n]{0,25}\b(system prompt|instructions|api key|secret|credential)", re.I)),
@@ -493,12 +653,56 @@ _INJECTION_PATTERNS = (
         r"|\binstead,?\s+(?:say|answer|reply|output|respond)(?:\s+(?:that|with)\b|\s*:|\s+[\"\u201c])", re.I)),
 )
 
+# Cyrillic and Greek letters that render as Latin ones. NFKC leaves them alone,
+# so "\u0406gnore" with a Cyrillic \u0406 read as a different word to every pattern.
+# ponytail: a hand list, not Unicode's confusables table; extend it, or take
+# that table, if a payload in another script shows up.
+_CONFUSABLES = str.maketrans({
+    "\u0430": "a", "\u0435": "e", "\u043e": "o", "\u0440": "p", "\u0441": "c", "\u0443": "y", "\u0445": "x",
+    "\u0456": "i", "\u0458": "j", "\u0455": "s", "\u0501": "d", "\u051b": "q", "\u051d": "w", "\u04bb": "h", "\u04cf": "l",
+    "\u0410": "A", "\u0412": "B", "\u0415": "E", "\u041a": "K", "\u041c": "M", "\u041d": "H", "\u041e": "O",
+    "\u0420": "P", "\u0421": "C", "\u0422": "T", "\u0425": "X", "\u0406": "I", "\u0408": "J", "\u0405": "S",
+    "\u03bf": "o", "\u03c1": "p", "\u03bd": "v", "\u03b9": "i", "\u0391": "A", "\u0392": "B", "\u0395": "E",
+    "\u0396": "Z", "\u0397": "H", "\u0399": "I", "\u039a": "K", "\u039c": "M", "\u039d": "N", "\u039f": "O",
+    "\u03a1": "P", "\u03a4": "T", "\u03a5": "Y", "\u03a7": "X",
+})
+_TAG_TO_ASCII = {0xE0000 + c: c for c in range(0x20, 0x7F)}
+
+
+def _normalise(text: str) -> str:
+    """The text as the patterns read it -- for detection only, never shown.
+
+    NFKC folds fullwidth letters; then every format character goes (category
+    Cf: zero-width, bidi controls, soft hyphen) with the variation selectors,
+    and lookalike letters fold to Latin. The printable tag block is decoded to
+    its ASCII letters rather than dropped: a payload spelled wholly in tags is
+    invisible on screen but readable to a model, and stripping it would leave
+    the patterns nothing to match.
+    """
+    text = unicodedata.normalize("NFKC", text).translate(_TAG_TO_ASCII)
+    text = "".join(c for c in text
+                   if unicodedata.category(c) != "Cf" and not "\ufe00" <= c <= "\ufe0f")
+    return text.translate(_CONFUSABLES)
+
+
 # Every text-bearing field a fetched row is known to carry. Screening the
 # concatenation means a payload split across title and body is still caught.
-_ZERO_WIDTH_RE = re.compile(r"[\u200b-\u200f\u2060\ufeff]")
 
 _SCREEN_FIELDS = ("title", "text", "body", "detail", "summary", "description",
                   "selftext", "content", "note", "notes")
+
+
+def normalize(text: str) -> str:
+    """NFKC with zero-width characters removed: the text every rule should read.
+
+    Fullwidth letters and zero-width joiners spell an injection past a plain
+    regex, and they spell a CVE id past one too -- "ＣＶＥ-2026-1234" and
+    "CVE\\u200b-2026-1234" made a KEV row invisible to decide(), which then
+    called the product safe.
+    """
+    # Unlike _normalise, no confusable folding or tag decoding: this text is
+    # read for facts, and invisible tag text must not become a CVE id.
+    return "".join(c for c in unicodedata.normalize("NFKC", text) if unicodedata.category(c) != "Cf")
 
 
 def screen(doc) -> Optional[str]:
@@ -508,9 +712,9 @@ def screen(doc) -> Optional[str]:
     else:
         parts = [str(doc)]
     blob = "\n".join(p for p in parts if p)
-    # Fullwidth letters, confusable scripts and zero-width joiners are how a
+    # Fullwidth letters, confusable scripts and invisible characters are how a
     # payload spells "ignore previous instructions" past a plain regex.
-    blob = _ZERO_WIDTH_RE.sub("", unicodedata.normalize("NFKC", blob))
+    blob = _normalise(blob)
     for name, pattern in _INJECTION_PATTERNS:
         if pattern.search(blob):
             return name
@@ -635,8 +839,32 @@ def _demo() -> None:
     # "Chrome 155" against a v155.0.8047 row, and every "fixed 3 bugs".
     # ponytail: this also stops catching an invented bare major ("Fedora 45");
     # dotted forms are what the domain decides on, per extract_versions.
-    counts = "The feed returned 5 release(s); kernel 6.17.2 is in 2 of them [R1]."
+    counts = "The feed returned 2 release(s); kernel 6.17.2 is in 1 of them [R1] [R2]."
     assert check(counts, ev).ok, check(counts, ev).violations
+
+    # Answer count == source count. Stored run #77: "4 advisory record(s)" over
+    # one citation. The same sentence or the whole answer may carry the cites.
+    v = check("The feed returned 5 release(s) [R1].", ev)
+    assert [x.code for x in v.violations] == ["count_mismatch"], v.violations
+    assert check("Two releases shipped: Fedora 44 [R1] and Chrome 155 [R2].", ev).ok
+    assert check("One community post reports grub loss [C1].", ev).ok
+    assert not check("Three posts report grub loss [C1].", ev).ok
+    # A summary over a list: the number is the list's.
+    listed = ("Users report three problems [C1].\n\n"
+              "1. grub is lost [C1].\n2. kernel 6.17.2 regressed [R1].")
+    v = check(listed, ev)
+    assert [x.code for x in v.violations] == ["count_mismatch"], v.violations
+    assert check(listed.replace("three", "two"), ev).ok
+    # A number after a product, or inside a version, is not a count.
+    assert check("The Fedora 44 release is out [R1].", ev).ok
+    assert check("Chrome v155.0.8047 release notes list it [R2].", ev).ok
+    assert check("In the past 7 days two releases shipped [R1] [R2].", ev).ok
+    # The rule-based fallback counts what it cites, so it passes the rule too.
+    from answer_agent import deterministic_paragraph
+    adv = ev + [Evidence(label=f"A{i}", kind="advisory", title=f"CVE-2026-1000{i}")
+                for i in range(4)]
+    para = deterministic_paragraph("linux", adv)
+    assert check(para, adv).ok, (para, check(para, adv).violations)
 
     # The prefix rule: a bare major is checked when the sources version that
     # product, and a source's 155.0.8047 is what makes "Chrome 155" true.
