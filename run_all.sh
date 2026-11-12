@@ -10,19 +10,14 @@ echo "  RUNNING ALL DEMO FILES"
 echo $W
 
 echo ""
-echo ">>> 1/3  DemoMain3.py — Single Agent Demo"
+echo ">>> 1/2  DemoMain3.py — Single Agent Demo"
 echo $W
-$PYTHON DemoMain3.py
+$PYTHON DemoMain3.py demo
 echo ""
 
-echo ">>> 2/3  rag_agent_smolagents.py — Single RAG Agent"
+echo ">>> 2/2  multiagent_rag_v3.py — Multi-Agent RAG System"
 echo $W
-$PYTHON rag_agent_smolagents.py
-echo ""
-
-echo ">>> 3/3  multiagent_rag.py — Multi-Agent RAG System"
-echo $W
-$PYTHON multiagent_rag.py
+$PYTHON multiagent_rag_v3.py demo
 echo ""
 
 echo $W
