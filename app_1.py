@@ -852,6 +852,9 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     temporal = g.temporal
     results["temporal"] = temporal
     results["grounding"] = g
+    # A "did you mean" for a question that named no known product; shown to
+    # the reader, never substituted into retrieval.
+    results["suggestion"] = None if g.vendors else vendor.suggest(query)
     results["grounded_query"] = g.rewritten
     results["timing"]["temporal"] = round(time.time() - t0, 2)
     grounded = temporal.query
@@ -1593,7 +1596,8 @@ def _console_log(query: str, results: dict, route: dict) -> str:
     kinds = ", ".join(sorted(getattr(g, "citable_kinds", []) or [])) or "—"
     vendors = ", ".join(getattr(g, "vendor_names", []) or []) or "none"
     L = [f'$ ask "{query}"',
-         f"[INTENT]  asks={graph.asks(query)}  citable={kinds}  vendors={vendors}",
+         f"[INTENT]  asks={graph.asks(query)}  citable={kinds}  vendors={vendors}"
+         + (f"  (did you mean {results['suggestion']}?)" if results.get("suggestion") else ""),
          f"[ROUTING] {route['mode'].upper():4} — {route['why']}"]
     for pool, label in (("releases", "Release"), ("cve", "Advisory"),
                         ("community", "Community")):
@@ -1652,14 +1656,60 @@ def _latest_release(rows: list, query: str, today=None) -> Optional[dict]:
 _ASKS_WHAT = re.compile(r"^\s*(?:what|which|list|show|tell me|how many|summari[sz]e)\b", re.I)
 
 
+def _headline_release(results: dict, query: str) -> Optional[dict]:
+    """The release a version/date question is answered with: the newest one of
+    the *asked* product, or None.
+
+    `_latest_release` over the whole pool answered "Latest Nodej.s version?"
+    with linux v7.38.0 (live, 2026-11-12): the typo grounded to no product, so
+    nothing scoped the pool, and the newest release of anything won the
+    headline over a gate that had abstained. Here no product means no
+    headline, and only rows whose product is a grounded one are candidates --
+    exact, unlike `vendor.filter_by_vendor`, which keeps rows with no product.
+    """
+    g = results.get("grounding")
+    wanted = set(getattr(g, "vendor_names", None) or [])
+    if not wanted:
+        return None
+    rows = [r for r in results.get("releases") or []
+            if str(r.get("product") or "").strip().lower() in wanted]
+    return _latest_release(rows, query)
+
+
+def _no_product_note(results: dict) -> str:
+    """What to say when a question named no product this system recognises."""
+    q = results.get("original_query", "")
+    name = results.get("suggestion")
+    fixed = vendor.respell(q) if name else None
+    out = "I couldn't tell which product you mean, so I'm not giving a version or a verdict."
+    if name:
+        out += f" Did you mean **{vendor.pretty(name)}**?"
+        if fixed:
+            out += f" Try asking: “{fixed}”"
+    else:
+        out += " Name the product, e.g. “Latest Node.js version?”."
+    return out
+
+
 def _tab_short(results: dict, presented=None) -> None:
     dec = results.get("decision")
     query = results.get("original_query", "")
     st.caption(f"**Q:** {query}")
+    asks_value = graph.asks(query) in ("version", "date")
+    g = results.get("grounding")
+    no_product = g is not None and not getattr(g, "vendors", None)
+    # A version/date question naming no product we recognise has no answer to
+    # give: say so, and offer the likely spelling, rather than any release.
+    if asks_value and no_product:
+        st.markdown("### ⚪ Which product?")
+        st.markdown(_no_product_note(results))
+        return
+    if no_product and results.get("suggestion"):
+        st.caption(f"Did you mean {vendor.pretty(results['suggestion'])}? "
+                   "No product was recognised in the question.")
     # A version/date question is answered by the feed value, not the verdict;
     # the verdict stays underneath as a note, since an advisory is still news.
-    rel = (_latest_release(results.get("releases") or [], query)
-           if graph.asks(query) in ("version", "date") else None)
+    rel = _headline_release(results, query) if asks_value else None
     if rel:
         d = monitor.parse_ymd(rel.get("date"))
         st.markdown(f"### {rel.get('product') or 'Latest'} v{rel.get('version')}")
