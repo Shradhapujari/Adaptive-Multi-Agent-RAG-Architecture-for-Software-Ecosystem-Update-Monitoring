@@ -97,6 +97,14 @@ _UNSEARCHABLE = frozenset({
     # product called weather, "is it safe" to one called safe.
     # ponytail: a stopword list; a word-frequency check if more keep turning up.
     "weather", "safe", "community",
+    # Measured on the 200-question decision sheet (2026-11-12): these matched
+    # ordinary words, never the tagged product. Filtering them drops stray
+    # vendor detections 161 -> 112 and loses none of the 61 real ones.
+    "app", "automatic", "browser", "command", "custom", "data", "extensions",
+    "group", "import", "input", "network", "neo", "new tab page",
+    "notifications", "passwords", "performance", "popup", "pro", "repo",
+    "return", "script", "search", "section", "server", "settings", "start",
+    "system", "tabs",
 })
 
 # Query words that name a product without being the catalog's spelling of it.
