@@ -292,3 +292,15 @@ def test_is_it_safe_names_only_the_product(tmp_path, product, expected):
     catalog = load_catalog(path=str(cache), fetch=False)
     assert ground(f"Is it safe to update {product}?",
                   catalog=catalog).vendor_names == [expected]
+
+
+def test_generic_catalogue_words_do_not_crowd_out_the_product(tmp_path):
+    # A real Reddit question from the decision sheet: "weather", "settings" and
+    # "new tab page" are catalogue rows, and they were detected instead of
+    # Firefox, so the real Firefox documents stopped counting as on-topic.
+    cache = tmp_path / "names.json"
+    cache.write_text('["firefox", "weather", "settings", "new tab page", "server", "pro"]')
+    catalog = load_catalog(path=str(cache), fetch=False)
+    q = ("Firefox 151: Weather from New Tab Page disappeared and there's no "
+         "option in settings anymore. How to get it back?")
+    assert [v.name for v in detect_vendors(q, catalog)] == ["firefox"]

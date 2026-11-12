@@ -93,6 +93,14 @@ _UNSEARCHABLE = frozenset({
     "patch", "patches", "bug", "bugs", "fix", "fixes", "issue", "issues",
     "software", "vulnerability", "vulnerabilities", "cve", "recent", "support",
     "safe",
+    # Measured on the 200-question decision sheet (2026-11-12): these matched
+    # ordinary words, never the tagged product. Filtering them drops stray
+    # vendor detections 161 -> 112 and loses none of the 61 real ones.
+    "app", "automatic", "browser", "command", "custom", "data", "extensions",
+    "group", "import", "input", "network", "neo", "new tab page",
+    "notifications", "passwords", "performance", "popup", "pro", "repo",
+    "return", "script", "search", "section", "server", "settings", "start",
+    "system", "tabs", "weather",
 })
 
 # Query words that name a product without being the catalog's spelling of it.
