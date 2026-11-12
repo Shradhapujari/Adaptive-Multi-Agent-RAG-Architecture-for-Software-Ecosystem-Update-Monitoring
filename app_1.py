@@ -36,7 +36,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from temporal import resolve_temporal, matches_window
 from fetch_union import union_fetch, product_terms, reset_screened
@@ -1813,19 +1813,108 @@ def _tab_long(results: dict, presented, tables: bool = True) -> None:
         _detail_tables(presented)
 
 
-def _detail_tables(presented) -> None:
+_TABLE_TITLES = (("security", "Security fixes — CVE / advisory"),
+                 ("patches", "Patches — releases"),
+                 ("pages", "Vendor pages (trusted web, DuckDuckGo)"))
+
+
+def _keys(*texts: str, names: tuple = ()) -> set:
+    """What identifies a document across the pool, the evidence and the
+    tables: its url, any CVE id, and its cited name. A url alone missed the
+    release rows /api/v/ returns without one, so a "safe" verdict standing on
+    them listed its own evidence under "not used"."""
+    out = {t for t in texts[:1] if t} | {n for n in names if n}
+    for t in texts:
+        out |= {c.upper() for c in _CVE_ID.findall(t or "")}
+    return out
+
+
+def _verdict_keys(results: dict) -> set:
+    """Keys (see `_keys`) of the documents the verdict stands on."""
+    from eval_harness.generators import doc_id
+    cited = set((results.get("decision") or {}).get("evidence_doc_ids") or [])
+    out: set = set()
+    for pool in ("releases", "cve", "decision_advisories", "community", "web"):
+        for d in results.get(pool) or []:
+            if cited and (d.get("doc_id") or doc_id(d)) in cited:
+                # Only a shipped release is named by describe_record; an
+                # advisory with no id comes back as " advisory", which is no key.
+                rel = pool == "releases" and not d.get("is_cve") and vendor.is_release_record(d)
+                out |= _keys(d.get("url", ""), d.get("title", ""),
+                             names=(vendor.describe_record(d),) if rel else ())
+    return out
+
+
+def _answer_keys(results: dict, presented) -> set:
+    """Keys of the sources the presented paragraph cites."""
+    if presented is None:
+        return set()
+    trace = xai.explain(results.get("original_query", ""), presented.text, presented.evidence)
+    out: set = set()
+    for s in trace.sources:
+        if s["used"]:
+            out |= _keys(s["url"], s["label"], s["title"], names=(s["title"],))
+    return out
+
+
+def _row_keys(row: dict) -> set:
+    return _keys(row.get("Link", ""), row.get("CVE", ""),
+                 names=(row.get("Release", ""), row.get("Page", "")))
+
+
+def _split_tables(tables: dict, verdict: set, answer: set, product: bool) -> Tuple[dict, dict]:
+    """(used, other): rows the verdict or the answer paragraph uses, marked
+    with a leading "Used by" column, and the rest.
+
+    The tables used to list every row of the evidence as if each were the
+    answer: "Latest Nodej.s version?" showed seven advisories (Ghost,
+    ApostropheCMS, a Linux md/raid1 fix) and Linux releases while the verdict
+    cited none of them (live, 2026-11-12). With no product recognised nothing
+    is verified for any product, so every row goes to `other`."""
+    used = {k: [] for k in tables}
+    other = {k: [] for k in tables}
+    for key, rows in tables.items():
+        for r in rows:
+            mine = _row_keys(r)
+            by = [name for name, keys in (("verdict", verdict), ("answer", answer))
+                  if product and mine & keys]
+            if by:
+                used[key].append({"Used by": " · ".join(by), **r})
+            else:
+                other[key].append(r)
+    return used, other
+
+
+def _show_tables(tables: dict) -> None:
+    link = {"Link": st.column_config.LinkColumn("Link", display_text="open")}
+    for key, title in _TABLE_TITLES:
+        if tables.get(key):
+            st.markdown(f"##### {title} ({len(tables[key])})")
+            st.dataframe(tables[key], hide_index=True, use_container_width=True,
+                         column_config=link)
+
+
+def _detail_tables(presented, results: Optional[dict] = None) -> None:
     # The detail behind the paragraph, as the sources state it: every CVE with
     # what was wrong and the fixed-in version, the releases that ship the
     # patches, the vendor's own pages.
     tables = answer_agent.details(presented.evidence)
-    link = {"Link": st.column_config.LinkColumn("Link", display_text="open")}
-    for key, title in (("security", "Security fixes — CVE / advisory"),
-                       ("patches", "Patches — releases"),
-                       ("pages", "Vendor pages (trusted web, DuckDuckGo)")):
-        if tables[key]:
-            st.markdown(f"##### {title} ({len(tables[key])})")
-            st.dataframe(tables[key], hide_index=True, use_container_width=True,
-                         column_config=link)
+    if results is None:
+        _show_tables(tables)
+        return
+    product = bool(getattr(results.get("grounding"), "vendors", None))
+    used, other = _split_tables(tables, _verdict_keys(results),
+                                _answer_keys(results, presented), product)
+    n_other = sum(len(v) for v in other.values())
+    if any(used.values()):
+        _show_tables(used)
+    elif product:
+        st.caption("None of the retrieved rows backs the verdict or is cited in the answer.")
+    if n_other:
+        label = (f"Other retrieved rows, not used ({n_other})" if product else
+                 f"Retrieved rows, not verified — no product recognised ({n_other})")
+        with st.expander(label):
+            _show_tables(other)
 
 
 def _source_rows(results: dict, presented=None) -> list:
@@ -1856,7 +1945,8 @@ def _source_rows(results: dict, presented=None) -> list:
                 "Title": (d.get("title") or "")[:80],
                 "id": did,
             })
-    return rows
+    # What the verdict and the answer used first; stable, so pool order holds within.
+    return sorted(rows, key=lambda r: not (r["Verdict"] or r["Answer"]))
 
 
 def _tab_sources(results: dict, presented=None) -> None:
@@ -2002,11 +2092,17 @@ def _render_mermaid(src: str, height: int = 230) -> None:
 def _maintenance_context(results: dict, today=None, days: int = 183) -> Dict[str, list]:
     """{component: ["v1.2 (2026-10-01)", ...]} for the shipped releases this
     question retrieved in the last `days` -- newest first. Only what was
-    fetched: a question retrieves a handful of releases, not a 6-month feed."""
+    fetched: a question retrieves a handful of releases, not a 6-month feed.
+
+    Only the asked products' releases: a Node.js question listed five Linux
+    releases here (2026-11-12). With grounding and no product, nothing."""
     today = today or datetime.now().date()
     out: Dict[str, list] = {}
     rows = [r for r in (results.get("releases") or [])
             if not r.get("is_cve") and vendor.is_release_record(r)]
+    if "grounding" in results:
+        wanted = set(getattr(results["grounding"], "vendor_names", None) or [])
+        rows = [r for r in rows if str(r.get("product") or "").strip().lower() in wanted]
     for r in sorted(rows, key=lambda r: monitor.parse_ymd(r.get("date")) or today, reverse=True):
         d = monitor.parse_ymd(r.get("date"))
         if not d or not 0 <= (today - d).days <= days:
@@ -2054,12 +2150,16 @@ def render_ask_view(result_limit: int, source: str) -> None:
             rel = _headline_release(results, q)
             latest, advisories, community = st.columns(3)
             latest.metric("Latest release", f"v{rel['version']}" if rel else "—")
-            advisories.metric("Advisories", len(answer_agent.details(presented.evidence)["security"]))
+            # Advisories the verdict or the answer uses, not every row retrieved:
+            # the count sits beside the verdict and is read as its evidence.
+            used, _ = _split_tables(answer_agent.details(presented.evidence),
+                                    _verdict_keys(results), _answer_keys(results, presented), True)
+            advisories.metric("Advisories", len(used["security"]))
             community.metric("Community reports", len(results.get("community") or []))
 
     st.markdown("#### Vulnerabilities & patches")
     if any(answer_agent.details(presented.evidence).values()):
-        _detail_tables(presented)
+        _detail_tables(presented, results)
     else:
         st.caption("No advisory, patch or vendor-page rows in this question's evidence.")
 
