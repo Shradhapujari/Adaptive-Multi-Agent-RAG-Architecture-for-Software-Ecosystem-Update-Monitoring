@@ -92,6 +92,7 @@ _UNSEARCHABLE = frozenset({
     "you", "your", "update", "updates", "release", "releases", "security",
     "patch", "patches", "bug", "bugs", "fix", "fixes", "issue", "issues",
     "software", "vulnerability", "vulnerabilities", "cve", "recent", "support",
+    "safe",
 })
 
 # Query words that name a product without being the catalog's spelling of it.
