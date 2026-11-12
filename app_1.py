@@ -1691,10 +1691,35 @@ def _no_product_note(results: dict) -> str:
     return out
 
 
+# The verdict in the words of the question. "Is it safe to update Firefox?"
+# answered "Patch urgently" left the reader to work out that this means yes.
+_STANCE_WORDS = {
+    "patch_urgently":        "Yes, update now",
+    "safe":                  "Yes, safe to update",
+    "update_with_caveat":    "Yes, with a caveat",
+    "hold":                  "Not yet, hold off",
+    "insufficient_evidence": "Not enough evidence to say",
+}
+
+
+def _plain_verdict(verdict: str, query: str) -> str:
+    """Icon and headline for a verdict; a yes/no only when the question was one."""
+    icon, label = _VERDICT_BADGE.get(verdict, ("⚪", verdict))
+    if graph.asks(query) == "stance":
+        label = _STANCE_WORDS.get(verdict, label)
+    return f"{icon} {label}"
+
+
+def _md_escape(text: str) -> str:
+    """A visitor's text as literal markdown: `![x](url)` in a question made
+    every reader's browser fetch that url."""
+    return re.sub(r"([\\`*_{}\[\]()<>#!|~$])", r"\\\1", text or "")
+
+
 def _tab_short(results: dict, presented=None) -> None:
     dec = results.get("decision")
     query = results.get("original_query", "")
-    st.caption(f"**Q:** {query}")
+    st.caption(f"**Q:** {_md_escape(query)}")
     asks_value = graph.asks(query) in ("version", "date")
     g = results.get("grounding")
     no_product = g is not None and not getattr(g, "vendors", None)
@@ -1740,15 +1765,12 @@ def _tab_short(results: dict, presented=None) -> None:
         st.caption("No document in the pool is about the asked product, so the "
                    "system abstains rather than guess.")
         return
-    icon, label = _VERDICT_BADGE.get(dec["verdict"], ("⚪", dec["verdict"]))
-    st.markdown(f"### {icon} {label}")
+    st.markdown(f"### {_plain_verdict(dec['verdict'], query)}")
     st.write(dec.get("rationale") or "—")
     if line:
         st.markdown(f"**Answer:** {line}")
-    meta = f"confidence {dec.get('confidence', 0):.2f} · {dec.get('stop_reason', '')}"
     if dec.get("source") == "web":
-        meta += " · via web fallback (GR-2)"
-    st.caption(meta)
+        st.caption("Answered from trusted vendor pages found by web search.")
 
 
 def _answer_urls(results: dict, presented) -> set:
@@ -1949,8 +1971,12 @@ def _render_mermaid(src: str, height: int = 230) -> None:
     # which is what makes an unsandboxed iframe acceptable here.
     doc = (f'<pre class="mermaid" style="margin:0">{html.escape(src)}</pre>'
            f'<script type="module">import mermaid from "{_MERMAID_JS}";'
-           'mermaid.initialize({startOnLoad: true, theme: "neutral",'
-           ' flowchart: {useMaxWidth: true}});</script>')
+           'mermaid.initialize({startOnLoad: false, theme: "neutral",'
+           ' flowchart: {useMaxWidth: true}});'
+           # Drawn once the frame has a width: inside a collapsed expander it
+           # has none, and mermaid laid every node out at NaN -- a blank box.
+           'new ResizeObserver((_, o) => { if (document.body.offsetWidth) {'
+           ' o.disconnect(); mermaid.run(); } }).observe(document.body);</script>')
     # st.iframe replaces components.html (deprecated); older Streamlit lacks it.
     if hasattr(st, "iframe"):
         st.iframe(doc, height=height)
@@ -1985,9 +2011,6 @@ def render_ask_view(result_limit: int, source: str) -> None:
     st.markdown("### Software Update Decision Intelligence")
     st.caption("Is an update safe? Answered from live release notes, CISA KEV / NVD "
                "advisories and community reports — every claim cited.")
-    diagram = st.empty()
-    with diagram.container():
-        _render_mermaid(_pipeline_mermaid())
     # A form, so Enter asks too; outside one, Enter only reran the page and
     # cleared the previous answer.
     with st.form("ask_form", border=False):
@@ -1996,14 +2019,21 @@ def render_ask_view(result_limit: int, source: str) -> None:
                             placeholder='e.g. "Is it safe to update Firefox?"  ·  "Latest Node.js version?"')
         asked = bcol.form_submit_button("Ask", type="primary", use_container_width=True)
     if not q or not asked:
-        st.html(_console_html("$ ready — type a question and press Ask"))
+        with st.expander("How it works"):
+            _render_mermaid(_pipeline_mermaid())
         return
     results, presented = ask(q, limit=result_limit, source=source)
-    with diagram.container():
-        _render_mermaid(_pipeline_mermaid(results))
 
-    st.markdown("#### Short answer & verdict")
-    _tab_short(results, presented)
+    # Verdict first: the answer, then the three numbers behind it. The pipeline
+    # diagram and the trace are how it was answered, so they go last.
+    with st.container(border=True):
+        _tab_short(results, presented)
+        if getattr(results.get("grounding"), "vendors", None):
+            rel = _headline_release(results, q)
+            latest, advisories, community = st.columns(3)
+            latest.metric("Latest release", f"v{rel['version']}" if rel else "—")
+            advisories.metric("Advisories", len(answer_agent.details(presented.evidence)["security"]))
+            community.metric("Community reports", len(results.get("community") or []))
 
     st.markdown("#### Vulnerabilities & patches")
     if any(answer_agent.details(presented.evidence).values()):
@@ -2028,8 +2058,13 @@ def render_ask_view(result_limit: int, source: str) -> None:
     with st.expander("Feedback loops"):
         _tab_loops(results, q)
 
-    # st.html, not st.markdown: markdown reads "$ ask ..." as LaTeX.
-    st.html(_console_html(_console_log(q, results, results["route"])))
+    with st.expander("How this was answered"):
+        _render_mermaid(_pipeline_mermaid(results))
+        dec = results.get("decision") or {}
+        if dec:
+            st.caption(f"confidence {dec.get('confidence', 0):.2f} · {dec.get('stop_reason', '')}")
+        # st.html, not st.markdown: markdown reads "$ ask ..." as LaTeX.
+        st.html(_console_html(_console_log(q, results, results["route"])))
 
 
 # ── SIDEBAR ───────────────────────────────────────────────
@@ -2303,7 +2338,7 @@ with st.sidebar:
             with st.expander(f"Last {len(_recent)} question(s)"):
                 for r in _recent:
                     flag = " · offline" if r.offline else ""
-                    st.markdown(f"**{r.query}**")
+                    st.markdown(f"**{_md_escape(r.query)}**")
                     st.caption(f"{r.ts[:16].replace('T', ' ')} · "
                                f"{r.n_documents} document(s){flag}")
                     if st.button("Ask again", key=f"again_{r.run_id}",

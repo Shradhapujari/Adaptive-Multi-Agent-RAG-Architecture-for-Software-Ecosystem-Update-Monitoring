@@ -78,3 +78,15 @@ def test_console_uses_gate_and_verdict_tags():
     log = app_1._console_log("q", res, {"mode": "full", "why": "x"})
     assert "[GATE]" in log and "[VERDICT] safe" in log and "[TIMING]" in log
     assert "[DECIDE]" not in log and "[SUFFICIENCY]" not in log
+
+
+def test_stance_question_gets_a_yes_or_no_headline():
+    assert app_1._plain_verdict("patch_urgently", "Is it safe to update Firefox?") == "🔴 Yes, update now"
+    assert app_1._plain_verdict("hold", "Should I update to macOS 27?").endswith("Not yet, hold off")
+    # Not a yes/no question, so no "Yes": the badge label stands.
+    assert app_1._plain_verdict("patch_urgently", "Latest Node.js version?") == "🔴 Patch urgently"
+
+
+def test_a_question_is_echoed_as_text_not_markdown():
+    out = app_1._md_escape("weather ![x](https://example.com/p.png) <b>")
+    assert "![x](" not in out and r"\!\[x\]\(" in out and r"\<b\>" in out
