@@ -59,7 +59,9 @@ st.set_page_config(
     page_title="Software Ecosystem Monitoring — Multi-Agent RAG",
     page_icon="🤖",
     layout="wide",
-    initial_sidebar_state="expanded"
+    # Collapsed: the console view needs nothing from it; the classic modes,
+    # Monitor and Results are one click away on the chevron.
+    initial_sidebar_state="collapsed"
 )
 
 # ── CUSTOM CSS ───────────────────────────────────────────
@@ -99,6 +101,15 @@ st.markdown("""
     .neutral  { border-left: 4px solid #F5A623; }
     .cve-card { border-left: 4px solid #C62828; background: #FFF5F5; }
     .release-card { border-left: 4px solid #1565C0; background: #F0F4FF; }
+    /* Decision console: one column, nothing wider than the page. */
+    .sys-console {
+        background: #0b0f14; color: #d6dde6;
+        font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+        padding: .8rem 1rem; border-radius: 6px; margin-top: 1.5rem;
+        max-height: 320px; overflow-y: auto;
+        white-space: pre-wrap; overflow-wrap: anywhere;
+    }
+    .sys-console .tag { color: #7fb4ff; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1589,15 +1600,19 @@ def _console_log(query: str, results: dict, route: dict) -> str:
         tag = "fired" if wf["used"] else "no backend (pip install ddgs)"
         L.append(f"[FETCH]   {'Web':<9} {wf['n']:>2} docs  (GR-2 {tag})")
     gate = dec.get("evidence_class", "absent")
-    L.append(f"[SUFFICIENCY] evidence={gate}  pool={dec.get('pool_size', 0)}"
+    L.append(f"[GATE]    evidence={gate}  pool={dec.get('pool_size', 0)}"
              + (f"  via={dec['source']}" if dec.get("source") else ""))
     if dec.get("path"):
-        L.append(f"[SUFFICIENCY] path: {' → '.join(dec['path'])}")
+        L.append(f"[GATE]    path: {' → '.join(dec['path'])}")
     if dec:
-        L.append(f"[DECIDE]  {dec.get('verdict', '—')}  "
+        L.append(f"[VERDICT] {dec.get('verdict', '—')}  "
                  f"cites={dec.get('evidence_doc_ids', [])}  conf={dec.get('confidence', 0)}")
     else:
-        L.append("[DECIDE]  abstain — insufficient evidence")
+        L.append("[VERDICT] abstain — insufficient evidence")
+    timing = results.get("timing") or {}
+    if timing:
+        L.append("[TIMING]  " + "  ".join(f"{k}={v}s" for k, v in timing.items())
+                 + f"  total={sum(timing.values()):.1f}s")
     return "\n".join(L)
 
 
@@ -1650,7 +1665,11 @@ def _tab_short(results: dict, presented=None) -> None:
             st.caption(f"Also: {icon} {label} — {dec.get('rationale') or ''}")
         return
     line = _answer_line(results, presented.text) if presented is not None else ""
-    if _ASKS_WHAT.match(query) and presented is not None:
+    # Under Patch now too: the model's first sentence there was a denial one
+    # run and a hedge the next ("...do not indicate these are critical or
+    # unpatched", 2026-11-12), each printed as the answer under a red badge.
+    if presented is not None and (_ASKS_WHAT.match(query)
+                                  or (dec or {}).get("verdict") == "patch_urgently"):
         # Composed from the advisory rows when there are any, so the count is
         # the Sources tab's; the model's headline otherwise.
         line = answer_agent.summary_line(presented.evidence) or line
@@ -1659,7 +1678,7 @@ def _tab_short(results: dict, presented=None) -> None:
         if dec and dec.get("verdict") not in (None, "safe", "insufficient_evidence"):
             icon, label = _VERDICT_BADGE.get(dec["verdict"], ("⚪", dec["verdict"]))
             st.caption(f"Also: {icon} {label} — {dec.get('rationale') or ''}")
-        st.caption("Details, CVEs and patches: Detailed Answer tab.")
+        st.caption("CVEs and patches: Vulnerabilities & patches, below.")
         return
     if not dec:
         st.markdown("### ⚪ Not enough evidence")
@@ -1685,7 +1704,7 @@ def _answer_urls(results: dict, presented) -> set:
     return {s["url"] for s in trace.sources if s["used"] and s["url"]}
 
 
-def _tab_long(results: dict, presented) -> None:
+def _tab_long(results: dict, presented, tables: bool = True) -> None:
     lead = answer_agent.verdict_lead(results.get("decision"))
     text = presented.text or ""
     if lead:
@@ -1698,6 +1717,11 @@ def _tab_long(results: dict, presented) -> None:
     trace = xai.explain(results.get("original_query", ""), presented.text, presented.evidence)
     secs = round(sum((results.get("timing") or {}).values()), 1)
     st.caption(_answer_caption(presented, sum(s["used"] for s in trace.sources), secs))
+    if tables:
+        _detail_tables(presented)
+
+
+def _detail_tables(presented) -> None:
     # The detail behind the paragraph, as the sources state it: every CVE with
     # what was wrong and the fixed-in version, the releases that ship the
     # patches, the vendor's own pages.
@@ -1707,7 +1731,7 @@ def _tab_long(results: dict, presented) -> None:
                        ("patches", "Patches — releases"),
                        ("pages", "Vendor pages (trusted web, DuckDuckGo)")):
         if tables[key]:
-            st.markdown(f"#### {title} ({len(tables[key])})")
+            st.markdown(f"##### {title} ({len(tables[key])})")
             st.dataframe(tables[key], hide_index=True, use_container_width=True,
                          column_config=link)
 
@@ -1814,37 +1838,139 @@ def ask(q: str, limit: int = 5, source: str = "agent"):
         return results, present_answer(results["original_query"], results)
 
 
+_MERMAID_JS = "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs"
+_STAGES = ("ask", "intent", "route", "rewrite", "retrieve", "classify", "answer", "abstain")
+
+
+def _pipeline_mermaid(results: Optional[dict] = None) -> str:
+    """graph.py's walk as Mermaid source. Before a run every stage is plain;
+    after one, the stages the run took are solid and the rest dashed -- the
+    releasetrain.io convention. Node names are graph.py's, so `path` maps on.
+    """
+    dec = (results or {}).get("decision") or {}
+    path = dec.get("path") or []
+    mode = ((results or {}).get("route") or {}).get("mode")
+    retries = max(0, path.count("rewrite") - 1)
+    lines = [
+        "flowchart LR",
+        'ask(["Ask"]) --> intent["Intent<br/>classification"] --> route{"Route"}',
+        # Full branch first: dagre breaks the retry cycle by declaration order,
+        # and fast-first ranked the Rewriter after the gate.
+        'route -- full --> rewrite["Query<br/>Rewriter"] --> retrieve["Multi-Source<br/>Retriever"]',
+        'route -- "fast: version/date" --> retrieve',
+        'retrieve --> classify{"Evaluator /<br/>Sufficiency Gate"}',
+        'classify -- sufficient --> answer["Orchestrator /<br/>Verdict Gate"]',
+        'classify -- "degraded' + (f" (retried ×{retries})" if retries else "") + '" --> rewrite',
+        'classify -- absent --> abstain(["Abstain"])',
+        "classDef taken fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b3a1d",
+        "classDef skipped fill:#fafafa,stroke:#9e9e9e,stroke-dasharray:4 3,color:#9e9e9e",
+    ]
+    if results:
+        taken = {"ask", "intent", "route", "retrieve"} | set(path)
+        # The fast walk runs an identity rewrite; no Rewriter agent ran.
+        if mode == "fast":
+            taken.discard("rewrite")
+        else:
+            taken.add("rewrite")      # run_pipeline always rewrites before fetching
+        if not dec:
+            taken.add("abstain")      # abstained before the gate
+        skipped = [n for n in _STAGES if n not in taken]
+        lines.append("class " + ",".join(n for n in _STAGES if n in taken) + " taken")
+        if skipped:
+            lines.append("class " + ",".join(skipped) + " skipped")
+    return "\n".join(lines)
+
+
+def _render_mermaid(src: str, height: int = 230) -> None:
+    import html
+    import streamlit.components.v1 as components
+    # ponytail: CDN-loaded, so the diagram is blank offline; st.graphviz_chart
+    # is the offline fallback if the demo ever runs without a network.
+    # Built from fixed labels and a retry count only -- no user or model text,
+    # which is what makes an unsandboxed iframe acceptable here.
+    doc = (f'<pre class="mermaid" style="margin:0">{html.escape(src)}</pre>'
+           f'<script type="module">import mermaid from "{_MERMAID_JS}";'
+           'mermaid.initialize({startOnLoad: true, theme: "neutral",'
+           ' flowchart: {useMaxWidth: true}});</script>')
+    # st.iframe replaces components.html (deprecated); older Streamlit lacks it.
+    if hasattr(st, "iframe"):
+        st.iframe(doc, height=height)
+    else:
+        components.html(doc, height=height)
+
+
+def _maintenance_context(results: dict, today=None, days: int = 183) -> Dict[str, list]:
+    """{component: ["v1.2 (2026-10-01)", ...]} for the shipped releases this
+    question retrieved in the last `days` -- newest first. Only what was
+    fetched: a question retrieves a handful of releases, not a 6-month feed."""
+    today = today or datetime.now().date()
+    out: Dict[str, list] = {}
+    rows = [r for r in (results.get("releases") or [])
+            if not r.get("is_cve") and vendor.is_release_record(r)]
+    for r in sorted(rows, key=lambda r: monitor.parse_ymd(r.get("date")) or today, reverse=True):
+        d = monitor.parse_ymd(r.get("date"))
+        if not d or not 0 <= (today - d).days <= days:
+            continue
+        out.setdefault(r.get("product") or "Other", []).append(f"v{r.get('version')} ({d.isoformat()})")
+    return out
+
+
+def _console_html(text: str) -> str:
+    import html
+    body = re.sub(r"^(\$ .*|\[[A-Z]+\])", r'<span class="tag">\1</span>',
+                  html.escape(text), flags=re.M)
+    return f'<div class="sys-console">{body}</div>'
+
+
 def render_ask_view(result_limit: int, source: str) -> None:
-    st.markdown(
-        "<div class='main-header'><h2 style='margin:0'>Software Update Decision Intelligence</h2>"
-        "<p style='margin:.3rem 0 0'>Ask whether an update is safe — grounded in live "
-        "release notes, advisories and community reports.</p></div>",
-        unsafe_allow_html=True)
+    st.markdown("### Software Update Decision Intelligence")
+    st.caption("Is an update safe? Answered from live release notes, CISA KEV / NVD "
+               "advisories and community reports — every claim cited.")
+    diagram = st.empty()
+    with diagram.container():
+        _render_mermaid(_pipeline_mermaid())
     # A form, so Enter asks too; outside one, Enter only reran the page and
     # cleared the previous answer.
     with st.form("ask_form", border=False):
-        q = st.text_input("Ask", key="ask_query", label_visibility="collapsed",
-                          placeholder='e.g. "Is it safe to update Firefox?"  ·  "Latest Node.js version?"')
-        asked = st.form_submit_button("Ask", type="primary")
+        qcol, bcol = st.columns([8, 1])
+        q = qcol.text_input("Ask", key="ask_query", label_visibility="collapsed",
+                            placeholder='e.g. "Is it safe to update Firefox?"  ·  "Latest Node.js version?"')
+        asked = bcol.form_submit_button("Ask", type="primary", use_container_width=True)
     if not q or not asked:
-        st.caption("Type a question and press **Ask**.")
+        st.html(_console_html("$ ready — type a question and press Ask"))
         return
     results, presented = ask(q, limit=result_limit, source=source)
-    route = results["route"]
-    left, right = st.columns(2, gap="large")
-    with left:
-        t1, t2, t3, t4, t5 = st.tabs(
-            ["Basic Answer", "Detailed Answer", "Sources", "Guardrails", "Feedback Loops"])
-        with t1: _tab_short(results, presented)
-        with t2: _tab_long(results, presented)
-        with t3: _tab_sources(results, presented)
-        with t4: _tab_guardrails(results, presented)
-        with t5: _tab_loops(results, q)
-    with right:
-        st.markdown("**System console**")
-        st.code(_console_log(q, results, route), language="text")
-        st.caption(f"intent → routing → fetch → gate → verdict · "
-                   f"{sum(results.get('timing', {}).values()):.1f}s total")
+    with diagram.container():
+        _render_mermaid(_pipeline_mermaid(results))
+
+    st.markdown("#### Short answer & verdict")
+    _tab_short(results, presented)
+
+    st.markdown("#### Vulnerabilities & patches")
+    if any(answer_agent.details(presented.evidence).values()):
+        _detail_tables(presented)
+    else:
+        st.caption("No advisory, patch or vendor-page rows in this question's evidence.")
+
+    st.markdown("#### Security & maintenance context")
+    ctx = _maintenance_context(results)
+    for comp, rels in ctx.items():
+        st.markdown(f"**{comp}** — " + ", ".join(rels))
+    st.caption("Releases from the last 6 months among the documents this question "
+               "retrieved, by component." if ctx else
+               "No release from the last 6 months among the retrieved documents.")
+
+    with st.expander("Detailed answer"):
+        _tab_long(results, presented, tables=False)
+    with st.expander("Sources"):
+        _tab_sources(results, presented)
+    with st.expander("Guardrails"):
+        _tab_guardrails(results, presented)
+    with st.expander("Feedback loops"):
+        _tab_loops(results, q)
+
+    # st.html, not st.markdown: markdown reads "$ ask ..." as LaTeX.
+    st.html(_console_html(_console_log(q, results, results["route"])))
 
 
 # ── SIDEBAR ───────────────────────────────────────────────

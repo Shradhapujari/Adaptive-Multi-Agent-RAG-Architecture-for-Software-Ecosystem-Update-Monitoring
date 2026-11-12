@@ -271,11 +271,15 @@ def details(evidence) -> Dict[str, List[Dict[str, str]]]:
             cve = _CVE_ID.search(f"{e.label} {e.title} {e.url}")
             aff = _AFFECTS.search(e.label)
             fix = _FIXED_IN.search(e.detail or "")
+            # Short columns first: the free-text one ran the KEV and severity
+            # columns off the right edge of a half-width table.
             out["security"].append({
                 "CVE": cve.group(0).upper() if cve else "—",
-                "What was wrong": _clean(e.detail or e.title, 160),
-                "Affects": aff.group(1) if aff else "",
+                "CISA KEV": "yes" if e.source == "cisa_kev" else "",
+                "Severity": e.severity.upper() or "—",
                 "Fixed in": fix.group(1) if fix else "",
+                "Affects": aff.group(1) if aff else "",
+                "What was wrong": _clean(e.detail or e.title, 160),
                 "Date": e.date, "Link": e.url})
         elif e.kind == "release":
             out["patches"].append({"Release": e.title, "Date": e.date,
@@ -320,19 +324,21 @@ def summary_line(evidence) -> str:
     rows = details(evidence)["security"]
     if not rows:
         return ""
-    product = (rows[0]["Affects"].split() or [""])[0]
+    # The first row that names one: KEV rows have no "affects" string, and one
+    # sorting first left the product blank ("Recent Recent updates", 2026-11-12).
+    product = next((r["Affects"].split()[0] for r in rows if r["Affects"].split()), "")
     # An advisory whose own text never names the product is filed under it,
     # not about it: NVD lists an OpenClaw flaw ("before 2026.8.0") as chrome
     # 2026.5.1. It still counts -- the Sources tab shows it -- but it does
     # not get to name a flaw or set the version to update to.
     own = [r for r in rows if product and product.lower() in r["What was wrong"].lower()] or rows
     flaws = list(dict.fromkeys(f for f in (_flaw(r["What was wrong"], product) for r in own) if f))
-    name = product[:1].upper() + product[1:] if product else "Recent"
-    out = (f"Recent {name} updates fixed {len(rows)} security bug(s)"
+    name = product[:1].upper() + product[1:]
+    out = (f"Recent {name + ' ' if name else ''}updates fixed {len(rows)} security bug(s)"
            + (f", including {_join(flaws[:3])}" if flaws else "") + ".")
     fixed = [r["Fixed in"] for r in own if r["Fixed in"]]
     if fixed:
-        out += f" Update to {name} {max(fixed, key=_vkey)} or later."
+        out += f" Update to {(name + ' ') if name else ''}{max(fixed, key=_vkey)} or later."
     return out
 
 
@@ -348,6 +354,8 @@ class Evidence:
     date: str = ""
     security: bool = False
     sentiment: str = ""
+    source: str = ""      # feed tag, e.g. cisa_kev -- the KEV column reads it
+    severity: str = ""    # versionSeverity as the feed states it; never inferred
 
     def line(self, tag: str = "") -> str:
         """One source line for the prompt: the citation label, then the facts.
@@ -488,6 +496,7 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
             label=label, kind="advisory" if advisory else "release", title=name,
             detail=_clean(r.get("notes", "")), url=r.get("url", ""), date=date,
             security=advisory or "SECURITY" in (r.get("security") or []),
+            source=r.get("source", ""), severity=str(r.get("versionSeverity") or ""),
         ))
 
     for c in kevs:
@@ -504,6 +513,7 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
                   + (f", {date}" if date else ""),
             kind="advisory", title=title, detail=_clean(c.get("detail", "")),
             url=c.get("url", ""), date=date, security=True,
+            source=c.get("source", ""), severity=str(c.get("versionSeverity") or ""),
         ))
 
     for c in [c for c in posts if not is_kev(c)][:per_kind]:
@@ -591,6 +601,41 @@ def verdict_lead(decision: Optional[Dict]) -> str:
         return ""
     from decide import LEAD
     return f"{LEAD[decision['verdict']]}: {decision.get('rationale', '')}.".strip()
+
+
+# Sentences that deny a verdict outright. Prefixing the lead (present_answer)
+# keeps the verdict first, but not the only claim: on 2026-11-12 "Patch now: 9
+# advisory document(s)..." was followed by "There are no critical Linux kernel
+# vulnerabilities right now." and the console showed that as the answer under
+# a red badge. "Safe to update" denies both patch_urgently and hold; "no
+# vulnerabilities" denies only patch_urgently -- a hold is about regressions,
+# and "no known vulnerabilities" can be true under one.
+_DENIES_SAFE = re.compile(r"\b(?<!not )(?<!n't )safe to (?:update|upgrade|install)\b", re.I)
+_DENIES_VULNS = re.compile(
+    r"\b(?:no|none of the)\s+(?:\w+\s+){0,4}?"
+    r"(?:vulnerabilit\w*|cves?|advisor\w*|exploits?|flaws?|security (?:issues?|bugs?|holes?))\b"
+    r"|\bnot (?:\w+\s+){0,2}(?:vulnerable|affected)\b", re.I)
+_DENIALS = {"patch_urgently": (_DENIES_SAFE, _DENIES_VULNS), "hold": (_DENIES_SAFE,)}
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+_NUMBERED = re.compile(r"^\s*\d+[.)]\s+")
+
+
+def drop_verdict_denials(body: str, verdict: Optional[str]) -> str:
+    """`body` without the prose sentences that deny `verdict`. Numbered items
+    are kept whole: "CVE-x does not affect 6.1" is a finding, not a denial.
+    ponytail: regex sentence split; "e.g." splits a sentence early, which
+    only matters if the fragment also denies the verdict."""
+    pats = _DENIALS.get(verdict or "")
+    if not pats:
+        return body
+    lines = []
+    for ln in body.split("\n"):
+        if not _NUMBERED.match(ln):
+            ln = " ".join(s for s in _SENTENCE_END.split(ln)
+                          if not any(p.search(s) for p in pats)).strip()
+        lines.append(ln)
+    # Leading newlines kept: they are what separates a list from the lead.
+    return "\n".join(lines).strip(" ").rstrip()
 
 
 def build_cited_prompt(query: str, evidence: List[Evidence],
@@ -849,11 +894,17 @@ def present_answer(query: str, results: Dict, model_spec: Optional[str] = None,
     # so whatever the model did, and covers the rule-composed fallback, which
     # is never shown the prompt at all. Same reason the leak scan is here.
     lead = verdict_lead(results.get("decision"))
-    if lead and not text.startswith(lead):
+    body = text[len(lead):] if lead and text.startswith(lead) else text
+    kept = drop_verdict_denials(body, (results.get("decision") or {}).get("verdict"))
+    notes = ["leak scan: " + ", ".join(hits)] if hits else []
+    if kept.strip() != body.strip():
+        text = (lead + (kept if kept.startswith("\n") else f" {kept}")).strip()
+        notes.append("dropped prose contradicting the verdict")
+    elif lead and not text.startswith(lead):
         text = f"{lead} {text}"
-    if not hits and text == out.text:
+    if not notes and text == out.text:
         return out
-    note = "leak scan: " + ", ".join(hits) if hits else ""
+    note = "; ".join(notes)
     return replace(out, text=text,
                    note=f"{out.note}; {note}" if out.note and note else note or out.note)
 
