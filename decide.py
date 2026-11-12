@@ -176,6 +176,57 @@ try:
 except (OSError, ValueError, KeyError):
     KB = {}
 
+# Vendor names that advisories put first ("Cisco IOS XE ...", "Zoom Windows
+# client ..."). Static for the same reason as KB.
+try:
+    with open(os.path.join(os.path.dirname(_KB_PATH), "known_vendors.json"), encoding="utf-8") as _f:
+        _kv = json.load(_f)
+        KNOWN_VENDORS = frozenset(_kv["kev"]) | frozenset(_kv["extra"])
+except (OSError, ValueError, KeyError):
+    KNOWN_VENDORS = frozenset()
+
+
+def _word_at(name: str, text: str) -> Optional[int]:
+    """Start of `name` as a whole word in `text`, or None."""
+    m = re.search(r"(?<![a-z0-9])" + re.escape(name) + r"(?![a-z0-9])", text)
+    return m.start() if m else None
+
+
+def _foreign_vendor_first(d: dict, vendors: Sequence[str]) -> bool:
+    """True when an advisory's subject names another vendor before every asked
+    product it names -- "Cisco IOS XE ..." for iOS, "Zoom Windows client ..."
+    for Windows. Advisories are written vendor-first, so the first vendor
+    named is the artifact's owner.
+
+    Only judged for products whose owner is on file (vendor_kb.json
+    `kev_vendors`): without one, a vendor before the product may be its own
+    ("Canonical Ubuntu"), so an asked product with no owner on file is never
+    blocked. A product the subject does not name (owned through the fix
+    clause) is not blocked either.
+
+    ponytail: KNOWN_VENDORS is a static list (KEV vendors + a few by hand);
+    a vendor missing from it passes. Upgrade path is NVD CPE vendor fields.
+    """
+    body = normalize(str(d.get("text") or d.get("detail") or "")).lower()
+    m = _PREDICATE.search(body)
+    if not m or m.start() == 0:
+        return False
+    head = _PLATFORM_PREP.split(body[:m.start()], maxsplit=1)[0]
+    blocked = False
+    for v in vendors:
+        pos = min((p for t in _vendor_tokens([v]) if (p := _word_at(t, head)) is not None), default=None)
+        if pos is None:
+            continue
+        owners = {o.lower() for o in KB.get(str(v).lower(), {}).get("kev_vendors", ())}
+        if not owners:
+            return False
+        first = min((p for n in KNOWN_VENDORS - owners if (p := _word_at(n, head)) is not None),
+                    default=None)
+        if first is None or first >= pos:
+            return False
+        blocked = True
+    return blocked
+
 
 def _owns(segment: str, vtoks: set, exclude: Sequence[str] = ()) -> bool:
     """Does `segment` (an advisory subject or fix clause) name the product as
@@ -257,18 +308,57 @@ def _subject_names_product(d: dict, vtoks: set, exclude: Sequence[str] = ()) -> 
     return any(_owns(fm.group(1), vtoks, exclude) for fm in _FIX_CLAUSE.finditer(body))
 
 
-def _about(d: dict, vtoks: set, qtoks: set, exclude: Sequence[str] = ()) -> bool:
+def kev_owns(d: dict, vendors: Sequence[str], exclude: Sequence[str] = ()) -> bool:
+    """Does a CISA KEV row's own vendorProject/product name an asked product?
+
+    KEV states the affected vendor and product as fields, so this reads those
+    rather than guessing from the description. The description cannot tell a
+    homonym from the product -- VMware "SD-WAN Edge" read as Microsoft Edge,
+    Cisco "IOS" as Apple iOS -- and it hid the rows it should have counted:
+    Chrome's are filed as Google "Chromium V8", which never says "chrome".
+
+    With an owner on file (vendor_kb.json `kev_vendors`), a row from any other
+    vendorProject is not this product's; one from the owner counts when its
+    product field names the product, or else when the description's subject
+    does (Apple files many rows as "Multiple Products"). With no owner on file,
+    the fields alone decide, with the platform after "for" cut off, so "Driver
+    for Windows" stays Intel's.
+    """
+    vend = normalize(str(d.get("kev_vendor") or "")).lower().strip()
+    prod = normalize(str(d.get("kev_product") or "")).lower()
+    for v in vendors:
+        vtoks = _vendor_tokens([v])
+        kb = KB.get(str(v).lower(), {})
+        owners = {o.lower() for o in kb.get("kev_vendors", ())}
+        if owners:
+            if vend not in owners:
+                continue
+            head = _PLATFORM_PREP.split(prod, maxsplit=1)[0]
+            names = vtoks | {p.lower() for p in kb.get("kev_products", ())}
+            if _tokens(head) & names or _subject_names_product(d, vtoks, exclude):
+                return True
+        elif _tokens(_PLATFORM_PREP.split(f"{vend} {prod}", maxsplit=1)[0]) & vtoks:
+            return True
+    return False
+
+
+def _about(d: dict, vtoks: set, qtoks: set, exclude: Sequence[str] = (),
+           vendors: Sequence[str] = ()) -> bool:
     """Is the document about the asked product? With a known vendor, the vendor
     name has to appear -- and for an advisory it has to appear in the subject,
-    for the reason `_subject_names_product` gives. Without a vendor, fall back
-    to sharing two content tokens with the question. The fallback is
-    deliberately weak -- a document the question's own words do not touch is
-    not evidence about it."""
+    for the reason `_subject_names_product` gives. A KEV row that carries its
+    vendor/product fields is decided by those instead (`kev_owns`). Without a
+    vendor, fall back to sharing two content tokens with the question. The
+    fallback is deliberately weak -- a document the question's own words do
+    not touch is not evidence about it."""
     toks = _tokens(_text(d))
+    if vtoks and d.get("source") in ADVISORY and d.get("kev_vendor"):
+        return kev_owns(d, vendors, exclude)
     if vtoks:
         if not toks & vtoks:
             return False
         return (_subject_names_product(d, vtoks, exclude)
+                and not _foreign_vendor_first(d, vendors)
                 if d.get("source") in ADVISORY else True)
     return len(toks & qtoks) >= 2
 
@@ -298,7 +388,7 @@ def decide(pool: Sequence[dict], question: str, vendors: Iterable[str] = (),
     vtoks, qtoks = _vendor_tokens(vendors), _tokens(question)
     exclude = [x.lower() for v in vendors
                for x in KB.get(str(v).lower(), {}).get("not_this_product", ())]
-    about = [d for d in pool if d.get("doc_id") and _about(d, vtoks, qtoks, exclude)]
+    about = [d for d in pool if d.get("doc_id") and _about(d, vtoks, qtoks, exclude, vendors)]
     on_version = [d for d in about if _version_ok(d, asked)]
 
     # An advisory counts when it is about the product even if it does not name

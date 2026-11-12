@@ -522,20 +522,60 @@ def fetch_apple_rss(query, limit=5):
     except Exception as e:
         return []
 
+import functools
+
+_KEV_TTL_S = 3600
+_KEV_WORD = re.compile(r"[a-z0-9][a-z0-9.+#-]*[a-z0-9+#]|[a-z0-9]")
+# Question scaffolding that also occurs in KEV product names ("Windows
+# Security Feature", "Update Stack"); a match on these is not a product match.
+_KEV_SCAFFOLD = frozenset("safe critical security vulnerability vulnerabilities "
+                          "exploited exploit patch patches fix fixed".split())
+
+
+@functools.lru_cache(maxsize=1)
+def _kev_catalog(bucket: int) -> tuple:
+    """The whole KEV catalogue, fetched at most once per `bucket` (an hour).
+    A failed fetch raises and is not cached, so the next call retries."""
+    import requests as req
+    r = req.get(CISA_KEV, timeout=15)
+    r.raise_for_status()
+    return tuple(r.json().get("vulnerabilities", []))
+
+
+def _kev_words(text: str) -> set:
+    return set(_KEV_WORD.findall((text or "").lower()))
+
+
 def fetch_cisa_kev(query, limit=3):
-    """Tier 1 — CISA Known Exploited Vulnerabilities (US Gov, actively exploited only)."""
+    """Tier 1 — CISA Known Exploited Vulnerabilities (US Gov, actively exploited only).
+
+    A row is returned only when a content word of the query is a whole word of
+    its vendorProject or product. The old test counted query words as
+    substrings of the whole row, so "is" and "it" matched nearly every
+    description ("this", "missing") and `hits >= 2` passed unrelated rows,
+    which then crowded the real ones out of `limit`. The row keeps
+    vendorProject and product as `kev_vendor` / `kev_product`, which is what
+    `decide.kev_owns` attributes it by.
+    """
     try:
-        import requests as req
-        r = req.get(CISA_KEV, timeout=15)
-        data = r.json().get("vulnerabilities", [])
-        terms = set(query.lower().replace("?","").replace("!","").split())
+        data = _kev_catalog(int(time.time() // _KEV_TTL_S))
+    except Exception:
+        return []
+    from decide import KB, _STOP
+    from keywords import QUESTION_STOPWORDS
+    words = {w for w in _kev_words(query)
+             if w not in _STOP and w not in QUESTION_STOPWORDS and w not in _KEV_SCAFFOLD}
+    # Chrome's rows are filed as "Chromium V8": the product's KEV names count.
+    words |= {p.lower() for w in list(words) for p in KB.get(w, {}).get("kev_products", ())}
+    try:
         results = []
         for v in data:
-            txt = (v.get("vendorProject","") + " " + v.get("product","") + " " +
-                   v.get("vulnerabilityName","") + " " + v.get("shortDescription","")).lower()
-            hits = sum(1 for w in terms if w in txt)
-            if hits >= 2:
-                results.append((hits, {
+            if not words & _kev_words(f"{v.get('vendorProject', '')} {v.get('product', '')}"):
+                continue
+            hits = len(words & _kev_words(" ".join(str(v.get(k, "")) for k in (
+                "vendorProject", "product", "vulnerabilityName", "shortDescription"))))
+            if hits:
+                results.append(((hits, v.get("dateAdded", "")), {
                     "title":   f"[CISA KEV] {v.get('vulnerabilityName','')} — {v.get('product','')}",
                     "subreddit": "CISA US-CERT",
                     "sentiment": "Negative",
@@ -546,9 +586,12 @@ def fetch_cisa_kev(query, limit=3):
                     "detail": v.get("shortDescription","")[:150],
                     "cve_id": v.get("cveID",""),
                     "action": v.get("requiredAction",""),
+                    "kev_vendor": v.get("vendorProject", ""),
+                    "kev_product": v.get("product", ""),
                     "verified": True,
                     "tier": 1,
                 }))
+        # Most matched words first, newest first among equals.
         results.sort(key=lambda x: x[0], reverse=True)
         return [d for _,d in results[:limit]]
     except Exception as e:

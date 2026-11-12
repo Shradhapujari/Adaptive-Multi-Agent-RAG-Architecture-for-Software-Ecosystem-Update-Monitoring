@@ -337,11 +337,15 @@ _LABEL_KINDS = (("Release Notes", "release"), ("Security Advisory", "advisory"),
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[\"“(]?[A-Z])|\n+")
 
 
+def _label(e) -> str:
+    return str(getattr(e, "label", "") or (e.get("label", "") if isinstance(e, dict) else "")).strip()
+
+
 def _kinds(evidence: Sequence) -> dict:
     """label -> evidence kind, from the item itself or its label's prefix."""
     out = {}
     for e in evidence or ():
-        label = str(getattr(e, "label", "") or (e.get("label", "") if isinstance(e, dict) else "")).strip()
+        label = _label(e)
         kind = getattr(e, "kind", "") or (e.get("kind", "") if isinstance(e, dict) else "")
         if label:
             out[label] = kind or next((k for p, k in _LABEL_KINDS if label.startswith(p)), "")
@@ -530,9 +534,16 @@ def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
                 f"{product} {claimed} is in no source (sources have "
                 f"{', '.join(sorted(known))})"))
 
-    # A CVE id the sources never mention is a fabricated one, however
-    # plausible its shape; the question may name one too.
-    known_cves = {c.upper() for c in _CVE_RE.findall(haystack + " " + (question or ""))}
+    # A CVE id the Tier-1 sources never mention is a fabricated one, however
+    # plausible its shape. Only a release note, an advisory or the vendor's own
+    # page can vouch for one: a forum post or an open-web snippet is quoted,
+    # untrusted text, and a CVE id in it reached the answer as fact. The
+    # question names a CVE only to ask about it, so it vouches for nothing --
+    # except in a refusal, which has to be able to say what it could not find.
+    tier1_labels = {lbl for lbl, k in _kinds(evidence).items()
+                    if k in ("release", "advisory") or lbl.startswith("Vendor page")}
+    tier1, _ = _lines([e for e in evidence or () if _label(e) in tier1_labels])
+    known_cves = {c.upper() for c in _CVE_RE.findall(tier1 + " " + (question if abstained else ""))}
     for c in sorted({c.upper() for c in _CVE_RE.findall(text)} - known_cves):
         bad.append(Violation("unsupported_cve", f"{c} is in no source"))
 

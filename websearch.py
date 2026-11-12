@@ -26,10 +26,15 @@ old honest abstention rather than erroring.
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import List, Optional, Tuple
 
 import guardrail
+
+# Off unless MARAG_WEB_FALLBACK=1. A live web read in a frozen benchmark is
+# non-reproducible, and the console reads this flag rather than forcing it on.
+ENABLE_WEB_FALLBACK = os.environ.get("MARAG_WEB_FALLBACK", "") == "1"
 
 MAX_RESULTS = 5
 UNTRUSTED = "[untrusted:community] {body} [/untrusted]"

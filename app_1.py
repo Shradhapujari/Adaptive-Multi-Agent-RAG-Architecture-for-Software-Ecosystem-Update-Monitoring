@@ -719,8 +719,24 @@ def _decide_pool(results: dict) -> list:
                 "source": source,
                 "url": d.get("url", ""),
                 "date": d.get("date", ""),
+                # KEV's own vendor/product fields: decide attributes by these.
+                **{k: d[k] for k in ("kev_vendor", "kev_product") if d.get(k)},
             })
     return out
+
+
+def _scope_cve(rows: list, g) -> list:
+    """The CVE pool scoped to the asked product. Reddit rows go through the
+    forum filter; CISA KEV rows, which name their vendor and product as
+    fields, go through `decide.kev_owns` -- the rule the verdict uses. The
+    forum filter matched KEV rows by text, so it dropped Chrome's ("Chromium
+    V8") and kept VMware's "SD-WAN Edge" for an Edge question."""
+    if not g.vendors:
+        return rows
+    kev = [r for r in rows if r.get("kev_vendor")]
+    rest = vendor.filter_community([r for r in rows if not r.get("kev_vendor")],
+                                   g.vendors, terms=g.terms)
+    return rest + [r for r in kev if decide.kev_owns(r, g.vendor_names)]
 
 
 def _short(err: str, limit: int = 90) -> str:
@@ -978,9 +994,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # The CVE feed is Reddit, not an advisory feed, so it gets the same vendor
     # scoping as the community pool and then has to prove it is about security
     # at all. Filters never empty a pool; a thin pool beats a false one.
-    if g.vendors:
-        results["cve"] = vendor.filter_community(results["cve"], g.vendors,
-                                                 terms=g.terms)
+    results["cve"] = _scope_cve(results["cve"], g)
     on_topic = [r for r in results["cve"] if is_security_post(r)]
     results["cve_dropped"] = len(results["cve"]) - len(on_topic)
     results["cve"] = on_topic
@@ -1135,6 +1149,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # it does not gate compute here (the fast path is a separate caller entry).
     results["route"] = dict(zip(("mode", "why"), graph.route_query(query)))
     results["web_fallback"] = None
+    results["web_enabled"] = web_fallback
     # The vendor's own release and security pages, searched keylessly
     # (DuckDuckGo) and kept only from trusted hosts. They feed the answer, not
     # the verdict: `_decide_pool` does not read `web`, so a search result can
@@ -1156,23 +1171,11 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         import websearch
         web_docs, meta = websearch.fallback(query, limit=limit)
         results["web_fallback"] = meta
-        if web_docs:
-            results["web"] = (results.get("web") or []) + web_docs
-            wstate = graph.run(
-                query,
-                rewrite=lambda q, tried: results["grounded_query"] or q,
-                retrieve=lambda q: (web_docs, False),
-                gate=decide.gate(g.vendor_names),
-            )
-            # Still abstains if the web is also empty of a verifiable value:
-            # a payload only exists for SUFFICIENT/AMBIGUOUS-grounded.
-            if wstate.payload:
-                results["decision"] = (
-                    decide.Decision.from_dict(wstate.payload).as_dict()
-                    | {"evidence_class": wstate.evidence.value,
-                       "path": [st.node for st in wstate.trace],
-                       "pool_size": len(web_docs), "shown": shown,
-                       "source": "web", "citable_kinds": sorted(g.citable_kinds)})
+        # The web feeds the answer paragraph, never the verdict. A second gate
+        # run over these docs used to replace the decision here, but decide has
+        # no source class for "web", so it could only ever say
+        # insufficient_evidence -- relabelled as coming from the web.
+        results["web"] = (results.get("web") or []) + web_docs
         results["timing"]["web_fallback"] = round(time.time() - t0, 2)
 
     return results
@@ -1596,6 +1599,8 @@ def _console_log(query: str, results: dict, route: dict) -> str:
                         ("community", "Community")):
         L.append(f"[FETCH]   {label:<9} {len(results.get(pool) or []):>2} docs")
     wf = results.get("web_fallback")
+    if results.get("web_enabled") is False:
+        L.append(f"[FETCH]   {'Web':<9}  — GR-2 off (MARAG_WEB_FALLBACK=1 enables)")
     if wf is not None:
         tag = "fired" if wf["used"] else "no backend (pip install ddgs)"
         L.append(f"[FETCH]   {'Web':<9} {wf['n']:>2} docs  (GR-2 {tag})")
@@ -1813,6 +1818,9 @@ def _tab_loops(results: dict, query: str) -> None:
                     + (f"{ws['n']} page(s) kept from {', '.join(ws['hosts'])}" if ws["backend"]
                        else "not available — `pip install ddgs`"))
     wf = results.get("web_fallback")
+    if results.get("web_enabled") is False:
+        st.markdown("**Web search (trusted pages and GR-2 fallback):** off — "
+                    "set `MARAG_WEB_FALLBACK=1` to enable")
     if wf is not None:
         st.markdown(f"**GR-2 web fallback:** {'fired, ' + str(wf['n']) + ' docs' if wf['used'] else 'not available'}")
     st.caption("The gate reads what the documents contain; ABSENT on a healthy "
@@ -1830,8 +1838,9 @@ def ask(q: str, limit: int = 5, source: str = "agent"):
             presented = present_answer(q, results, model_spec="rule-based")
             presented.note = "fast path — feed value, no model call"
             return results, presented
-        results = run_pipeline(q, show_steps=False, limit=limit,
-                               source=source, web_fallback=True)
+        import websearch
+        results = run_pipeline(q, show_steps=False, limit=limit, source=source,
+                               web_fallback=websearch.ENABLE_WEB_FALLBACK)
         if route["mode"] == "fast":
             route = {"mode": "full", "why": "fast path could not answer — escalated"}
         results["route"] = route
