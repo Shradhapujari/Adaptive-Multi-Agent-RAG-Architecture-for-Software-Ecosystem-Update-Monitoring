@@ -50,6 +50,17 @@ def test_k_problem_reports_and_no_fix_is_hold():
     assert d.obligations["no_newer_fix_release"] is True
 
 
+def test_lost_or_disappeared_data_is_a_problem_report():
+    # 2026-11-13: Firefox posts about lost bookmarks and a vanished New Tab Page
+    # never counted as problem reports, so the console could not see the regression.
+    pool = [_d(1, "vendor_reddit", "Ubuntu 24.04 update: lost all my bookmarks", date="2026-05-02"),
+            _d(2, "vendor_reddit", "ubuntu 24.04 dock disappeared after upgrade", date="2026-05-03"),
+            _d(4, "vendor_reddit", "ubuntu 24.04 settings missing", date="2026-05-03"),
+            _d(3, "vendor_releases", "Ubuntu 24.04 LTS released", date="2026-04-25")]
+    d = D.decide(pool, Q, V)
+    assert d.verdict == "hold" and set(d.evidence) == {"d1", "d2", "d4"}
+
+
 def test_one_report_is_not_a_hold():
     pool = [_d(1, "vendor_reddit", "Ubuntu 24.04 broke my wifi", date="2026-05-02"),
             _d(3, "vendor_releases", "Ubuntu 24.04 LTS released", date="2026-04-25")]
