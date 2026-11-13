@@ -303,3 +303,13 @@ def test_the_knowledge_store_excludes_a_product_text_cannot_separate():
     own = [_d(1, "nvd", "macos v27.0 — macOS",
               "An issue in macOS before 27.1 allows code execution. CVE-2026-5152")]
     assert D.decide(own, MQ, ["macos"]).verdict == "patch_urgently"
+
+
+def test_no_asked_version_is_not_a_confirmed_version():
+    # "Is it safe to update Firefox?" asks no version, so nothing was checked
+    # against the advisory's affected range. The console showed confidence 1.00
+    # for exactly this (2026-11-12): `_version_ok` is vacuously true with no
+    # asked version, and that read as a confirmed match.
+    pool = [_d(1, "cisa_kev", "[CISA KEV] Ubuntu kernel flaw", "CVE-2026-1234 exploited")]
+    d = D.decide(pool, "Is it safe to update Ubuntu?", V)
+    assert d.verdict == "patch_urgently" and d.confidence == 0.8
