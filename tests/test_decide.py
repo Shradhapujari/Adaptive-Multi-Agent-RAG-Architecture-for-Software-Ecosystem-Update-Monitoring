@@ -265,3 +265,13 @@ def test_the_patch_verdict_does_not_overclaim_its_attribution():
     assert d.verdict == "patch_urgently"
     assert "about the product" not in d.rationale
     assert "name" in d.rationale and "citation" in d.rationale
+
+
+def test_no_asked_version_is_not_a_confirmed_version():
+    # "Is it safe to update Firefox?" asks no version, so nothing was checked
+    # against the advisory's affected range. The console showed confidence 1.00
+    # for exactly this (2026-11-12): `_version_ok` is vacuously true with no
+    # asked version, and that read as a confirmed match.
+    pool = [_d(1, "cisa_kev", "[CISA KEV] Ubuntu kernel flaw", "CVE-2026-1234 exploited")]
+    d = D.decide(pool, "Is it safe to update Ubuntu?", V)
+    assert d.verdict == "patch_urgently" and d.confidence == 0.8

@@ -284,7 +284,9 @@ def decide(pool: Sequence[dict], question: str, vendors: Iterable[str] = (),
     ids = lambda docs: [d["doc_id"] for d in docs]  # noqa: E731
 
     if advisories:
-        versioned = any(_version_ok(d, asked) for d in advisories)
+        # With no version asked, `_version_ok` is vacuously true; that is not a
+        # confirmed match, so it must not earn the confirmed-version confidence.
+        versioned = bool(asked) and any(_version_ok(d, asked) for d in advisories)
         return Decision("patch_urgently", ids(advisories), obligations, "obligations_met",
                         [], 1.0 if versioned else 0.8,
                         # "name" rather than "are about": attribution is a text
