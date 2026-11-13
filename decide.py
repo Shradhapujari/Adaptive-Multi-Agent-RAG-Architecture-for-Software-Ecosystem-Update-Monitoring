@@ -376,12 +376,19 @@ def _version_ok(d: dict, asked: Sequence[str]) -> bool:
 # ---------------------------------------------------------------------- rules
 
 def decide(pool: Sequence[dict], question: str, vendors: Iterable[str] = (),
-           versions: Optional[Sequence[str]] = None, k_reports: int = K_REPORTS) -> Decision:
+           versions: Optional[Sequence[str]] = None, k_reports: int = K_REPORTS,
+           unchecked: Iterable[str] = ()) -> Decision:
     """The verdict the pool supports, with the obligations it met and missed.
 
     `vendors` are the grounded product names (grounding.ground / the sheet's
     `vendor`); `versions` default to the dotted versions in the question.
+    `unchecked` names the evidence classes ("cve", "community") whose feed
+    failed this run. A verdict that stands on the *absence* of that class --
+    `safe` on both, `update_with_caveat` on community (with reports it could
+    have been `hold`) -- abstains instead: absence of retrieved evidence is
+    not evidence of safety when the source was never read.
     """
+    unchecked = set(unchecked)
     asked = list(versions) if versions is not None else \
         extract_versions(question, multipart_only=True)
     vendors = list(vendors)
@@ -413,6 +420,7 @@ def decide(pool: Sequence[dict], question: str, vendors: Iterable[str] = (),
         "no_newer_fix_release": not fix_releases,
         "release_note_present": bool(releases),
         "caveat_named": bool(caveats),
+        "sources_checked": not unchecked,
     }
     ids = lambda docs: [d["doc_id"] for d in docs]  # noqa: E731
 
@@ -440,6 +448,16 @@ def decide(pool: Sequence[dict], question: str, vendors: Iterable[str] = (),
                         min(1.0, len(reports) / (2 * k_reports)),
                         f"{len(reports)} community reports of a problem and no newer "
                         f"release note saying it is fixed")
+    # Both verdicts below stand on something *not* being in the pool: a caveat
+    # on fewer than K reports (else hold), safe on that and no advisory.
+    caveat = bool(caveats or (reports and fix_releases))
+    needs = {"community"} if caveat else {"cve", "community"} if releases else set()
+    blind = sorted(unchecked & needs)
+    if blind:
+        return Decision("insufficient_evidence", [], obligations, "evidence_insufficient",
+                        blind, 0.0,
+                        f"the {' and '.join(blind)} source could not be checked this run, "
+                        "so finding nothing there is not evidence that the update is safe")
     if caveats or (reports and fix_releases):
         used = caveats or (fix_releases + reports)
         return Decision("update_with_caveat", ids(used), obligations, "obligations_met", [],
@@ -468,7 +486,8 @@ _EVIDENCE_BY_STOP = {"no_evidence": "absent", "evidence_insufficient": "ambiguou
                      "obligations_met": "sufficient"}
 
 
-def gate(vendors: Iterable[str] = (), k_reports: int = K_REPORTS):
+def gate(vendors: Iterable[str] = (), k_reports: int = K_REPORTS,
+         unchecked: Iterable[str] = ()):
     """`decide` in the shape graph.run wants: (query, docs, degraded) ->
     (Evidence, reason, payload). The stop reason is the evidence class --
     no document about the product is ABSENT, documents that meet no
@@ -481,7 +500,7 @@ def gate(vendors: Iterable[str] = (), k_reports: int = K_REPORTS):
     def _gate(query: str, docs: Sequence[dict], degraded: bool = False):
         if degraded:
             return Evidence.DEGRADED, "fetch degraded", {}
-        d = decide(docs, query, vendors=vendors, k_reports=k_reports)
+        d = decide(docs, query, vendors=vendors, k_reports=k_reports, unchecked=unchecked)
         return Evidence(_EVIDENCE_BY_STOP[d.stop_reason]), d.rationale, d.as_dict()
     return _gate
 

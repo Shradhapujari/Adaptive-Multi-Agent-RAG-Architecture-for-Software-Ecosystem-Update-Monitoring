@@ -313,3 +313,27 @@ def test_no_asked_version_is_not_a_confirmed_version():
     pool = [_d(1, "cisa_kev", "[CISA KEV] Ubuntu kernel flaw", "CVE-2026-1234 exploited")]
     d = D.decide(pool, "Is it safe to update Ubuntu?", V)
     assert d.verdict == "patch_urgently" and d.confidence == 0.8
+
+
+def test_an_unread_source_is_not_evidence_of_safety():
+    # A release note and nothing else is `safe` -- but only if the advisory and
+    # community feeds were actually read. A dead CISA KEV feed used to look
+    # exactly like "no exploited CVE".
+    pool = [_d(1, "vendor_releases", "Ubuntu 24.04.1 LTS released", "point release")]
+    for down in ({"cve"}, {"community"}):
+        d = D.decide(pool, Q, V, unchecked=down)
+        assert d.verdict == "insufficient_evidence" and d.probes_wanted == sorted(down)
+        assert d.obligations["sources_checked"] is False
+
+
+def test_an_unread_community_feed_blocks_a_caveat_but_an_unread_cve_feed_does_not():
+    # A caveat stands on fewer than K reports (else hold); with the advisory
+    # feed down it could only have been patch_urgently, which is also `act`.
+    pool = [_d(1, "vendor_releases", "Ubuntu 24.04 LTS", "breaking change: removed python2")]
+    assert D.decide(pool, Q, V, unchecked={"community"}).verdict == "insufficient_evidence"
+    assert D.decide(pool, Q, V, unchecked={"cve"}).verdict == "update_with_caveat"
+
+
+def test_positive_evidence_still_decides_when_a_feed_is_down():
+    pool = [_d(1, "nvd", "CVE-2026-1234 Ubuntu", "Ubuntu before 24.04.2 allows RCE")]
+    assert D.decide(pool, Q, V, unchecked={"cve", "community"}).verdict == "patch_urgently"

@@ -579,6 +579,10 @@ def terminal_sources(query: str, rewritten: str, already: list):
         # would go on looking like a thin news day.
         _record_fetch_error("Shared sources", e)
         return {"community": [], "releases": [], "cve": []}, []
+    # The advisory catalogues used to swallow their own outages, so a dead
+    # CISA KEV feed read as "no exploited CVE" and the verdict came back safe.
+    for feed, e in src.get("outages") or ():
+        _record_fetch_error(feed, e)
 
     pools, dropped = {}, []
     for pool, buckets in (("community", ("vendor_reddit", "gen_reddit", "gen_news")),
@@ -650,6 +654,22 @@ def _release_rows(docs: list) -> list:
         row["source"] = d.get("source", "")
         out.append(row)
     return out
+
+
+# Which evidence class each fetch agent's outage leaves unread. /api/v/ (the
+# Release Notes agent) carries the NVD advisory rows; the app's "CVE" feed is
+# Reddit. ponytail: CIRCL is Apple-only but blocks every product's `safe`;
+# key it by vendor if CIRCL outages ever cost a real answer.
+_UNCHECKED_BY_AGENT = {
+    "CISA KEV": {"cve"}, "CIRCL": {"cve"}, "Release Notes": {"cve"},
+    "Community": {"community"}, "CVE": {"community"},
+    "Shared sources": {"cve", "community"},
+}
+
+
+def _unchecked(errors) -> set:
+    """Evidence classes this run's fetch outages left unread."""
+    return set().union(*(_UNCHECKED_BY_AGENT.get(e.get("agent"), set()) for e in errors or ()))
 
 
 def _decide_pool(results: dict) -> list:
@@ -1134,7 +1154,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         query,
         rewrite=lambda q, tried: results["grounded_query"] or q,
         retrieve=lambda q: (pool, degraded),
-        gate=decide.gate(g.vendor_names),
+        gate=decide.gate(g.vendor_names, unchecked=_unchecked(results["errors"])),
     )
     # DEGRADED leaves the payload empty: there is no verdict to render, which
     # is not the same as a verdict of insufficient evidence.

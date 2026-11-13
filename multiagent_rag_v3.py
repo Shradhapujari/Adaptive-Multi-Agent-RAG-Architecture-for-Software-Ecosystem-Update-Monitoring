@@ -546,7 +546,7 @@ def _kev_words(text: str) -> set:
     return set(_KEV_WORD.findall((text or "").lower()))
 
 
-def fetch_cisa_kev(query, limit=3):
+def fetch_cisa_kev(query, limit=3, outages=None):
     """Tier 1 — CISA Known Exploited Vulnerabilities (US Gov, actively exploited only).
 
     A row is returned only when a content word of the query is a whole word of
@@ -559,7 +559,11 @@ def fetch_cisa_kev(query, limit=3):
     """
     try:
         data = _kev_catalog(int(time.time() // _KEV_TTL_S))
-    except Exception:
+    except Exception as e:
+        # An unreachable catalogue is not an empty one: `decide` must not read
+        # "no exploited CVE" off a feed it never saw.
+        if outages is not None:
+            outages.append(("CISA KEV", e))
         return []
     from decide import KB, _STOP
     from keywords import QUESTION_STOPWORDS
@@ -597,7 +601,7 @@ def fetch_cisa_kev(query, limit=3):
     except Exception as e:
         return []
 
-def fetch_circl_apple(query, limit=3):
+def fetch_circl_apple(query, limit=3, outages=None):
     """Tier 1 — CIRCL Apple CVE Atom feed (no API key, aggregates NVD+CISA+CVEProject)."""
     try:
         import requests as req, xml.etree.ElementTree as ET
@@ -631,6 +635,8 @@ def fetch_circl_apple(query, limit=3):
         results.sort(key=lambda x: x[0], reverse=True)
         return [d for _,d in results[:limit]]
     except Exception as e:
+        if outages is not None:
+            outages.append(("CIRCL", e))
         return []
 
 def fetch_reddit_subreddit(query, subreddits=None, limit=5):
@@ -1661,6 +1667,7 @@ def gather_sources(rewritten_query: str, original_query: str = "",
 
     gen_releases, gen_apple, gen_cisa, gen_circl = [], [], [], []
     gen_cve, gen_llm, gen_reddit, gen_news = [], [], [], []
+    outages = []   # (feed, exception) from fetchers that report them; list.append is thread-safe
 
     # Gate on the question before spending a round trip per search term.
     # Check the original wording too: a rewrite can drop the model name.
@@ -1675,8 +1682,8 @@ def gather_sources(rewritten_query: str, original_query: str = "",
         if not vendor_releases:
             _calls.append(("releases", lambda q=q: fetch_live_releases(q, limit=4)))
         _calls.append(("apple", lambda q=q: fetch_apple_rss(q, limit=3)))
-        _calls.append(("cisa",  lambda q=q: fetch_cisa_kev(q, limit=2)))
-        _calls.append(("circl", lambda q=q: fetch_circl_apple(q, limit=2)))
+        _calls.append(("cisa",  lambda q=q: fetch_cisa_kev(q, limit=2, outages=outages)))
+        _calls.append(("circl", lambda q=q: fetch_circl_apple(q, limit=2, outages=outages)))
         _calls.append(("cve",   lambda q=q: fetch_live_cve(q, limit=2)))
         if _wants_llm:
             _calls.append(("llm", lambda q=q: fetch_llm_releases(q, limit=3, gate=False)))
@@ -1689,7 +1696,8 @@ def gather_sources(rewritten_query: str, original_query: str = "",
     return {"vendor_releases": vendor_releases, "vendor_reddit": vendor_reddit,
             "gen_releases": gen_releases, "gen_apple": gen_apple,
             "gen_cisa": gen_cisa, "gen_circl": gen_circl, "gen_cve": gen_cve,
-            "gen_llm": gen_llm, "gen_reddit": gen_reddit, "gen_news": gen_news}
+            "gen_llm": gen_llm, "gen_reddit": gen_reddit, "gen_news": gen_news,
+            "outages": outages}
 
 
 class RetrieverAgent:
