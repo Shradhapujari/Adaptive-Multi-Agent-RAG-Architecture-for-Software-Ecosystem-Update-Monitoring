@@ -47,7 +47,7 @@ python -m eval_harness.run_eval --dataset validation_gt.json \
 ## Tests
 
 ```bash
-python -m pytest tests/ -q      # 643 offline tests
+python -m pytest tests/ -q      # 1,100+ offline tests
 ```
 
 Offline in the strict sense: clocks, fetch functions and model clients are
@@ -65,6 +65,7 @@ injected, so the suite needs neither a network nor a particular date.
 | `MARAG_MAX_VENDORS` | integer, default `2` | How many products one question may resolve to. `1` is what every run before 2026-09-23 did, and it searched only one side of a two-product question. |
 | `MARAG_RETRY_THRESHOLD` | float, default `0.15` | Term-overlap between the question and its best retrieved document, before any source floor, below which the Manager retries. Read off the pre-floor score since 2026-09-23; on the floored score it could never fire (Finding 12). |
 | `MARAG_CORPUS` | `record:<dir>` · `replay:<dir>` | Freeze the live corpus. Record once, replay for every arm; give each ablation its own directory, since a warm replay against a shared snapshot can backfill it. |
+| `MARAG_WEB_FALLBACK` | `1` to enable | The GR-2 fallback: one bounded DuckDuckGo search, run only when the local lake is ABSENT on a healthy fetch. Off by default (a live web read would break a frozen benchmark); the console says "GR-2 off" when disabled. |
 | `PRESENTER_MODEL` | e.g. `ollama:llama3.1`, `openai:gpt-4o`, `anthropic:claude-*` | Which model writes the demo's final cited paragraph. Unset means the rule-based path. Also readable from `.streamlit/secrets.toml`. |
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | — | Required by those provider backends, including for a stronger independent judge (`--judge openai:gpt-4o`). |
 

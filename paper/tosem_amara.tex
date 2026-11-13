@@ -3084,9 +3084,26 @@ in Section~\ref{sec:two-metrics} was obtained under a handicap rather than
 assisted by one.
 
 We took two mitigations and omit one. The answer-quality finding was re-judged
-by a second, different-family model (\texttt{qwen2.5:7b-instruct}) on 40
-questions, and the format effect held at $+0.107$ versus $+0.111$, significant
-under both judges. The retrieval judgments behind
+by a second, different-family model (\texttt{qwen2.5:7b-instruct}). A first
+re-judge on 40 questions, which reported the format effect at $+0.107$ versus
+$+0.111$, was confounded and is withdrawn: a run's rows store the ids of the
+documents an answer was judged against, not their text, and the re-judging
+script fell back to the ids, so the second judge scored faithfulness against
+identifiers the first judge had read as documents --- the judge and the evidence
+changed together. The repeated re-judge restores the text from recorded
+candidate pools, which is possible for 146 of the 300 questions of a leak-free
+strict-replay run on the 1{,}000-question benchmark (three arms, 438 answers);
+the rest are dropped rather than judged on less. Re-scoring the restored
+contexts with \texttt{llama3.1} itself moves faithfulness by 0.023 on average,
+so the reconstruction is close to what the first judge saw. Against it,
+\texttt{qwen2.5:7b-instruct} scores faithfulness 0.10 lower and agrees on the
+order of individual answers only loosely (Spearman 0.47), but keeps the order
+of the arms, and the format effect keeps its sign and grows:
+\texttt{marag\_llm} over \texttt{marag} by $+0.071$ (88 better, 3 worse,
+$p<0.001$) against $+0.047$ under \texttt{llama3.1} ($p<0.001$). Both
+re-judges decode under a JSON schema and the original scores did not, and the
+146 questions are not a random sample: they are the ones whose documents
+another run happened to record. The retrieval judgments behind
 Table~\ref{tab:tier-control} were then re-scored in full by \texttt{mistral}, a
 different family from \texttt{llama3.1} with no part in that run --- its arms are
 \texttt{llama3.1} and its grading cascade \texttt{qwen2.5:7b-instruct}. All

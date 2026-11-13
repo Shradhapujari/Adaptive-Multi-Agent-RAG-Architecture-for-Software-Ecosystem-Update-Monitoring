@@ -335,6 +335,23 @@ community matches, and CVE matches, and signals a retry below a threshold
 ($\theta=0.15$ in the released implementation); Section~\ref{sec:retry} reports
 that this gate cannot open.
 
+\textbf{Knowledge sources.} The Retriever draws on three kinds of source in two
+trust tiers:
+\begin{enumerate}
+\item \emph{Vendor release notes} (Tier~1): official changelogs recording
+  version changes, features, and fixes, matched against a product-name registry
+  of 1{,}348 entries as of 2026-09-23 (14{,}223 when the benchmarks were run).
+\item \emph{Security advisories} (Tier~1): CVE records from NIST's National
+  Vulnerability Database and the CIRCL CVE feed, together with the CISA Known
+  Exploited Vulnerabilities (KEV) catalogue, so that a vulnerability known to be
+  exploited in the wild is distinguishable from one that is merely disclosed.
+\item \emph{Community discussions} (Tier~2): Reddit deployment reports from 364
+  subreddits as of 2026-09-23, and Google News coverage.
+\end{enumerate}
+Both registry sizes are readings of a live service at a point in time; every
+evaluation run records or replays its own corpus snapshot
+(Section~\ref{sec:setup}).
+
 \textbf{Adaptation.} A persistent Self-Improvement Memory accumulates positive and
 negative scores for query expansion terms across sessions, which the Rewriter
 consults, adapting retrieval without preference labels or retraining. No
@@ -934,8 +951,59 @@ general-purpose LLM's training-time knowledge? We ranked the 30 ecosystem
 components tracked throughout this work twice: once by the pipeline's live
 severity-weighted advisory count (\texttt{monitor.risk}, ReleaseTrain/NVD) and
 once by a local Llama~3.1~8B, through Ollama, with no retrieval, ordering the
-same 30 by urgency from its own knowledge. The full ranking is in the
-supplementary material (Table~S13).
+same 30 by urgency from its own knowledge. Table~\ref{tab:ranking} is the full
+ranking, reproduced from the supplementary material (Table~S13) so the
+comparison it is based on is visible in the main text.
+
+\begin{table}[t]
+\caption{All 30 components: pipeline rank (live severity-weighted advisory
+count, \texttt{monitor.risk}) versus \texttt{llama3.1} rank (parametric
+knowledge only, no retrieval). Advisories are the trailing-90-day count
+behind the pipeline rank. Sorted by pipeline rank; rank 1 is most urgent.}
+\label{tab:ranking}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Component & Pipeline rank & \texttt{llama3.1} rank & Advisories (90d) \\
+\midrule
+wordpress      & 1  & 14 & 299 \\
+linux          & 2  & 30 & 126 \\
+gitlab         & 3  & 4  & 54  \\
+windows        & 4  & 22 & 43  \\
+android        & 5  & 25 & 26  \\
+kubernetes     & 6  & 7  & 19  \\
+postgresql     & 7  & 1  & 16  \\
+macos          & 8  & 23 & 19  \\
+docker         & 9  & 6  & 11  \\
+git            & 10 & 5  & 12  \\
+mysql          & 11 & 2  & 7   \\
+rust           & 12 & 10 & 7   \\
+chrome         & 13 & 16 & 8   \\
+ios            & 14 & 24 & 7   \\
+ubuntu         & 15 & 28 & 12  \\
+firefox        & 16 & 17 & 8   \\
+debian         & 17 & 27 & 3   \\
+arch           & 18 & 29 & 4   \\
+grafana        & 19 & 15 & 2   \\
+fedora         & 20 & 26 & 1   \\
+safari         & 21 & 18 & 0   \\
+edge           & 22 & 21 & 0$^\dagger$ \\
+brave          & 23 & 19 & 0   \\
+opera          & 24 & 20 & 0$^\dagger$ \\
+node           & 25 & 8  & 0   \\
+python         & 26 & 9  & 0   \\
+home assistant & 27 & 12 & 0$^\dagger$ \\
+nextcloud      & 28 & 13 & 0   \\
+mongodb        & 29 & 3  & 0$^\dagger$ \\
+neovim         & 30 & 11 & 0   \\
+\bottomrule
+\end{tabular}
+\\[2pt]
+{\footnotesize $^\dagger$ no rows returned from the feed in this pull; read
+as unranked, not as evidence of stability.}
+\end{table}
 
 Agreement is statistically indistinguishable from zero: Spearman's
 $\rho=-0.050$, Kendall's $\tau=-0.039$; treating $\rho$ as a test statistic,
@@ -958,6 +1026,21 @@ anti-correlation estimate; it is that substituting parametric memory for a
 live feed in a security-adjacent decision would, here, rank the single
 highest-advisory-volume component as the lowest priority. One baseline model,
 one run --- hosted models and repeated sampling are the natural next step.
+
+\textbf{Query routing.}\label{sec:routing}
+A later addition, \texttt{graph.route\_query()}, classifies each question as a
+single-product \emph{version}/\emph{date} lookup --- fast path --- or anything
+needing cross-source synthesis (a comparison, a safety or stance question, a
+CVE lookup) --- full path --- reusing the same deterministic attribute
+classifier the decision gate already reads, so routing and the gate never
+disagree. The fast path, \texttt{graph.fast\_run()}, walks the identical state
+machine with an identity rewrite, \texttt{max\_rounds=1}, and no model: one
+retrieval and a deterministic SUFFICIENT/AMBIGUOUS/ABSENT classification,
+abstaining rather than guessing if that single read falls short. As wired into
+the demo application today, the route is computed and shown in a diagnostic
+trace but does not yet gate which path executes --- the full pipeline still
+runs regardless of the label --- so, as with the decision layer above, we
+report this as a mechanism rather than a latency or cost result.
 
 \section{Discussion}\label{sec:discussion}
 
@@ -1054,6 +1137,17 @@ possible. \emph{Abstention}: on most questions no arm retrieves a document the j
 this'' is a hand-back that tells a person the question needs them --- preferable,
 in a maintenance context, to a confident wrong version number.
 
+\emph{Audit result.} We audited the benchmark on 500 questions across 24
+software ecosystems. Excluding each question's originating community post at
+fetch time, every arm retrieves at nDCG@3 0.30. With the ranking prior also
+removed and the same grading cascade on both arms, replayed from one snapshot, the
+multi-agent and single-agent architectures reach parity: 0.496 versus 0.490
+($+0.006$, 95\% CI $[-0.009,+0.021]$; Table~\ref{tab:control}). Decomposition did
+not improve retrieval. Its contribution is traceability: the Rewriter, Retriever,
+and Evaluator stages let us localise a fault to a stage once a person had noticed
+it. The leak and the query drop were each found by a person, not by the traces
+(Section~\ref{sec:human}).
+
 \textbf{Evaluation is the loop that did not close.} All judgments here were
 produced by \texttt{llama3.1}, which also synthesises two of the three arms.
 Re-scoring every judgment with a different model family leaves the ordering intact
@@ -1103,8 +1197,14 @@ census, though its direction is unaffected because those documents were absent
 from the multi-agent pool regardless of their label; and LLM qrels carry less
 discriminative power than human ones~\cite{faggioli2023perspectives}, so the
 significance in Section~\ref{sec:two-metrics} was obtained under a handicap rather
-than assisted by one. We re-judged the answer-quality finding with \texttt{qwen2.5:7b-instruct} on 40
-questions (the format effect holds at $+0.107$ versus $+0.111$) and re-scored all
+than assisted by one. We re-judged the answer-quality finding with \texttt{qwen2.5:7b-instruct}. An
+earlier 40-question re-judge is withdrawn as confounded: run rows store document ids, not
+text, so the second judge scored faithfulness against ids the first had read as documents.
+With the text restored from recorded pools for 146 of the 300 questions of a leak-free
+strict-replay run (\texttt{llama3.1} re-scoring the restored contexts moves 0.023 on
+average), \texttt{qwen2.5} scores faithfulness 0.10 lower and orders individual answers
+only loosely (Spearman 0.47), but the format effect keeps its sign and grows ($+0.071$
+against $+0.047$, $p<0.001$ under both). We also re-scored all
 2{,}446 retrieval pairs behind Table~\ref{tab:control} with \texttt{mistral}, a
 different family with no part in that run: every paired difference keeps its sign,
 three of four shrink, and agreement is $\kappa=0.370$ graded, $0.421$ binary. The

@@ -157,6 +157,53 @@ With no model reachable it composes the same shape by rule, and the UI states
 which path produced the text, so rule-based prose is never passed off as model
 output.
 
+### Decision gate — `decide.py`, `graph.py`
+
+Fourteen findings say every arm retrieves the same documents, so retrieval
+metrics cannot separate architectures. The console therefore changes the output
+type: not a paragraph over the top-k but a *verdict*, each carrying the
+rule-checkable evidence it needs before it may be issued. Precedence is the
+table's order:
+
+| Verdict | Obligation checked against the pool |
+|---|---|
+| `patch_urgently` | An advisory-tier document (CISA KEV / CVE feed) *for that product*, with a CVE id, matching the asked version if one is asked |
+| `hold` | At least K community problem reports on the product/version, and no newer vendor release that says it is fixed |
+| `update_with_caveat` | A release note naming a breaking change, deprecation or known issue (or reports a newer release fixed) |
+| `safe` | A release note, no advisory, fewer than K reports, no caveat |
+| `insufficient_evidence` | None of the above holds: abstain |
+
+It is model-free on purpose: it must run when Ollama is down, and only fields
+extracted from a document (source class, CVE ids, versions, dates, markers)
+reach the verdict, never its prose, so an injected instruction inside a Reddit
+post is irrelevant to the decision. Advisories are attributed by owner: CISA KEV
+rows by `vendorProject`/`product`, NVD text by the vendor named in the subject,
+so a VMware "SD-WAN Edge" or Cisco "IOS" row does not turn Edge or iOS red.
+
+`graph.py` walks it as a stdlib state machine
+(`rewrite → retrieve → classify → {answer | verify | abstain | rewrite}`). The
+edge out of `classify` depends on what the documents contain, the only way back
+into `rewrite` is a failed fetch, and ABSENT on a healthy fetch is terminal. It
+makes no model or network calls, so the eval harness can replay it byte-for-byte
+as the `marag_decide` arm. LangGraph was evaluated and rejected: an unpinned
+dependency tree under a replay-identical harness, for a graph with one cycle.
+
+### Web fallback — `websearch.py` (GR-2)
+
+The one orchestration-layer step off the local corpus: a single DuckDuckGo
+search, at most `limit` results, run only after the graph returns ABSENT on a
+healthy fetch. If the web is also empty of a verifiable version, date or CVE the
+system still abstains. Off unless `MARAG_WEB_FALLBACK=1`.
+
+### Egress and console guards
+
+`guardrail.check` requires a CVE id in an answer to appear in a release note, an
+advisory or the vendor's own page — forum posts, open-web snippets and the
+question itself no longer vouch for one (the question still may in a refusal).
+The console also declines off-topic questions before searching, offers "did you
+mean" for typos, and shows no release headline unless the asked product has a
+release.
+
 ---
 
 ## Implementations
@@ -164,9 +211,5 @@ output.
 | File | What it is |
 |---|---|
 | `multiagent_rag_v3.py` | Main four-agent system, pure Python — the cleanest execution trace |
-| `rag_smolagents_v2.py` | Equivalent implementation on HuggingFace smolagents |
-| `unified_agent_system.py` | Single-agent baseline used for comparison |
-| `app_1.py` | The deployed Streamlit demo |
-
-The pure-Python and smolagents implementations produce equivalent retrieval
-results on the evaluation dataset.
+| `eval_harness/generators.py` | Every evaluation arm, including the single-agent baseline |
+| `app_1.py` | The deployed Streamlit demo (decision console by default) |
