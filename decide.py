@@ -75,7 +75,7 @@ _CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
 _PROBLEM_RE = re.compile(
     r"\b(brok(e|en)|crash(es|ed|ing)?|bug|regression|not working|stopped working|"
     r"fail(s|ed|ing)?|stuck|bricked|freez(es|ing)|boot ?loop|won'?t (boot|start|open)|"
-    r"issue|problem|unusable|drain)\b", re.I)
+    r"issue|problem|unusable|drain|lost|missing|disappear(s|ed|ing)?)\b", re.I)
 _FIX_RE = re.compile(r"\b(fix(es|ed)?|resolv(es|ed)|patch(es|ed)?|addresses|hotfix)\b", re.I)
 _CAVEAT_RE = re.compile(
     r"\b(breaking change|breaking|deprecat(ed|es|ion)|removed|no longer support|"
