@@ -927,9 +927,11 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     else:
         # "lake": no store, so a live miss is a miss. "agent": store fallback.
         _db = None if source == "lake" else db
-        community_fetch = caching_fetch(_db, "community", fetch_community_feedback)
-        release_fetch   = caching_fetch(_db, "release",   fetch_release_notes)
-        cve_fetch       = caching_fetch(_db, "cve",       fetch_cve_data)
+        # An empty feed is a live answer; only a recorded outage falls back.
+        _outages = lambda: len(_FETCH_ERRORS.get() or [])
+        community_fetch = caching_fetch(_db, "community", fetch_community_feedback, _outages)
+        release_fetch   = caching_fetch(_db, "release",   fetch_release_notes, _outages)
+        cve_fetch       = caching_fetch(_db, "cve",       fetch_cve_data, _outages)
 
     # Both pools are fetched deeper than they are shown, because the filters
     # in step 4b run *after* the fetch and cutting to `limit` first leaves them
@@ -1224,7 +1226,7 @@ def run_fast(query: str, limit: int = 5, source: str = "agent") -> Optional[dict
         fetch = lambda q, limit=5, **kw: db.search(q, pool="release", limit=limit)  # noqa: E731
     else:
         fetch = caching_fetch(None if source == "lake" else db, "release",
-                              fetch_release_notes)
+                              fetch_release_notes, lambda: len(errors))
     rows = fetch(g.vendor_names[0], limit=max(limit * 10, 50)) or []
     rows = vendor.filter_by_vendor(rows, g.vendors) or rows
     shipped = [r for r in rows if not r.get("is_cve") and vendor.is_release_record(r)]

@@ -229,3 +229,33 @@ def test_search_survives_fts_punctuation(st, query):
 def test_search_finds_a_dotted_version_string(st):
     st.record_documents("release", [RELEASE])
     assert [h["version"] for h in st.search("linux 7.1.0")] == ["7.1.0"]
+
+
+def test_an_empty_live_feed_is_not_an_outage(st):
+    # 2026-11-15: the CVE pool answered November questions with September
+    # advisories because "no CVEs this week" came back empty and empty read as
+    # an outage. With an outage signal, empty-and-healthy stays empty.
+    st.record_documents("cve", [ADVISORY])
+    log = []
+    fetch = store_mod.caching_fetch(st, "cve", lambda q, limit=5: [],
+                                    outage=lambda: len(log))
+    assert fetch("linux", limit=5) == []
+
+
+def test_a_recorded_outage_still_falls_back(st):
+    st.record_documents("cve", [ADVISORY])
+    log = []
+
+    def down(q, limit=5):
+        log.append("timeout")
+        return []
+
+    fetch = store_mod.caching_fetch(st, "cve", down, outage=lambda: len(log))
+    assert [d["version"] for d in fetch("linux", limit=5)] == ["25.642087.0"]
+
+
+def test_the_fallback_does_not_serve_stale_documents(st):
+    st.record_documents("release", [RELEASE])
+    st.conn.execute("UPDATE documents SET last_seen = '2026-09-01T00:00:00+00:00'")
+    assert st.search("linux", pool="release", max_age_days=14) == []
+    assert len(st.search("linux", pool="release")) == 1   # explicit store reads stay unbounded
