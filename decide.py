@@ -278,9 +278,17 @@ def _subject_names_product(d: dict, vtoks: set, exclude: Sequence[str] = ()) -> 
     if not body:
         return True
     m = _PREDICATE.search(body)
-    if not m or m.start() == 0:          # no readable subject; rule abstains
+    if m and m.start() == 0:             # no readable subject; rule abstains
         return True
-    subject = body[:m.start()].lower()
+    # No predicate at all is usually a cut, not a subjectless advisory: the
+    # app keeps 200 characters of /api/v/ notes, and "The MongoDB Shell
+    # (mongosh) relies on Node.js as a third-party runtime ..." lost its
+    # "prior to" there and counted for a Node.js question (2026-11-12). The
+    # first sentence stands in for the subject -- when it names the product at
+    # all; a bare "CVE-2026-1234" still abstains.
+    subject = (body[:m.start()] if m else re.split(r"(?<=[.;])\s", body, maxsplit=1)[0]).lower()
+    if not m and not any(v in subject for v in vtoks):
+        return True
     # Within the subject, a name after "on"/"for" is the platform the product
     # runs on, not the product: "VeraCrypt 1.26.29 (FUSE-T build) on macOS
     # systems allows ..." is a VeraCrypt advisory. Observed 2026-10-15, when a
