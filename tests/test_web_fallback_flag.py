@@ -55,6 +55,8 @@ def empty_lake(monkeypatch):
                         lambda *a, **k: ({"community": [], "releases": [], "cve": []}, []))
     monkeypatch.setattr(app_1, "rewrite_query", lambda q: Rewrite(q, "rule-based"))
     monkeypatch.setattr(app_1, "get_store", lambda: None)
+    import nvd
+    monkeypatch.setattr(nvd, "fetch", lambda *a, **k: [])
     monkeypatch.setattr(websearch, "trusted", lambda *a, **k: ([], {"backend": True, "n": 0, "used": True, "hosts": []}))
     web = [{"doc_id": "web0", "title": "Zig 0.15.1 released", "source": "web", "kind": "community",
             "text": "[untrusted:community] Zig 0.15.1 fixes CVE-2026-7777 [/untrusted]", "url": "https://x.example"}]

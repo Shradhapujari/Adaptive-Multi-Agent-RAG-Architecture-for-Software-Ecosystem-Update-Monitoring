@@ -38,7 +38,9 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
-from temporal import resolve_temporal, matches_window
+import dataclasses
+from temporal import TemporalResolution, resolve_temporal, matches_window
+from temporal import now as _clock
 from fetch_union import union_fetch, product_terms, reset_screened
 from agent_rules import rules_block
 import answer_agent
@@ -754,9 +756,15 @@ def _scope_cve(rows: list, g) -> list:
     if not g.vendors:
         return rows
     kev = [r for r in rows if r.get("kev_vendor")]
-    rest = vendor.filter_community([r for r in rows if not r.get("kev_vendor")],
+    # NVD rows are free text: a keyword hit is not ownership (an "nvd" Chrome
+    # search returns Hono and Nuxt CVEs), so the verdict's subject rule decides.
+    vtoks = decide._vendor_tokens(g.vendor_names)
+    nvd_rows = [r for r in rows if r.get("source") == "nvd"
+                and decide._about(r, vtoks, set(), vendors=g.vendor_names)]
+    rest = vendor.filter_community([r for r in rows if not r.get("kev_vendor")
+                                    and r.get("source") != "nvd"],
                                    g.vendors, terms=g.terms)
-    return rest + [r for r in kev if decide.kev_owns(r, g.vendor_names)]
+    return rest + nvd_rows + [r for r in kev if decide.kev_owns(r, g.vendor_names)]
 
 
 def _short(err: str, limit: int = 90) -> str:
@@ -818,10 +826,44 @@ def _catalog_note() -> Optional[str]:
             f"vendor-scoped. Cause: {why}")
 
 
+# The sidebar's "Advanced checks" and optional "Guardrails". Defaults are the
+# pipeline as it ran before the panel existed, plus the live NVD feed.
+CHECK_DEFAULTS = {
+    "vendor_check": True,       # drop documents about another product
+    "temporal_filter": True,    # keep documents inside the asked date window
+    "intent_filter": True,      # cite only the document kinds the intent allows
+    "resolve_vendor": True,     # detect the product from the catalog
+    "resolve_temporal": True,   # turn "this week" into dates
+    "retry_terms": False,       # no evidence: re-run once on the rewritten terms
+    "nist_retry": True,         # retry NVD on rate limit / 5xx
+    "nist_sort": True,          # read NVD newest-first (it returns oldest-first)
+    "web_search": False,        # trusted web pages + fallback when feeds have nothing
+}
+
+# Checks with no switch, each named by the code that runs it. Listed only where
+# that code exists; the screenshot's other always-on names have none yet.
+ALWAYS_ON = [
+    ("Injection scan", "guardrail.screen — fetched text with prompt-injection payloads is dropped."),
+    ("Leak scan", "guardrail.scrub — keys, tokens and card numbers are removed from the answer."),
+    ("Version check", "guardrail.check — a version the answer names must be in its sources."),
+    ("Sources must match", "guardrail.check — every citation must point at a retrieved document."),
+    ("Live Reddit search", "Community feed read live from releasetrain.io on every question."),
+    ("Domain check", "websearch — web results only from vendor and advisory domains (when web search is on)."),
+    ("Retriever retry", "Each feed request is retried once before it counts as an outage."),
+    ("Evaluator retry", "graph.run — a failed fetch re-enters rewrite, up to MARAG_MAX_ROUNDS."),
+    ("Route to Update", "graph.route_query — version/date lookups take the fast path."),
+    ("Resolve a CVE", "answer_agent.details — CVE id and severity read off each advisory."),
+    ("Surface fix versions", "answer_agent.details — the 'fixed in' version of each advisory."),
+    ("Stale-store bound", "store — an outage falls back only to documents seen in the last "
+                          "MARAG_STORE_MAX_AGE_DAYS days (default 14)."),
+]
+
+
 def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
                  yesno_on: bool = True, unclear_as_no: bool = False,
                  survey_on: bool = True, source: str = "agent",
-                 reddit_id: Optional[str] = None, web_fallback: bool = False) -> dict:
+                 reddit_id: Optional[str] = None, web_fallback: Optional[bool] = None,
+                 checks: Optional[dict] = None) -> dict:
     """Main orchestrator — runs all 4 agents and returns results.
 
     `source` picks where documents come from: "lake" hits releasetrain.io
@@ -829,8 +871,14 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     and lets the retrieval agent fall back to the store per feed on outage.
     `reddit_id` is a thread the user picked from the questions feed; its
     comments become the thread answered from, instead of a BM25 search.
+    `checks` overrides CHECK_DEFAULTS; `web_fallback` overrides its web_search.
     """
+    checks = {**CHECK_DEFAULTS, **(checks or {})}
+    if web_fallback is not None:
+        checks["web_search"] = web_fallback
+    web_fallback = checks["web_search"]
     results = {
+        "checks":          checks,
         "source":          source,
         "thread":          None,
         "top_comment":     None,
@@ -869,6 +917,11 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # on one code path is the point -- a demo that grounds differently from the
     # thing being measured is not a demo of it.
     g = ground(query)
+    if not checks["resolve_temporal"]:
+        g = dataclasses.replace(g, rewritten=query, temporal=TemporalResolution(
+            original=query, query=query, stripped=query))
+    if not checks["resolve_vendor"]:
+        g = dataclasses.replace(g, vendors=[])
     temporal = g.temporal
     results["temporal"] = temporal
     results["grounding"] = g
@@ -940,12 +993,13 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # advisories and a release question filtered down to an empty pool. Same
     # truncate-before-filter shape as the bug fixed in fetch_vendor_releases.
     pool_limit = max(limit * 10, 50)
+    window = temporal if checks["temporal_filter"] else None
 
     # Step 2 — Community Agent
     with _step("Community Agent — fetching Reddit feedback...", show_steps):
         t0 = time.time()
         results["community"] = union_fetch(community_fetch, phrasings,
-                                           pool_limit, temporal)
+                                           pool_limit, window)
         # The terminal's twelve sources, unless the run is pinned to the local
         # store. One network burst for both pools: the security sources come
         # back in the same call and are added to the CVE pool in step 4.
@@ -961,7 +1015,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     with _step("Release Notes Agent — fetching live releases...", show_steps):
         t0 = time.time()
         results["releases"] = union_fetch(release_fetch, release_phrasings,
-                                          pool_limit, temporal)
+                                          pool_limit, window)
         # Already fetched and screened in step 2. `/api/c/name/<vendor>` is the
         # vendor catalogue, which this app never asked: it searched
         # `/api/v/?q=` and took whatever came back under the query string.
@@ -978,7 +1032,21 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # Step 4 — CVE Agent
     with _step("CVE Agent — fetching security vulnerabilities...", show_steps):
         t0 = time.time()
-        results["cve"] = union_fetch(cve_fetch, phrasings, limit, temporal)
+        results["cve"] = union_fetch(cve_fetch, phrasings, limit, window)
+        # Live NVD, per detected product: the releasetrain CVE feed is Reddit
+        # and the store's advisories stopped at 2026-10-13. A keyword search
+        # needs a product name (NVD ANDs every word), so no product, no call.
+        if source != "store":
+            import nvd
+            days = ((_clock().date() - temporal.window[0]).days + 1
+                    if temporal.window else 90)
+            for name in g.vendor_names[:2]:
+                try:
+                    shared["cve"] = shared["cve"] + nvd.fetch(
+                        name, limit=max(limit * 4, 20), days=days,
+                        retry=checks["nist_retry"], newest_first=checks["nist_sort"])
+                except Exception as e:  # noqa: BLE001 -- recorded, not swallowed
+                    _record_fetch_error("NVD", e)
         # Already fetched and screened in step 2. The app's own CVE feed is
         # Reddit; these are the advisory catalogues (CISA KEV, CIRCL) the
         # terminal reads and this app had no fetcher for. Deduped on url as
@@ -1005,7 +1073,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # answer over none, and a demo that returns nothing teaches the reader
     # nothing about what it fixed.
     t0 = time.time()
-    if g.vendors:
+    if g.vendors and checks["vendor_check"]:
         scoped = vendor.filter_by_vendor(results["releases"], g.vendors)
         results["releases"] = scoped or results["releases"]
         # No `or results["community"]` fallback: when the subject filter finds
@@ -1019,12 +1087,13 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # The CVE feed is Reddit, not an advisory feed, so it gets the same vendor
     # scoping as the community pool and then has to prove it is about security
     # at all. Filters never empty a pool; a thin pool beats a false one.
-    results["cve"] = _scope_cve(results["cve"], g)
+    if checks["vendor_check"]:
+        results["cve"] = _scope_cve(results["cve"], g)
     on_topic = [r for r in results["cve"] if is_security_post(r)]
     results["cve_dropped"] = len(results["cve"]) - len(on_topic)
     results["cve"] = on_topic
 
-    if "cve" not in g.citable_kinds:
+    if checks["intent_filter"] and "cve" not in g.citable_kinds:
         shipped = [r for r in results["releases"] if vendor.is_release_record(r)]
         excluded = [r for r in results["releases"] if not vendor.is_release_record(r)]
         results["advisories_excluded"] = len(excluded)
@@ -1202,6 +1271,23 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         # insufficient_evidence -- relabelled as coming from the web.
         results["web"] = (results.get("web") or []) + web_docs
         results["timing"]["web_fallback"] = round(time.time() - t0, 2)
+
+    # Retry new terms: a healthy fetch with no evidence gets one more run on
+    # the rewriter's terms. Adopted only if that run finds evidence.
+    results["retry"] = None
+    rq = results["rewritten_query"]
+    if (checks["retry_terms"] and state.evidence is graph.Evidence.ABSENT
+            and not degraded and rq and rq.strip().lower() != query.strip().lower()):
+        again = run_pipeline(rq, show_steps=False, limit=limit, yesno_on=yesno_on,
+                             unclear_as_no=unclear_as_no, survey_on=survey_on,
+                             source=source, checks={**checks, "retry_terms": False})
+        found = (again.get("decision") or {}).get("evidence_class") not in (
+            None, graph.Evidence.ABSENT.value)
+        results["retry"] = {"query": rq, "adopted": found}
+        if found:
+            again["original_query"] = query
+            again["retry"] = results["retry"]
+            return again
 
     return results
 
@@ -2026,7 +2112,7 @@ def _tab_loops(results: dict, query: str) -> None:
                "fetch abstains, only a degraded fetch re-enters rewrite.")
 
 
-def ask(q: str, limit: int = 5, source: str = "agent"):
+def ask(q: str, limit: int = 5, source: str = "agent", checks: Optional[dict] = None):
     """(results, presented) for one console question. A fast-routed question
     tries `run_fast` and escalates to the full pipeline when it returns None;
     `results["route"]` says which path actually answered."""
@@ -2039,7 +2125,8 @@ def ask(q: str, limit: int = 5, source: str = "agent"):
             return results, presented
         import websearch
         results = run_pipeline(q, show_steps=False, limit=limit, source=source,
-                               web_fallback=websearch.ENABLE_WEB_FALLBACK)
+                               web_fallback=bool((checks or {}).get("web_search"))
+                               or websearch.ENABLE_WEB_FALLBACK, checks=checks)
         if route["mode"] == "fast":
             route = {"mode": "full", "why": "fast path could not answer — escalated"}
         results["route"] = route
@@ -2140,7 +2227,7 @@ def _console_html(text: str) -> str:
     return f'<div class="sys-console">{body}</div>'
 
 
-def render_ask_view(result_limit: int, source: str) -> None:
+def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = None) -> None:
     st.markdown("### Software Update Decision Intelligence")
     st.caption("Is an update safe? Answered from live release notes, CISA KEV / NVD "
                "advisories and community reports — every claim cited.")
@@ -2162,7 +2249,7 @@ def render_ask_view(result_limit: int, source: str) -> None:
             st.markdown("### ⚪ Not a software update question")
             st.markdown(note)
         return
-    results, presented = ask(q, limit=result_limit, source=source)
+    results, presented = ask(q, limit=result_limit, source=source, checks=checks)
 
     # Verdict first: the answer, then the three numbers behind it. The pipeline
     # diagram and the trace are how it was answered, so they go last.
@@ -2322,6 +2409,41 @@ with st.sidebar:
                               help="Blend the 2024 software-update survey's user "
                                    "priorities into the quality score, and report which "
                                    "of them these results address.")
+    # The panel's checks. Each box switches a real step of run_pipeline (see
+    # CHECK_DEFAULTS); the always-on list names checks that have no switch.
+    _ck = lambda label, key, help_: st.checkbox(  # noqa: E731
+        label, value=CHECK_DEFAULTS[key], key=f"ck_{key}", help=help_,
+        disabled=single_mode)
+    with st.expander("Advanced checks", expanded=False):
+        checks = {
+            "vendor_check": _ck("Vendor check", "vendor_check",
+                                "Drop releases, posts and advisories about another product."),
+            "temporal_filter": _ck("Temporal filter", "temporal_filter",
+                                   "Keep only documents inside the asked date window."),
+            "intent_filter": _ck("Intent filter", "intent_filter",
+                                 "Cite only the document kinds the question's intent allows."),
+            "resolve_vendor": _ck("Resolve vendor", "resolve_vendor",
+                                  "Detect the product from the releasetrain catalog."),
+            "resolve_temporal": _ck("Resolve temporal constraints", "resolve_temporal",
+                                    "Turn \"this week\" or \"today\" into dates before fetching."),
+        }
+    with st.expander("Guardrails", expanded=False):
+        checks |= {
+            "retry_terms": _ck("Retry new terms", "retry_terms",
+                               "When a healthy fetch finds no evidence, run once more on "
+                               "the rewriter's terms; keep that run only if it finds some."),
+            "nist_retry": _ck("NIST: retry loop", "nist_retry",
+                              "Retry the live NVD feed up to 3 times on a rate limit or "
+                              "server error instead of reading it as no CVEs."),
+            "nist_sort": _ck("NIST: fallback sort", "nist_sort",
+                             "NVD lists matches oldest-first; read the newest ones instead."),
+            "web_search": _ck("Web search for questions the feeds can't answer", "web_search",
+                              "Trusted vendor pages, plus a web fallback when no document "
+                              "is about the asked product."),
+        }
+        st.caption("ALWAYS ON")
+        for _name, _what in ALWAYS_ON:
+            st.checkbox(_name, value=True, disabled=True, key=f"ao_{_name}", help=_what)
     if single_mode:
         st.caption("Baseline arm selected — the agents above it are switched "
                    "off, which is what makes it the baseline.")
@@ -2641,7 +2763,7 @@ if view == "Results":
 # Decision console is the default Ask layout: clean input, five tabs, live
 # console. It owns its own input and renders nothing of the classic view below.
 if console_mode:
-    render_ask_view(result_limit, source)
+    render_ask_view(result_limit, source, checks)
     st.stop()
 
 if "main_query" not in st.session_state:
@@ -2738,7 +2860,7 @@ elif run_btn and query and compare_mode:
             results = run_pipeline(query, show_steps=False, limit=result_limit,
                                    yesno_on=yesno_on, unclear_as_no=unclear_as_no,
                                    survey_on=survey_on, source=source,
-                                   reddit_id=reddit_id)
+                                   reddit_id=reddit_id, checks=checks)
             presented = present_answer(results["original_query"], results,
                                        model_spec=presenter_spec(),
                                        per_kind=result_limit)
@@ -2820,7 +2942,7 @@ elif run_btn and query:
     results = run_pipeline(query, show_steps=show_pipeline, limit=result_limit,
                            yesno_on=yesno_on, unclear_as_no=unclear_as_no,
                            survey_on=survey_on, source=source,
-                           reddit_id=reddit_id)
+                           reddit_id=reddit_id, checks=checks)
 
     # `show_pipeline` is the "Show pipeline steps" switch. Only the plan strip
     # above consulted it, so unchecking the box left every per-agent section on
