@@ -170,7 +170,7 @@ table's order:
 | `patch_urgently` | An advisory-tier document (CISA KEV / CVE feed) *for that product*, with a CVE id, matching the asked version if one is asked |
 | `hold` | At least K community problem reports on the product/version, and no newer vendor release that says it is fixed |
 | `update_with_caveat` | A release note naming a breaking change, deprecation or known issue (or reports a newer release fixed) |
-| `safe` | A release note, no advisory, fewer than K reports, no caveat |
+| `safe` | A release note, no advisory, fewer than K reports, no caveat — and the advisory and community sources were actually read this run (a feed outage abstains instead: finding nothing in an unread source is not evidence of safety) |
 | `insufficient_evidence` | None of the above holds: abstain |
 
 It is model-free on purpose: it must run when Ollama is down, and only fields
