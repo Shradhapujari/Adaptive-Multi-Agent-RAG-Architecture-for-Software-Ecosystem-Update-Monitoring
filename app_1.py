@@ -838,7 +838,44 @@ CHECK_DEFAULTS = {
     "nist_retry": True,         # retry NVD on rate limit / 5xx
     "nist_sort": True,          # read NVD newest-first (it returns oldest-first)
     "web_search": False,        # trusted web pages + fallback when feeds have nothing
+    "llm_extract": False,       # rules find no version: ask the model, keep it if the doc states it
 }
+
+
+def model_extract_version(query: str, pool: list, spec: Optional[str] = None,
+                          client=None) -> Optional[dict]:
+    """Model-assisted extraction when the rules find no version.
+
+    Runs only for a version question whose on-topic documents state no version
+    the rule can read (graph.classify: AMBIGUOUS) -- "Zig 15" is single-part,
+    and the rule reads multipart versions only. The model gets graph's verify
+    prompt; its value is kept only if graph.check_verify finds it in the
+    document it cites, so the model reads a version and cannot supply one.
+    None when the rule is enough or the question is not about a version.
+    """
+    if graph.asks(query) != "version":
+        return None
+    ev, why, _ = graph.classify(query, pool, kind="version")
+    if ev is not graph.Evidence.AMBIGUOUS:
+        return None
+    out = {"why": why, "model": "", "grounded": False, "value": None, "doc": None, "reason": ""}
+    try:
+        if client is None:
+            from eval_harness.providers import make_client
+            spec = spec or answer_agent._resolve_spec(None)
+            if not spec:
+                return {**out, "reason": "no model reachable"}
+            client = make_client(spec)
+        out["model"] = spec or getattr(client, "spec", "")
+        raw = client.generate(graph.verify_prompt(graph.State(query=query, docs=tuple(pool))),
+                              max_tokens=graph.VERIFY_MAX_TOKENS)
+    except Exception as e:  # noqa: BLE001 -- a dead model is no extraction, not a dead run
+        return {**out, "reason": f"{type(e).__name__}: {e}"}
+    obj = graph._extract_json(raw) or {}
+    grounded, reason = graph.check_verify(obj, pool)
+    return {**out, "grounded": grounded, "reason": reason,
+            "value": obj.get("value") if grounded else None,
+            "doc": obj.get("doc") if grounded else None}
 
 # Checks with no switch, each named by the code that runs it. Listed only where
 # that code exists; the screenshot's other always-on names have none yet.
@@ -1232,11 +1269,17 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     results["decision"] = (
         decide.Decision.from_dict(state.payload).as_dict()
         | {"evidence_class": state.evidence.value,
-           "path": [st.node for st in state.trace],
+           "path": [st.node for st in state.trace], "step_ms": _step_ms(state),
            "pool_size": len(pool), "shown": shown,
            "citable_kinds": sorted(g.citable_kinds)}
         if state.payload else None)
     results["timing"]["decision"] = round(time.time() - t0, 2)
+
+    results["extracted"] = None
+    if checks["llm_extract"]:
+        t0 = time.time()
+        results["extracted"] = model_extract_version(query, pool, spec=presenter_spec() or None)
+        results["timing"]["extract"] = round(time.time() - t0, 2)
 
     # GR-1 / GR-2 — adaptive route and bounded web fallback.
     # The route is a label for the console; the pipeline above already ran, so
@@ -1292,6 +1335,14 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     return results
 
 
+def _step_ms(state) -> Dict[str, int]:
+    """{graph node: milliseconds}, summed over retries -- the diagram's timings."""
+    out: Dict[str, int] = {}
+    for s in state.trace:
+        out[s.node] = out.get(s.node, 0) + s.dur_ms
+    return out
+
+
 def run_fast(query: str, limit: int = 5, source: str = "agent") -> Optional[dict]:
     """GR-1 fast path: a single-product version/date lookup, answered from one
     release-feed fetch. No rewriter, no community or CVE feed, no model.
@@ -1304,8 +1355,10 @@ def run_fast(query: str, limit: int = 5, source: str = "agent") -> Optional[dict
     """
     t0 = time.time()
     g = ground(query)
+    t_ground = round(time.time() - t0, 2)
     if len(g.vendor_names) != 1:
         return None
+    t0 = time.time()
     errors = _reset_fetch_errors()
     db = get_store()
     if source == "store" and db is not None:
@@ -1319,13 +1372,15 @@ def run_fast(query: str, limit: int = 5, source: str = "agent") -> Optional[dict
     advisories = [r for r in rows if r not in shipped]
     if _latest_release(shipped, query) is None:
         return None
+    t_fetch = round(time.time() - t0, 2)
+    t0 = time.time()
     results = {"source": source, "original_query": query, "grounded_query": g.rewritten,
                "grounding": g, "temporal": g.temporal, "rewrite": None, "rewritten_query": "",
                "community": [], "cve": [], "errors": errors, "screened": [],
                "releases": sorted(shipped, key=lambda r: monitor.version_key(r.get("version")),
                                   reverse=True)[:limit],
                "decision_advisories": advisories, "advisories_excluded": len(advisories),
-               "timing": {}, "web_fallback": None}
+               "timing": {"temporal": t_ground, "releases": t_fetch}, "web_fallback": None}
     pool = _decide_pool(results)
     state = graph.fast_run(query, retrieve=lambda q: (pool, bool(errors) and not rows),
                            gate=decide.gate(g.vendor_names))
@@ -1333,11 +1388,11 @@ def run_fast(query: str, limit: int = 5, source: str = "agent") -> Optional[dict
         return None
     results["decision"] = (decide.Decision.from_dict(state.payload).as_dict()
                            | {"evidence_class": state.evidence.value,
-                              "path": [st.node for st in state.trace],
+                              "path": [st.node for st in state.trace], "step_ms": _step_ms(state),
                               "pool_size": len(pool), "shown": len(results["releases"]),
                               "citable_kinds": sorted(g.citable_kinds)})
     results["route"] = {"mode": "fast", "why": graph.route_query(query)[1]}
-    results["timing"]["fast"] = round(time.time() - t0, 2)
+    results["timing"]["decision"] = round(time.time() - t0, 2)
     return results
 
 _CITE = re.compile(r"\s*\[[^\]]*\]")
@@ -1369,7 +1424,12 @@ def _answer_line(results: dict, text: str) -> str:
     """
     lead = answer_agent.verdict_lead(results.get("decision"))
     body = text[len(lead):] if lead and (text or "").startswith(lead) else (text or "")
-    return _one_line(body) if body.strip() else ""
+    line = _one_line(body) if body.strip() else ""
+    ex = results.get("extracted") or {}
+    if ex.get("grounded"):
+        line = (f"{ex['value']} — read by {ex['model'] or 'the model'} from "
+                f"[{ex['doc']}] and checked against it. {line}").strip()
+    return line
 
 
 def render_answer(presented, *, key: str = "", lead: str = "") -> None:
@@ -2120,7 +2180,9 @@ def ask(q: str, limit: int = 5, source: str = "agent", checks: Optional[dict] = 
     with st.spinner(f"{route['mode'].upper()} path — {route['why']}…"):
         results = run_fast(q, limit=limit, source=source) if route["mode"] == "fast" else None
         if results is not None:
+            t0 = time.time()
             presented = present_answer(q, results, model_spec="rule-based")
+            results.setdefault("timing", {})["answer"] = round(time.time() - t0, 2)
             presented.note = "fast path — feed value, no model call"
             return results, presented
         import websearch
@@ -2130,47 +2192,89 @@ def ask(q: str, limit: int = 5, source: str = "agent", checks: Optional[dict] = 
         if route["mode"] == "fast":
             route = {"mode": "full", "why": "fast path could not answer — escalated"}
         results["route"] = route
-        return results, present_answer(results["original_query"], results)
+        t0 = time.time()
+        presented = present_answer(results["original_query"], results)
+        results.setdefault("timing", {})["answer"] = round(time.time() - t0, 2)
+        return results, presented
 
 
 _MERMAID_JS = "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs"
-_STAGES = ("ask", "intent", "route", "rewrite", "retrieve", "classify", "answer", "abstain")
+# The releasetrain.io strip's labels over this pipeline's steps. Search and
+# Verify are grounding's catalog lookup and its product match; Classify is
+# graph's gate; Evaluate is graph's model `verify` (and the opt-in model
+# extraction); Orchestrate is the verdict plus the composed answer.
+_STAGES = ("ask", "search", "check", "rewrite", "facts", "classify", "evaluate", "orch")
+_LABELS = {"ask": "Ask", "search": "Search", "check": "Verify", "rewrite": "Rewrite",
+           "facts": "Find Facts and Artifacts", "classify": "Classify",
+           "evaluate": "Evaluate", "orch": "Orchestrate", "done": "End"}
+_FETCH_TIMINGS = ("community", "releases", "cve", "filter", "web_search", "web_fallback")
+
+
+def _diagram_notes(results: dict) -> Tuple[set, Dict[str, str]]:
+    """(stages the run took, {stage: note under its box}) -- time, plus what
+    the step found: the products matched, the artifacts fetched, the evidence
+    class, the verdict. Skipped stages say so."""
+    dec = results.get("decision") or {}
+    path = dec.get("path") or []
+    timing = results.get("timing") or {}
+    ms = dec.get("step_ms") or {}
+    sec = lambda x: f"{x:.1f}s"  # noqa: E731
+    vendors = list(getattr(results.get("grounding"), "vendor_names", None) or [])
+    artifacts = sum(len(results.get(k) or []) for k in ("community", "releases", "cve", "web"))
+    taken = {"ask", "facts"}
+    taken |= {"search"} if "grounding" in results else set()
+    taken |= {"check"} if vendors else set()
+    # The fast walk runs an identity rewrite; no Rewriter ran.
+    taken |= {"rewrite"} if results.get("rewrite") is not None else set()
+    taken |= {"classify"} if "classify" in path else set()
+    taken |= {"evaluate"} if "verify" in path or results.get("extracted") else set()
+    taken |= {"orch"} if "answer" in path else set()
+    notes = {
+        "search": sec(timing.get("temporal", 0)),
+        "check": ", ".join(vendors[:3]),
+        "rewrite": sec(timing.get("rewriter", 0)),
+        "facts": f"{sec(sum(timing.get(k, 0) for k in _FETCH_TIMINGS))} · {artifacts} artifacts",
+        "classify": f"{sec(ms.get('classify', 0) / 1000)} · {dec.get('evidence_class', '')}",
+        "evaluate": sec(ms.get("verify", 0) / 1000 + timing.get("extract", 0)),
+        "orch": f"{sec(timing.get('answer', 0))} · {str(dec.get('verdict', '')).replace('_', ' ')}",
+    }
+    notes = {n: (t if n in taken else "skipped") for n, t in notes.items()}
+    # No verdict at all, or the walk ended in abstain: the run declined to answer.
+    notes["done"] = "abstained" if not dec or path[-1:] == ["abstain"] else ""
+    return taken, notes
 
 
 def _pipeline_mermaid(results: Optional[dict] = None) -> str:
-    """graph.py's walk as Mermaid source. Before a run every stage is plain;
-    after one, the stages the run took are solid and the rest dashed -- the
-    releasetrain.io convention. Node names are graph.py's, so `path` maps on.
+    """The pipeline as a releasetrain.io-style strip. Before a run every stage
+    is plain; after one, the stages the run took are solid green with their
+    time and finding underneath, and the rest dashed and marked skipped.
     """
     dec = (results or {}).get("decision") or {}
-    path = dec.get("path") or []
-    mode = ((results or {}).get("route") or {}).get("mode")
-    retries = max(0, path.count("rewrite") - 1)
+    retries = max(0, (dec.get("path") or []).count("rewrite") - 1)
+    taken, notes = _diagram_notes(results) if results else (set(), {})
+
+    def box(n: str) -> str:
+        # Notes carry catalog product names; keep them to plain label characters.
+        note = re.sub(r"[^\w .,+#·-]", "", notes.get(n, ""))[:40]
+        label = _LABELS[n] + (f"<br/><small>{note}</small>" if note else "")
+        return f'{n}(["{label}"])' if n == "done" else f'{n}["{label}"]'
+
     lines = [
         "flowchart LR",
-        'ask(["Ask"]) --> intent["Intent<br/>classification"] --> route{"Route"}',
-        # Full branch first: dagre breaks the retry cycle by declaration order,
-        # and fast-first ranked the Rewriter after the gate.
-        'route -- full --> rewrite["Query<br/>Rewriter"] --> retrieve["Multi-Source<br/>Retriever"]',
-        'route -- "fast: version/date" --> retrieve',
-        'retrieve --> classify{"Evaluator /<br/>Sufficiency Gate"}',
-        'classify -- sufficient --> answer["Orchestrator /<br/>Verdict Gate"]',
-        'classify -- "degraded' + (f" (retried ×{retries})" if retries else "") + '" --> rewrite',
-        'classify -- absent --> abstain(["Abstain"])',
+        f'start(["Start"]) --> {box("ask")} --> {box("search")} --> {box("check")}',
+        f'check --> {box("rewrite")} --> {box("facts")} --> {box("classify")}',
+        f'classify --> {box("evaluate")} --> {box("orch")} --> {box("done")}',
+        "classify -.->|" + ("degraded" + (f" ×{retries}" if retries else "")) + "| rewrite",
+        "classify -.->|absent| done",
+        "evaluate -.->|not grounded| done",
         "classDef taken fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b3a1d",
         "classDef skipped fill:#fafafa,stroke:#9e9e9e,stroke-dasharray:4 3,color:#9e9e9e",
+        "classDef term fill:#ede7ff,stroke:#7c5cff,stroke-width:2px,color:#2e1f6b",
+        "class start,done term",
     ]
     if results:
-        taken = {"ask", "intent", "route", "retrieve"} | set(path)
-        # The fast walk runs an identity rewrite; no Rewriter agent ran.
-        if mode == "fast":
-            taken.discard("rewrite")
-        else:
-            taken.add("rewrite")      # run_pipeline always rewrites before fetching
-        if not dec:
-            taken.add("abstain")      # abstained before the gate
-        skipped = [n for n in _STAGES if n not in taken]
         lines.append("class " + ",".join(n for n in _STAGES if n in taken) + " taken")
+        skipped = [n for n in _STAGES if n not in taken]
         if skipped:
             lines.append("class " + ",".join(skipped) + " skipped")
     return "\n".join(lines)
@@ -2181,8 +2285,9 @@ def _render_mermaid(src: str, height: int = 230) -> None:
     import streamlit.components.v1 as components
     # ponytail: CDN-loaded, so the diagram is blank offline; st.graphviz_chart
     # is the offline fallback if the demo ever runs without a network.
-    # Built from fixed labels and a retry count only -- no user or model text,
-    # which is what makes an unsandboxed iframe acceptable here.
+    # Built from fixed labels, timings, counts, fixed enums and catalog product
+    # names stripped to plain characters -- no user or model text, which is
+    # what makes an unsandboxed iframe acceptable here.
     doc = (f'<pre class="mermaid" style="margin:0">{html.escape(src)}</pre>'
            f'<script type="module">import mermaid from "{_MERMAID_JS}";'
            'mermaid.initialize({startOnLoad: false, theme: "neutral",'
@@ -2220,6 +2325,22 @@ def _maintenance_context(results: dict, today=None, days: int = 183) -> Dict[str
     return out
 
 
+_KIND_TAG = {"version": "Fact question", "date": "Fact question",
+             "cve": "Security question", "stance": "Opinion question"}
+
+
+def _question_tags(q: str, results: dict) -> List[str]:
+    """The tags under the search box: what kind of question it is, and which
+    path answered it -- the route the strip above draws. Two products found by
+    grounding is a comparison too: "Is zoom better or teams?" has no "than"."""
+    vendors = getattr(results.get("grounding"), "vendor_names", None) or []
+    compare = graph._COMPARE_RE.search(q) or len(vendors) > 1
+    tags = ["Comparison question"] if compare else []
+    tags += [_KIND_TAG[k] for k in [graph.asks(q)] if k in _KIND_TAG]
+    mode = (results.get("route") or {}).get("mode")
+    return tags + ([{"fast": "Fast path", "full": "Full pipeline"}[mode]] if mode else [])
+
+
 def _console_html(text: str) -> str:
     import html
     body = re.sub(r"^(\$ .*|\[[A-Z]+\])", r'<span class="tag">\1</span>',
@@ -2231,6 +2352,9 @@ def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = Non
     st.markdown("### Software Update Decision Intelligence")
     st.caption("Is an update safe? Answered from live release notes, CISA KEV / NVD "
                "advisories and community reports — every claim cited.")
+    # The pipeline strip sits above the search box, filled once the run is in:
+    # plain before a question, the walked path with timings after one.
+    strip = st.container()
     # A form, so Enter asks too; outside one, Enter only reran the page and
     # cleared the previous answer.
     with st.form("ask_form", border=False):
@@ -2239,17 +2363,22 @@ def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = Non
                             placeholder='e.g. "Is it safe to update Firefox?"  ·  "Latest Node.js version?"')
         asked = bcol.form_submit_button("Ask", type="primary", use_container_width=True)
     if not q or not asked:
-        with st.expander("How it works"):
-            _render_mermaid(_pipeline_mermaid())
+        with strip:
+            _render_mermaid(_pipeline_mermaid(), height=150)
         return
     note = _off_topic_note(q)
     if note:
+        with strip:
+            _render_mermaid(_pipeline_mermaid(), height=150)
         with st.container(border=True):
             st.caption(f"**Q:** {_md_escape(q)}")
             st.markdown("### ⚪ Not a software update question")
             st.markdown(note)
         return
     results, presented = ask(q, limit=result_limit, source=source, checks=checks)
+    with strip:
+        _render_mermaid(_pipeline_mermaid(results), height=150)
+    st.markdown(" ".join(f":blue-badge[{t}]" for t in _question_tags(q, results)))
 
     # Verdict first: the answer, then the three numbers behind it. The pipeline
     # diagram and the trace are how it was answered, so they go last.
@@ -2290,7 +2419,6 @@ def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = Non
         _tab_loops(results, q)
 
     with st.expander("How this was answered"):
-        _render_mermaid(_pipeline_mermaid(results))
         dec = results.get("decision") or {}
         if dec:
             st.caption(f"confidence {dec.get('confidence', 0):.2f} · {dec.get('stop_reason', '')}")
@@ -2440,6 +2568,11 @@ with st.sidebar:
             "web_search": _ck("Web search for questions the feeds can't answer", "web_search",
                               "Trusted vendor pages, plus a web fallback when no document "
                               "is about the asked product."),
+            "llm_extract": _ck("Model-assisted extraction when rules find no version",
+                               "llm_extract",
+                               "For a version question whose documents state no version the "
+                               "rules can read, the presenter model reads one; it is shown only "
+                               "if that exact value is in the document it cites."),
         }
         st.caption("ALWAYS ON")
         for _name, _what in ALWAYS_ON:
