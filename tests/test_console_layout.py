@@ -23,28 +23,52 @@ def _classes(src: str) -> dict:
 
 
 def test_diagram_is_plain_before_a_run():
-    assert _classes(app_1._pipeline_mermaid()) == {}
+    assert _classes(app_1._pipeline_mermaid()) == {"start": "term", "done": "term"}
 
 
-def test_fast_run_skips_the_rewriter_and_abstain():
-    res = {"route": {"mode": "fast"},
-           "decision": {"path": ["rewrite", "retrieve", "classify", "answer"]}}
-    c = _classes(app_1._pipeline_mermaid(res))
-    assert c["rewrite"] == "skipped" and c["abstain"] == "skipped"
-    assert c["classify"] == c["answer"] == c["retrieve"] == "taken"
+class _G:
+    vendor_names = ["zoom", "teams"]
+
+
+def test_fast_run_skips_the_rewriter_and_evaluate():
+    res = {"route": {"mode": "fast"}, "grounding": _G(), "rewrite": None,
+           "releases": [{}, {}], "timing": {"temporal": 0.04, "releases": 0.6, "answer": 0.5},
+           "decision": {"path": ["rewrite", "retrieve", "classify", "answer"],
+                        "step_ms": {"classify": 120}, "evidence_class": "sufficient",
+                        "verdict": "safe"}}
+    src = app_1._pipeline_mermaid(res)
+    c = _classes(src)
+    assert c["rewrite"] == c["evaluate"] == "skipped"
+    assert c["search"] == c["check"] == c["facts"] == c["classify"] == c["orch"] == "taken"
+    assert c["start"] == c["done"] == "term"
+    # Each taken box says how long it took and what it found.
+    assert "0.6s · 2 artifacts" in src and "0.1s · sufficient" in src
+    assert "0.5s · safe" in src and "zoom, teams" in src
+    assert 'rewrite["Rewrite<br/><small>skipped</small>"]' in src and "abstained" not in src
 
 
 def test_full_run_with_no_decision_abstains_before_the_gate():
-    c = _classes(app_1._pipeline_mermaid({"route": {"mode": "full"}, "decision": None}))
-    assert c["rewrite"] == c["abstain"] == "taken"
-    assert c["classify"] == c["answer"] == "skipped"
+    res = {"route": {"mode": "full"}, "rewrite": object(), "decision": None}
+    src = app_1._pipeline_mermaid(res)
+    c = _classes(src)
+    assert c["rewrite"] == c["facts"] == "taken"
+    assert c["classify"] == c["orch"] == c["check"] == "skipped"
+    assert 'done(["End<br/><small>abstained</small>"])' in src
 
 
 def test_retry_loop_is_labelled_with_its_count():
     res = {"route": {"mode": "full"},
            "decision": {"path": ["rewrite", "retrieve", "classify", "rewrite",
                                  "retrieve", "classify", "answer"]}}
-    assert "retried ×1" in app_1._pipeline_mermaid(res)
+    assert "|degraded ×1|" in app_1._pipeline_mermaid(res)
+
+
+def test_question_tags_name_the_kind_and_the_path():
+    assert app_1._question_tags("Is zoom better or teams?",
+                              {"route": {"mode": "full"}, "grounding": _G()}) == [
+        "Comparison question", "Opinion question", "Full pipeline"]
+    assert app_1._question_tags("Latest Node.js version?", {"route": {"mode": "fast"}}) == [
+        "Fact question", "Fast path"]
 
 
 def test_security_table_reads_kev_and_severity_from_the_row():
