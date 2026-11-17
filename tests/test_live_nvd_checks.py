@@ -37,3 +37,17 @@ def test_nvd_rows_are_scoped_to_the_owner(monkeypatch):
 
 def test_vendor_check_off_keeps_every_nvd_row(monkeypatch):
     assert _run(monkeypatch, vendor_check=False) == {"CVE-2026-1", "CVE-2026-2"}
+
+
+def test_vendor_filter_may_empty_the_release_pool(monkeypatch):
+    # 2026-11-17: rows with product "vulnerability" were restored as Zig releases.
+    junk = [{"product": "vulnerability", "version": "10.3.26", "date": "2026-11-01",
+             "notes": "Path Traversal", "url": "https://x/1", "is_cve": False}]
+    monkeypatch.setattr(app_1, "union_fetch", lambda fn, *a, **k: junk if fn.__name__ == "fetch" and a and "zig" in a[0] else [])
+    monkeypatch.setattr(app_1, "terminal_sources",
+                        lambda *a, **k: ({"community": [], "releases": junk, "cve": []}, []))
+    monkeypatch.setattr(app_1, "rewrite_query", lambda q: Rewrite(q, "rule-based"))
+    monkeypatch.setattr(app_1, "get_store", lambda: None)
+    monkeypatch.setattr(nvd, "fetch", lambda *a, **k: [])
+    r = app_1.run_pipeline("What is the latest version of Zig?", show_steps=False)
+    assert r["releases"] == []

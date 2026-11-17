@@ -1106,13 +1106,14 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # For a release question those rows are not weak evidence, they are wrong
     # evidence, so intent decides whether they may be cited at all.
     #
-    # Filters never empty a pool: an answer over imperfect documents beats an
-    # answer over none, and a demo that returns nothing teaches the reader
-    # nothing about what it fixed.
+    # The vendor filter may empty the release pool, and that is the finding.
+    # `scoped or results["releases"]` restored what it had just rejected:
+    # "What is the latest version of Zig?" (2026-11-17) showed rows whose
+    # product is "vulnerability", "3" and "session" as Zig releases.
     t0 = time.time()
     if g.vendors and checks["vendor_check"]:
         scoped = vendor.filter_by_vendor(results["releases"], g.vendors)
-        results["releases"] = scoped or results["releases"]
+        results["releases"] = scoped
         # No `or results["community"]` fallback: when the subject filter finds
         # nothing about this question in the feed, that is the finding. The
         # fallback used to restore the pool it had just rejected, which is how
@@ -1367,7 +1368,7 @@ def run_fast(query: str, limit: int = 5, source: str = "agent") -> Optional[dict
         fetch = caching_fetch(None if source == "lake" else db, "release",
                               fetch_release_notes, lambda: len(errors))
     rows = fetch(g.vendor_names[0], limit=max(limit * 10, 50)) or []
-    rows = vendor.filter_by_vendor(rows, g.vendors) or rows
+    rows = vendor.filter_by_vendor(rows, g.vendors)
     shipped = [r for r in rows if not r.get("is_cve") and vendor.is_release_record(r)]
     advisories = [r for r in rows if r not in shipped]
     if _latest_release(shipped, query) is None:
