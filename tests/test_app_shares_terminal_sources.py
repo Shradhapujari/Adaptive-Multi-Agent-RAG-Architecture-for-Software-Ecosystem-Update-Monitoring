@@ -148,3 +148,15 @@ def test_the_news_article_survives_into_the_answered_pool(monkeypatch, sourced):
     results = app_1.run_pipeline("What broke printing in the latest Windows "
                                  "update?", show_steps=False, limit=5)
     assert "news1" in [d["url"] for d in results["community"]]
+
+
+def test_an_advisory_feed_outage_is_recorded_and_blocks_safe(monkeypatch):
+    # The KEV/CIRCL fetchers used to swallow their own exceptions, so a dead
+    # feed was indistinguishable from "no exploited CVE".
+    monkeypatch.setattr(marag, "gather_sources", lambda *a, **k: dict(
+        BUCKETS, outages=[("CISA KEV", TimeoutError("read timed out"))]))
+    monkeypatch.setattr(marag, "extract_vendor", lambda q: ["windows"])
+    app_1.terminal_sources("printing?", "printing", [])
+    errors = app_1._FETCH_ERRORS.get()
+    assert [e["agent"] for e in errors] == ["CISA KEV"]
+    assert app_1._unchecked(errors) == {"cve"}

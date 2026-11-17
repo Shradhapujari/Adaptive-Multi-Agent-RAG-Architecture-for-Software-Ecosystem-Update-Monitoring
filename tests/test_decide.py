@@ -50,6 +50,17 @@ def test_k_problem_reports_and_no_fix_is_hold():
     assert d.obligations["no_newer_fix_release"] is True
 
 
+def test_lost_or_disappeared_data_is_a_problem_report():
+    # 2026-11-13: Firefox posts about lost bookmarks and a vanished New Tab Page
+    # never counted as problem reports, so the console could not see the regression.
+    pool = [_d(1, "vendor_reddit", "Ubuntu 24.04 update: lost all my bookmarks", date="2026-05-02"),
+            _d(2, "vendor_reddit", "ubuntu 24.04 dock disappeared after upgrade", date="2026-05-03"),
+            _d(4, "vendor_reddit", "ubuntu 24.04 settings missing", date="2026-05-03"),
+            _d(3, "vendor_releases", "Ubuntu 24.04 LTS released", date="2026-04-25")]
+    d = D.decide(pool, Q, V)
+    assert d.verdict == "hold" and set(d.evidence) == {"d1", "d2", "d4"}
+
+
 def test_one_report_is_not_a_hold():
     pool = [_d(1, "vendor_reddit", "Ubuntu 24.04 broke my wifi", date="2026-05-02"),
             _d(3, "vendor_releases", "Ubuntu 24.04 LTS released", date="2026-04-25")]
@@ -267,6 +278,44 @@ def test_the_patch_verdict_does_not_overclaim_its_attribution():
     assert "name" in d.rationale and "citation" in d.rationale
 
 
+# ---- owner boundary: the product named, another vendor's artifact affected --
+# Observed 2026-10-22: "latest Node.js version?" came back with a red note
+# citing a MariaDB Connector/Node.js advisory.
+
+NQ = "What is the latest version of Node.js?"
+NV = ["node.js"]
+
+
+def test_a_connector_for_the_runtime_is_not_a_runtime_advisory():
+    pool = [_d(1, "nvd", "node.js v3.4.0 — MariaDB Connector/Node.js",
+               "MariaDB Connector/Node.js before 3.4.1 allows SQL injection. CVE-2026-4242")]
+    assert D.decide(pool, NQ, NV).verdict != "patch_urgently"
+
+
+def test_a_driver_named_after_the_runtime_is_not_a_runtime_advisory():
+    pool = [_d(1, "nvd", "node.js — foo Node.js driver",
+               "The foo Node.js driver before 2.0 allows prototype pollution. CVE-2026-4243"),
+            _d(2, "nvd", "node.js — weakness first",
+               "Prototype pollution was fixed in Acme Node.js SDK 1.2. CVE-2026-4244")]
+    assert D.decide(pool, NQ, NV).verdict != "patch_urgently"
+
+
+def test_the_runtimes_own_advisory_still_orders_a_patch():
+    pool = [_d(1, "nvd", "node.js v24.9.1 — HTTP request smuggling",
+               "Node.js before 24.9.1 allows HTTP request smuggling. CVE-2026-4245")]
+    assert D.decide(pool, NQ, NV).verdict == "patch_urgently"
+
+
+def test_the_knowledge_store_excludes_a_product_text_cannot_separate():
+    """iTerm2 and macOS differ by a word no rule can know; the store knows it."""
+    iterm = [_d(1, "nvd", "macos v3.6.11 — iTerm2",
+                "An issue in iTerm2 macOS before 3.6.12 allows code execution. CVE-2026-5151")]
+    assert D.decide(iterm, MQ, ["macos"]).verdict != "patch_urgently"
+    own = [_d(1, "nvd", "macos v27.0 — macOS",
+              "An issue in macOS before 27.1 allows code execution. CVE-2026-5152")]
+    assert D.decide(own, MQ, ["macos"]).verdict == "patch_urgently"
+
+
 def test_no_asked_version_is_not_a_confirmed_version():
     # "Is it safe to update Firefox?" asks no version, so nothing was checked
     # against the advisory's affected range. The console showed confidence 1.00
@@ -275,3 +324,27 @@ def test_no_asked_version_is_not_a_confirmed_version():
     pool = [_d(1, "cisa_kev", "[CISA KEV] Ubuntu kernel flaw", "CVE-2026-1234 exploited")]
     d = D.decide(pool, "Is it safe to update Ubuntu?", V)
     assert d.verdict == "patch_urgently" and d.confidence == 0.8
+
+
+def test_an_unread_source_is_not_evidence_of_safety():
+    # A release note and nothing else is `safe` -- but only if the advisory and
+    # community feeds were actually read. A dead CISA KEV feed used to look
+    # exactly like "no exploited CVE".
+    pool = [_d(1, "vendor_releases", "Ubuntu 24.04.1 LTS released", "point release")]
+    for down in ({"cve"}, {"community"}):
+        d = D.decide(pool, Q, V, unchecked=down)
+        assert d.verdict == "insufficient_evidence" and d.probes_wanted == sorted(down)
+        assert d.obligations["sources_checked"] is False
+
+
+def test_an_unread_community_feed_blocks_a_caveat_but_an_unread_cve_feed_does_not():
+    # A caveat stands on fewer than K reports (else hold); with the advisory
+    # feed down it could only have been patch_urgently, which is also `act`.
+    pool = [_d(1, "vendor_releases", "Ubuntu 24.04 LTS", "breaking change: removed python2")]
+    assert D.decide(pool, Q, V, unchecked={"community"}).verdict == "insufficient_evidence"
+    assert D.decide(pool, Q, V, unchecked={"cve"}).verdict == "update_with_caveat"
+
+
+def test_positive_evidence_still_decides_when_a_feed_is_down():
+    pool = [_d(1, "nvd", "CVE-2026-1234 Ubuntu", "Ubuntu before 24.04.2 allows RCE")]
+    assert D.decide(pool, Q, V, unchecked={"cve", "community"}).verdict == "patch_urgently"

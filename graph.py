@@ -121,6 +121,12 @@ def asks(question: str) -> str:
 _COMPARE_RE = re.compile(
     r"\b(vs\.?|versus|compare[ds]?|comparison|better than|more (?:stable|reliable|secure)"
     r"|difference between|which (?:is|one)|or\b.*\bor\b)", re.I)
+# Two products in one lookup: "Python and Node.js", "Postgres or MySQL",
+# "Kubernetes 1.35 and Docker 29". A lookup over two feeds is a cross-vendor
+# question, not a single-product short-circuit.
+# ponytail: the second name must be capitalised, so "python and node" stays
+# fast; key this off grounding's vendor count if lower-case queries matter.
+_MULTI_PRODUCT_RE = re.compile(r"\w\s*(?:,|&|\band\b|\bor\b)\s+[A-Z][\w.+#-]")
 
 
 def route_query(question: str) -> Tuple[str, str]:
@@ -140,6 +146,8 @@ def route_query(question: str) -> Tuple[str, str]:
     kind = asks(question)
     if _COMPARE_RE.search(question or ""):
         return "full", "comparison — weighs several products"
+    if _MULTI_PRODUCT_RE.search(question or ""):
+        return "full", f"{kind} lookup across several products"
     if kind in ("version", "date"):
         return "fast", f"single-product {kind} lookup"
     return "full", f"{kind} question — needs cross-source synthesis"
@@ -255,6 +263,38 @@ def verify_prompt(s: State) -> str:
             '{"grounded": true|false, "value": "<the stated answer or null>", "doc": "<id or null>"}')
 
 
+def _facts(text: str) -> set:
+    return set(extract_versions(text)) | set(extract_dates(text)) | {c.upper() for c in _CVE_RE.findall(text)}
+
+
+def check_verify(obj, docs: Sequence[dict]) -> Tuple[bool, str]:
+    """(grounded, why-not) for one verify reply, checked against the pool.
+
+    Grounded only on a JSON `true` that names a pool document stating the
+    value. `bool(obj.get("grounded"))` read the string "false" as True, and a
+    value or doc the model invented was answered with as if a source said it.
+    An empty why-not is a well-formed reply; anything else breaks the contract.
+    """
+    if not isinstance(obj, dict) or not isinstance(obj.get("grounded"), bool):
+        return False, "grounded is not a JSON boolean"
+    if not obj["grounded"]:
+        return False, ""
+    by_id = {str(d.get("doc_id", i)): d for i, d in enumerate(docs)}
+    d = by_id.get(str(obj.get("doc")))
+    if d is None:
+        return False, f"doc {obj.get('doc')!r} is not in the pool"
+    value = str(obj.get("value") or "").strip()
+    if not value:
+        return False, "grounded with no value"
+    text = _doc_text(d) + " " + str(d.get("date") or "")
+    # Versions, dates and CVE ids are compared as extracted facts, so "6.17"
+    # is not satisfied by "6.17.2"; anything else must appear as whole words.
+    facts = _facts(value)
+    stated = facts <= _facts(text) if facts else re.search(
+        r"(?<!\w)" + re.escape(value) + r"(?!\w)", text, re.I)
+    return (True, "") if stated else (False, f"value {value!r} is not in doc {obj.get('doc')!r}")
+
+
 def run(query: str, rewrite: Callable[[str, tuple], str], retrieve: Callable[[str], tuple],
         llm: Optional[Callable[[str, int], str]] = None, max_rounds: int = MAX_ROUNDS,
         gate: Optional[Gate] = None) -> State:
@@ -267,6 +307,7 @@ def run(query: str, rewrite: Callable[[str, tuple], str], retrieve: Callable[[st
     while node not in TERMINAL:
         t0, tok0, h_in = time.time(), tokens.snapshot(), s.digest()
         out: dict = {}
+        contract_ok = True
         if node == "rewrite":
             q = rewrite(query, s.tried)
             s = replace(s, tried=s.tried + (q,))
@@ -282,9 +323,10 @@ def run(query: str, rewrite: Callable[[str, tuple], str], retrieve: Callable[[st
         elif node == "verify":
             raw = llm(verify_prompt(s), VERIFY_MAX_TOKENS) if llm else ""
             obj = _extract_json(raw) or {}
-            s = replace(s, grounded=bool(obj.get("grounded")))
-            out = {"grounded": s.grounded, "value": obj.get("value"), "doc": obj.get("doc")}
-        contract_ok = node != "verify" or bool(_extract_json(raw))
+            grounded, why = check_verify(obj, s.docs)
+            s = replace(s, grounded=grounded)
+            contract_ok = not why
+            out = {"grounded": grounded, "value": obj.get("value"), "doc": obj.get("doc"), "reason": why}
         if node == "classify" and s.evidence is Evidence.DEGRADED and len(s.tried) >= max_rounds:
             nxt = "abstain"
         else:
@@ -352,11 +394,21 @@ def _demo() -> None:
     s = run("latest Fedora version?", rw, lambda q: ([rel], False), llm=lambda p, n: (_ for _ in ()).throw(AssertionError("llm called")))
     assert s.trace[-1].node == "answer" and s.values == ("6.17.2",)
     # AMBIGUOUS is the only path to the model, and its contract is checked.
+    # A bare major is not a multipart version, so this doc is AMBIGUOUS.
+    cur = {"doc_id": "c3", "title": "Fedora 44 is the current release"}
     seen = {}
-    def llm(prompt, max_tokens): seen["n"] = max_tokens; return '{"grounded": true, "value": "44", "doc": "c1"}'
-    s = run("latest Fedora version?", rw, lambda q: ([chat], False), llm=llm)
+    def llm(prompt, max_tokens): seen["n"] = max_tokens; return '{"grounded": true, "value": "44", "doc": "c3"}'
+    s = run("latest Fedora version?", rw, lambda q: ([cur], False), llm=llm)
     assert seen["n"] == VERIFY_MAX_TOKENS and s.trace[-1].node == "answer"
     assert all(st.contract_ok for st in s.trace)
+    # The same reply citing a doc that never says 44 is the model inventing it.
+    s = run("latest Fedora version?", rw, lambda q: ([chat], False),
+            llm=lambda p, n: '{"grounded": true, "value": "44", "doc": "c1"}')
+    assert s.trace[-1].node == "abstain"
+    # The string "false" is not a JSON false, and must not read as true.
+    s = run("latest Fedora version?", rw, lambda q: ([cur], False),
+            llm=lambda p, n: '{"grounded": "false", "value": "44", "doc": "c3"}')
+    assert s.trace[-1].node == "abstain"
     s = run("latest Fedora version?", rw, lambda q: ([chat], False), llm=lambda p, n: "I think so, yes.")
     v = [st for st in s.trace if st.node == "verify"][0]
     assert not v.contract_ok and v.edge_taken == "abstain"

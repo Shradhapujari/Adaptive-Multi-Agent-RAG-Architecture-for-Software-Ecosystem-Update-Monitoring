@@ -56,6 +56,9 @@ def manager(negative_rounds, cap=None):
     m = marag.ManagerAgent()
     m.rewriter, m.retriever = FakeRewriter(), FakeRetriever()
     m.evaluator = FakeEvaluator(negative_rounds)
+    m.planner = lambda q: {"planner": "stub", "thinking": "",
+                           "detected_vendor": "", "temporal_anchor": "",
+                           "search_strategy": [q], "expected_sources": []}
     if cap is not None:
         m.MAX_ROUNDS = cap
     return m
@@ -161,6 +164,37 @@ def test_the_avoided_phrasings_reach_the_prompt(monkeypatch):
     assert "Do not reuse" in seen["prompt"]
 
 
+# The query used to be spliced in by f-string and then the whole prompt run
+# through .format(), so a brace in the user's words was read as a template slot.
+@pytest.mark.parametrize("query", ["what changed in {django}?", "set x = {} in config",
+                                   "json {\"a\": 1} broke", "{tried}"])
+@pytest.mark.parametrize("avoid", [(), ("tried {once}",)])
+def test_a_brace_in_the_query_reaches_the_prompt_verbatim(monkeypatch, query, avoid):
+    monkeypatch.setattr(marag, "pause", lambda *a, **k: None)
+    seen = {}
+    monkeypatch.setattr(marag, "call_llama", lambda p: seen.setdefault("prompt", p) and "rewritten q")
+    assert marag.QueryRewriterAgent().run(query, avoid=avoid)["rewritten"] == f"{query} rewritten q"
+    assert f'A user asked: "{query}"' in seen["prompt"]
+    assert all(t in seen["prompt"] for t in avoid)
+
+
+def test_the_model_reply_is_appended_never_substituted(monkeypatch):
+    monkeypatch.setattr(marag, "pause", lambda *a, **k: None)
+    monkeypatch.setattr(marag, "call_llama", lambda p: '"Chrome release notes, CVE"')
+    out = marag.QueryRewriterAgent().run("chrome update")["rewritten"]
+    assert out == "chrome update Chrome release notes, CVE"
+
+
+# call_llama returns None only when Ollama is unreachable; an empty or blank
+# reply came back as "" and was searched for as the rewritten query.
+@pytest.mark.parametrize("reply", ["", "   ", "\n\t"])
+def test_a_blank_rewrite_falls_back_by_rule(monkeypatch, reply):
+    monkeypatch.setattr(marag, "pause", lambda *a, **k: None)
+    monkeypatch.setattr(marag, "call_llama", lambda p: reply)
+    out = marag.QueryRewriterAgent().run("chrome update")["rewritten"]
+    assert out.startswith("chrome update ") and out.strip() != "chrome update"
+
+
 # ---- the signal reads the pre-floor relevance, not the floored quality ------
 
 def test_retry_signal_fires_on_off_topic_docs_even_from_a_recognised_source(monkeypatch):
@@ -174,3 +208,21 @@ def test_retry_signal_fires_on_off_topic_docs_even_from_a_recognised_source(monk
     assert "negative" in r["signal"]    # so the Manager retries
     on_topic = [dict(off_topic[0], title="ubuntu kernel wifi broken after upgrade")]
     assert "positive" in ev.run(on_topic, "ubuntu kernel wifi broken after upgrade")["signal"]
+
+
+# ---- opt-in LLM judge: θ=0.30 on its score, term overlap when it fails ------
+
+@pytest.mark.parametrize("reply, want", [
+    ('{"score": 0.20, "cve_match": false}', "negative"),   # on-topic docs, judge says thin
+    ('noise {"thinking": "ok", "score": 0.85} noise', "positive"),
+    ('{"score": 7}', "positive"),                           # out of range -> term overlap
+    (None, "positive"),                                      # Ollama down -> term overlap
+])
+def test_llm_judge_drives_the_retry_signal(monkeypatch, reply, want):
+    monkeypatch.setattr(marag, "pause", lambda *a, **k: None)
+    monkeypatch.setattr(marag, "call_llama", lambda p, **k: reply)
+    monkeypatch.setattr(marag.EvaluatorAgent, "USE_LLM", True)
+    q = "ubuntu kernel wifi broken after upgrade"
+    docs = [{"source": "vendor_releases", "title": q, "detail": "",
+             "subreddit": "", "sentiment": "Neutral", "url": "u"}]
+    assert want in marag.EvaluatorAgent().run(docs, q)["signal"]

@@ -510,6 +510,10 @@ def run(cfg: EvalConfig) -> str:
     _jf = getattr(judge, "answer_parse_failures", 0)
     cfg_dict["judge_answer_calls"] = _jc
     cfg_dict["judge_answer_parse_failures"] = _jf
+    # From 2026-10-25 answer scores are decoded under judge.ANSWER_SCHEMA on
+    # Ollama; runs without this key were free-text, so their answer means are
+    # not like-for-like with runs that have it. qrels/nDCG are unaffected.
+    cfg_dict["judge_answer_decoding"] = "json_schema"
     if _jc:
         print(f"[harness] judge answer-score parse failures: {_jf}/{_jc} "
               f"({100.0 * _jf / _jc:.1f}%) -- scored as None, excluded from the means")

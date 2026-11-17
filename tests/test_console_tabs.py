@@ -68,3 +68,14 @@ def test_sources_list_the_advisories_held_back_for_the_verdict():
     assert "CVE-2026-11111" in nvd[0]["Version/CVE"]
     assert nvd[0]["Verdict"] == "cited"
     assert [r["Tier"] for r in rows if r["Title"] == "bookmarks gone"] == ["Reddit / Forums"]
+
+
+def test_sources_mark_what_the_answer_cites_apart_from_the_verdict():
+    from answer_agent import collect_evidence, PresentedAnswer
+    rel = _rel("26.12.1", "20261020")
+    post = {"title": "npm broke", "url": "https://reddit.com/y"}
+    results = {"releases": [rel], "cve": [], "community": [post], "decision": None}
+    ev = collect_evidence(results)
+    text = f"Node.js v26.12.1 shipped [{ev[0].label}]."
+    rows = app_1._source_rows(results, PresentedAnswer(text, "llm", evidence=ev))
+    assert {r["Title"]: r["Answer"] for r in rows} == {rel["title"]: "cited", "npm broke": ""}

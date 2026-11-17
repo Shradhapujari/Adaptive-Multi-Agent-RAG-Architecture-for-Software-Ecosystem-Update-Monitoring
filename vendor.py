@@ -38,6 +38,7 @@ answering one question does not re-download 104 KB of names.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
@@ -92,7 +93,10 @@ _UNSEARCHABLE = frozenset({
     "you", "your", "update", "updates", "release", "releases", "security",
     "patch", "patches", "bug", "bugs", "fix", "fixes", "issue", "issues",
     "software", "vulnerability", "vulnerabilities", "cve", "recent", "support",
-    "safe",
+    # Catalog entries that are everyday words: "weather in Paris" grounded to a
+    # product called weather, "is it safe" to one called safe.
+    # ponytail: a stopword list; a word-frequency check if more keep turning up.
+    "weather", "safe", "community",
     # Measured on the 200-question decision sheet (2026-11-12): these matched
     # ordinary words, never the tagged product. Filtering them drops stray
     # vendor detections 161 -> 112 and loses none of the 61 real ones.
@@ -100,7 +104,7 @@ _UNSEARCHABLE = frozenset({
     "group", "import", "input", "network", "neo", "new tab page",
     "notifications", "passwords", "performance", "popup", "pro", "repo",
     "return", "script", "search", "section", "server", "settings", "start",
-    "system", "tabs", "weather",
+    "system", "tabs",
 })
 
 # Query words that name a product without being the catalog's spelling of it.
@@ -290,6 +294,99 @@ def detect_vendors(query: str, catalog: Optional[Sequence[str]] = None,
             claimed.append(name)
 
     return found[:limit]
+
+
+_SUGGEST_WORD = re.compile(r"[a-z][a-z0-9.+#-]*[a-z0-9+#]")
+# Question words that sit a typo away from a catalogue name ("latest" ->
+# "latex"); never offered as a misspelling. "safe" is here rather than in
+# _UNSEARCHABLE because that list is also being edited on another branch.
+_NOT_A_PRODUCT = frozenset({"latest", "newest", "current", "currently", "version",
+                            "versions", "safe", "stable", "recently", "released",
+                            "critical", "exploited", "upgrade", "upgrading"})
+
+
+def known_products() -> List[str]:
+    """Products this system has hand-curated knowledge of: alias targets,
+    data/vendor_kb.json entries and websearch's vendor-page hosts."""
+    from websearch import VENDOR_DOMAINS
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data",
+                               "vendor_kb.json"), encoding="utf-8") as fh:
+            kb = list(json.load(fh)["products"])
+    except (OSError, ValueError, KeyError):
+        kb = []
+    return sorted(set(_ALIASES.values()) | set(kb) | set(VENDOR_DOMAINS))
+
+
+def suggest(query: str, catalog: Optional[Sequence[str]] = None) -> Optional[str]:
+    """The product a misspelt word in `query` most likely meant, or None.
+
+    For a question `detect_vendors` found no product in: "Latest Nodej.s
+    version?" -> "node.js". Only a suggestion, for the reader to accept by
+    asking again: substituting it silently would answer about a product the
+    user may not have meant, which is the error this exists to stop
+    ("Nodej.s" answered with linux v7.38.0, 2026-11-12).
+
+    Stdlib difflib over the products this system knows by hand (`known_products`)
+    and the hand-checked aliases, not the whole catalogue: over its 5,613
+    names, 156 of the 247 benchmark questions with no product got a bogus
+    suggestion ("videos" -> video, "settings", "installer"). With the rules in
+    `_closest`, 0 of 242 do, and transposition typos (pyhton, kernal, ubunut)
+    still resolve.
+
+    ponytail: a long-tail product's typo gets no suggestion; widen
+    `known_products` if that turns out to matter.
+    """
+    hit = _closest(query, catalog)
+    return hit[1] if hit else None
+
+
+# Display spellings for names whose lowercase catalogue form reads wrong.
+_PRETTY = {"node.js": "Node.js", "nodejs": "Node.js", "macos": "macOS", "ios": "iOS",
+           "postgresql": "PostgreSQL", "openssl": "OpenSSL", "gpt": "GPT"}
+
+
+def pretty(name: str) -> str:
+    return _PRETTY.get(name, name[:1].upper() + name[1:])
+
+
+def respell(query: str, catalog: Optional[Sequence[str]] = None) -> Optional[str]:
+    """`query` with its misspelt product replaced by the suggestion, or None.
+    "Latest Nodej.s version?" -> "Latest Node.js version?"."""
+    hit = _closest(query, catalog)
+    if not hit:
+        return None
+    word, name = hit
+    return re.sub(rf"(?<![\w.-]){re.escape(word)}(?![\w-])", lambda _: pretty(name),
+                  query, count=1, flags=re.I)
+
+
+def _closest(query: str, catalog: Optional[Sequence[str]] = None,
+             cutoff: float = 0.8) -> Optional[tuple]:
+    """(misspelt word as found, product) for `suggest` and `respell`."""
+    from keywords import QUESTION_STOPWORDS
+    if catalog is None:
+        catalog = known_products()
+    canon = {n: n for n in catalog if len(n) >= 3}
+    canon.update({a: c for a, c in _ALIASES.items() if " " not in a})
+    names = list(canon)
+    skip = _UNSEARCHABLE | QUESTION_STOPWORDS | _NOT_A_PRODUCT
+    best, pick = 0.0, None
+    for w in _SUGGEST_WORD.findall((query or "").lower()):
+        # Under five letters, one edit is a fifth of the word ("home" -> chrome,
+        # "clue" -> claude); a plural of a known name is that name, not a typo.
+        if len(w) < 5 or w in skip or w in canon or w.rstrip("s") in canon:
+            continue
+        for n in difflib.get_close_matches(w, names, n=3, cutoff=cutoff):
+            # A word inside a name, or a name inside a word, is a different
+            # word, not a typo: "phone"/iphone, "imac"/mac. And a typo keeps
+            # its first letter: "icloud" is not "gcloud".
+            if w in n or n in w or w[0] != n[0]:
+                continue
+            r = difflib.SequenceMatcher(None, w, n).ratio()
+            if r > best:
+                best, pick = r, (w, canon[n])
+    return pick
 
 
 def disambiguate(query: str, vendors: Sequence[VendorMatch]) -> str:

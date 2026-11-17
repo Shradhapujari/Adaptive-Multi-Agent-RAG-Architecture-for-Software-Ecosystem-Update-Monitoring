@@ -29,3 +29,8 @@ tzdata==2026.4
 # failure -- just a blunter rewrite and a blunter answer. Temporal grounding
 # (temporal.py) is rule-based by design and needs no model at all.
 streamlit>=1.32.0
+
+# Keyless DuckDuckGo search (websearch.py): the vendors' own release and
+# security pages, kept only from trusted hosts. No API key. Optional -- without
+# it the console says so and answers from the feeds alone.
+ddgs==9.16.1

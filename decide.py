@@ -44,11 +44,14 @@ obligation fired, which is what a human gate (Phase 3) routes on.
 """
 from __future__ import annotations
 
+import json
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from eval_harness.benchmarks import extract_versions
+from guardrail import normalize
 
 VERDICTS = ("patch_urgently", "hold", "update_with_caveat", "safe",
             "insufficient_evidence")
@@ -72,7 +75,7 @@ _CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
 _PROBLEM_RE = re.compile(
     r"\b(brok(e|en)|crash(es|ed|ing)?|bug|regression|not working|stopped working|"
     r"fail(s|ed|ing)?|stuck|bricked|freez(es|ing)|boot ?loop|won'?t (boot|start|open)|"
-    r"issue|problem|unusable|drain)\b", re.I)
+    r"issue|problem|unusable|drain|lost|missing|disappear(s|ed|ing)?)\b", re.I)
 _FIX_RE = re.compile(r"\b(fix(es|ed)?|resolv(es|ed)|patch(es|ed)?|addresses|hotfix)\b", re.I)
 _CAVEAT_RE = re.compile(
     r"\b(breaking change|breaking|deprecat(ed|es|ion)|removed|no longer support|"
@@ -114,7 +117,9 @@ class Decision:
 # ----------------------------------------------------------------- extraction
 
 def _text(d: dict) -> str:
-    return f"{d.get('title', '')} {d.get('text', '') or d.get('detail', '')}"
+    # Normalized here because every extractor below reads through it: the
+    # injection screen saw NFKC text, the rules used to see the raw bytes.
+    return normalize(f"{d.get('title', '')} {d.get('text', '') or d.get('detail', '')}")
 
 
 def _date(d: dict) -> Optional[str]:
@@ -153,8 +158,96 @@ _FIX_CLAUSE = re.compile(
 
 _PLATFORM_PREP = re.compile(r"\b(?:on|for)\b", re.I)
 
+# A component built *for* the product, named after it: "MariaDB Connector/
+# Node.js", "the foo Node.js driver", "a WordPress plugin". The product token
+# is there, but another vendor owns the affected artifact.
+_COMPONENT_AFTER = re.compile(
+    r"\s*(?:connectors?|drivers?|modules?|packages?|plugins?|extensions?|add-?ons?"
+    r"|sdks?|bindings?|wrappers?|adapters?)\b", re.I)
 
-def _subject_names_product(d: dict, vtoks: set) -> bool:
+# Hand-curated per-product exclusions (data/vendor_kb.json): names that appear
+# in a product's advisory subjects without the product owning the advisory.
+# Static on purpose -- a list a run could append to would make one question's
+# verdict depend on the questions before it, which the paired tests forbid.
+_KB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "vendor_kb.json")
+try:
+    with open(_KB_PATH, encoding="utf-8") as _f:
+        KB: Dict[str, dict] = {k.lower(): v for k, v in json.load(_f)["products"].items()}
+except (OSError, ValueError, KeyError):
+    KB = {}
+
+# Vendor names that advisories put first ("Cisco IOS XE ...", "Zoom Windows
+# client ..."). Static for the same reason as KB.
+try:
+    with open(os.path.join(os.path.dirname(_KB_PATH), "known_vendors.json"), encoding="utf-8") as _f:
+        _kv = json.load(_f)
+        KNOWN_VENDORS = frozenset(_kv["kev"]) | frozenset(_kv["extra"])
+except (OSError, ValueError, KeyError):
+    KNOWN_VENDORS = frozenset()
+
+
+def _word_at(name: str, text: str) -> Optional[int]:
+    """Start of `name` as a whole word in `text`, or None."""
+    m = re.search(r"(?<![a-z0-9])" + re.escape(name) + r"(?![a-z0-9])", text)
+    return m.start() if m else None
+
+
+def _foreign_vendor_first(d: dict, vendors: Sequence[str]) -> bool:
+    """True when an advisory's subject names another vendor before every asked
+    product it names -- "Cisco IOS XE ..." for iOS, "Zoom Windows client ..."
+    for Windows. Advisories are written vendor-first, so the first vendor
+    named is the artifact's owner.
+
+    Only judged for products whose owner is on file (vendor_kb.json
+    `kev_vendors`): without one, a vendor before the product may be its own
+    ("Canonical Ubuntu"), so an asked product with no owner on file is never
+    blocked. A product the subject does not name (owned through the fix
+    clause) is not blocked either.
+
+    ponytail: KNOWN_VENDORS is a static list (KEV vendors + a few by hand);
+    a vendor missing from it passes. Upgrade path is NVD CPE vendor fields.
+    """
+    body = normalize(str(d.get("text") or d.get("detail") or "")).lower()
+    m = _PREDICATE.search(body)
+    if not m or m.start() == 0:
+        return False
+    head = _PLATFORM_PREP.split(body[:m.start()], maxsplit=1)[0]
+    blocked = False
+    for v in vendors:
+        pos = min((p for t in _vendor_tokens([v]) if (p := _word_at(t, head)) is not None), default=None)
+        if pos is None:
+            continue
+        owners = {o.lower() for o in KB.get(str(v).lower(), {}).get("kev_vendors", ())}
+        if not owners:
+            return False
+        first = min((p for n in KNOWN_VENDORS - owners if (p := _word_at(n, head)) is not None),
+                    default=None)
+        if first is None or first >= pos:
+            return False
+        blocked = True
+    return blocked
+
+
+def _owns(segment: str, vtoks: set, exclude: Sequence[str] = ()) -> bool:
+    """Does `segment` (an advisory subject or fix clause) name the product as
+    the owner of the affected artifact?
+
+    Three ways a product token shows up without owning it: as the platform
+    after "on"/"for" (VeraCrypt on macOS), as the target of a component named
+    after it (Connector/Node.js, "Node.js driver"), or next to a name the
+    knowledge store lists for that product (iTerm2 on macOS)."""
+    head = _PLATFORM_PREP.split(segment.lower(), maxsplit=1)[0]
+    if any(x in head for x in exclude):
+        return False
+    for v in vtoks:
+        for m in re.finditer(re.escape(v), head):
+            if head[:m.start()].endswith("/") or _COMPONENT_AFTER.match(head, m.end()):
+                continue
+            return True
+    return False
+
+
+def _subject_names_product(d: dict, vtoks: set, exclude: Sequence[str] = ()) -> bool:
     """Does the asked product appear in the *subject* of an advisory?
 
     A product name anywhere in an advisory is not evidence that the advisory
@@ -185,9 +278,17 @@ def _subject_names_product(d: dict, vtoks: set) -> bool:
     if not body:
         return True
     m = _PREDICATE.search(body)
-    if not m or m.start() == 0:          # no readable subject; rule abstains
+    if m and m.start() == 0:             # no readable subject; rule abstains
         return True
-    subject = body[:m.start()].lower()
+    # No predicate at all is usually a cut, not a subjectless advisory: the
+    # app keeps 200 characters of /api/v/ notes, and "The MongoDB Shell
+    # (mongosh) relies on Node.js as a third-party runtime ..." lost its
+    # "prior to" there and counted for a Node.js question (2026-11-12). The
+    # first sentence stands in for the subject -- when it names the product at
+    # all; a bare "CVE-2026-1234" still abstains.
+    subject = (body[:m.start()] if m else re.split(r"(?<=[.;])\s", body, maxsplit=1)[0]).lower()
+    if not m and not any(v in subject for v in vtoks):
+        return True
     # Within the subject, a name after "on"/"for" is the platform the product
     # runs on, not the product: "VeraCrypt 1.26.29 (FUSE-T build) on macOS
     # systems allows ..." is a VeraCrypt advisory. Observed 2026-10-15, when a
@@ -201,8 +302,7 @@ def _subject_names_product(d: dict, vtoks: set) -> bool:
     # after the preposition. Upgrade path is the row's own product field once
     # /api/v/ can be trusted to carry it (today it files NVD records under
     # whatever string the query matched, which is why this rule exists).
-    head = _PLATFORM_PREP.split(subject, maxsplit=1)[0]
-    if any(v in head for v in vtoks):
+    if _owns(subject, vtoks, exclude):
         return True
     # Weakness-first fallback: a real advisory whose subject is the flaw still
     # names the product in its fix clause. This is what let "Is it safe to
@@ -213,22 +313,60 @@ def _subject_names_product(d: dict, vtoks: set) -> bool:
     # Same platform-preposition guard as the subject: "fixed in Firefox for
     # iOS 157.1" is a Firefox advisory, so an iOS question must not match the
     # "iOS" after "for".
-    return any(v in _PLATFORM_PREP.split(fm.group(1).lower(), maxsplit=1)[0]
-               for fm in _FIX_CLAUSE.finditer(body) for v in vtoks)
+    return any(_owns(fm.group(1), vtoks, exclude) for fm in _FIX_CLAUSE.finditer(body))
 
 
-def _about(d: dict, vtoks: set, qtoks: set) -> bool:
+def kev_owns(d: dict, vendors: Sequence[str], exclude: Sequence[str] = ()) -> bool:
+    """Does a CISA KEV row's own vendorProject/product name an asked product?
+
+    KEV states the affected vendor and product as fields, so this reads those
+    rather than guessing from the description. The description cannot tell a
+    homonym from the product -- VMware "SD-WAN Edge" read as Microsoft Edge,
+    Cisco "IOS" as Apple iOS -- and it hid the rows it should have counted:
+    Chrome's are filed as Google "Chromium V8", which never says "chrome".
+
+    With an owner on file (vendor_kb.json `kev_vendors`), a row from any other
+    vendorProject is not this product's; one from the owner counts when its
+    product field names the product, or else when the description's subject
+    does (Apple files many rows as "Multiple Products"). With no owner on file,
+    the fields alone decide, with the platform after "for" cut off, so "Driver
+    for Windows" stays Intel's.
+    """
+    vend = normalize(str(d.get("kev_vendor") or "")).lower().strip()
+    prod = normalize(str(d.get("kev_product") or "")).lower()
+    for v in vendors:
+        vtoks = _vendor_tokens([v])
+        kb = KB.get(str(v).lower(), {})
+        owners = {o.lower() for o in kb.get("kev_vendors", ())}
+        if owners:
+            if vend not in owners:
+                continue
+            head = _PLATFORM_PREP.split(prod, maxsplit=1)[0]
+            names = vtoks | {p.lower() for p in kb.get("kev_products", ())}
+            if _tokens(head) & names or _subject_names_product(d, vtoks, exclude):
+                return True
+        elif _tokens(_PLATFORM_PREP.split(f"{vend} {prod}", maxsplit=1)[0]) & vtoks:
+            return True
+    return False
+
+
+def _about(d: dict, vtoks: set, qtoks: set, exclude: Sequence[str] = (),
+           vendors: Sequence[str] = ()) -> bool:
     """Is the document about the asked product? With a known vendor, the vendor
     name has to appear -- and for an advisory it has to appear in the subject,
-    for the reason `_subject_names_product` gives. Without a vendor, fall back
-    to sharing two content tokens with the question. The fallback is
-    deliberately weak -- a document the question's own words do not touch is
-    not evidence about it."""
+    for the reason `_subject_names_product` gives. A KEV row that carries its
+    vendor/product fields is decided by those instead (`kev_owns`). Without a
+    vendor, fall back to sharing two content tokens with the question. The
+    fallback is deliberately weak -- a document the question's own words do
+    not touch is not evidence about it."""
     toks = _tokens(_text(d))
+    if vtoks and d.get("source") in ADVISORY and d.get("kev_vendor"):
+        return kev_owns(d, vendors, exclude)
     if vtoks:
         if not toks & vtoks:
             return False
-        return (_subject_names_product(d, vtoks)
+        return (_subject_names_product(d, vtoks, exclude)
+                and not _foreign_vendor_first(d, vendors)
                 if d.get("source") in ADVISORY else True)
     return len(toks & qtoks) >= 2
 
@@ -246,16 +384,26 @@ def _version_ok(d: dict, asked: Sequence[str]) -> bool:
 # ---------------------------------------------------------------------- rules
 
 def decide(pool: Sequence[dict], question: str, vendors: Iterable[str] = (),
-           versions: Optional[Sequence[str]] = None, k_reports: int = K_REPORTS) -> Decision:
+           versions: Optional[Sequence[str]] = None, k_reports: int = K_REPORTS,
+           unchecked: Iterable[str] = ()) -> Decision:
     """The verdict the pool supports, with the obligations it met and missed.
 
     `vendors` are the grounded product names (grounding.ground / the sheet's
     `vendor`); `versions` default to the dotted versions in the question.
+    `unchecked` names the evidence classes ("cve", "community") whose feed
+    failed this run. A verdict that stands on the *absence* of that class --
+    `safe` on both, `update_with_caveat` on community (with reports it could
+    have been `hold`) -- abstains instead: absence of retrieved evidence is
+    not evidence of safety when the source was never read.
     """
+    unchecked = set(unchecked)
     asked = list(versions) if versions is not None else \
         extract_versions(question, multipart_only=True)
+    vendors = list(vendors)
     vtoks, qtoks = _vendor_tokens(vendors), _tokens(question)
-    about = [d for d in pool if d.get("doc_id") and _about(d, vtoks, qtoks)]
+    exclude = [x.lower() for v in vendors
+               for x in KB.get(str(v).lower(), {}).get("not_this_product", ())]
+    about = [d for d in pool if d.get("doc_id") and _about(d, vtoks, qtoks, exclude, vendors)]
     on_version = [d for d in about if _version_ok(d, asked)]
 
     # An advisory counts when it is about the product even if it does not name
@@ -280,6 +428,7 @@ def decide(pool: Sequence[dict], question: str, vendors: Iterable[str] = (),
         "no_newer_fix_release": not fix_releases,
         "release_note_present": bool(releases),
         "caveat_named": bool(caveats),
+        "sources_checked": not unchecked,
     }
     ids = lambda docs: [d["doc_id"] for d in docs]  # noqa: E731
 
@@ -307,6 +456,16 @@ def decide(pool: Sequence[dict], question: str, vendors: Iterable[str] = (),
                         min(1.0, len(reports) / (2 * k_reports)),
                         f"{len(reports)} community reports of a problem and no newer "
                         f"release note saying it is fixed")
+    # Both verdicts below stand on something *not* being in the pool: a caveat
+    # on fewer than K reports (else hold), safe on that and no advisory.
+    caveat = bool(caveats or (reports and fix_releases))
+    needs = {"community"} if caveat else {"cve", "community"} if releases else set()
+    blind = sorted(unchecked & needs)
+    if blind:
+        return Decision("insufficient_evidence", [], obligations, "evidence_insufficient",
+                        blind, 0.0,
+                        f"the {' and '.join(blind)} source could not be checked this run, "
+                        "so finding nothing there is not evidence that the update is safe")
     if caveats or (reports and fix_releases):
         used = caveats or (fix_releases + reports)
         return Decision("update_with_caveat", ids(used), obligations, "obligations_met", [],
@@ -335,7 +494,8 @@ _EVIDENCE_BY_STOP = {"no_evidence": "absent", "evidence_insufficient": "ambiguou
                      "obligations_met": "sufficient"}
 
 
-def gate(vendors: Iterable[str] = (), k_reports: int = K_REPORTS):
+def gate(vendors: Iterable[str] = (), k_reports: int = K_REPORTS,
+         unchecked: Iterable[str] = ()):
     """`decide` in the shape graph.run wants: (query, docs, degraded) ->
     (Evidence, reason, payload). The stop reason is the evidence class --
     no document about the product is ABSENT, documents that meet no
@@ -348,7 +508,7 @@ def gate(vendors: Iterable[str] = (), k_reports: int = K_REPORTS):
     def _gate(query: str, docs: Sequence[dict], degraded: bool = False):
         if degraded:
             return Evidence.DEGRADED, "fetch degraded", {}
-        d = decide(docs, query, vendors=vendors, k_reports=k_reports)
+        d = decide(docs, query, vendors=vendors, k_reports=k_reports, unchecked=unchecked)
         return Evidence(_EVIDENCE_BY_STOP[d.stop_reason]), d.rationale, d.as_dict()
     return _gate
 

@@ -19,7 +19,7 @@ The paper reports **+17.2%** retrieval quality over a single-agent baseline. Re-
 
 So the project's contribution is **a negative result and its remedy**, not an improvement claim. Full chain of measurements, confounds and superseded readings: [`eval_harness/FINDINGS.md`](eval_harness/FINDINGS.md); every number maps to a run id in [`results/PROVENANCE.md`](results/PROVENANCE.md).
 
-What does hold: **zero hallucinated version numbers** across version-specific evaluation, and the whole system runs **fully locally** on Apple Silicon via Ollama, with 732 offline tests.
+What does hold: **zero hallucinated version numbers** across version-specific evaluation, and the whole system runs **fully locally** on Apple Silicon via Ollama, with 1,100+ offline tests.
 
 ---
 
@@ -62,6 +62,10 @@ Four specialized agents coordinated by an Orchestrator, with a retrieval-level f
 
 **Self-Improvement Memory** — expansion terms that lead to successful retrieval accumulate score, failures decrement it. No human feedback, no labeled data, no retraining. Top learned terms after 50 queries: `vulnerability` (+2.20), `patch` (+1.58), `advisory` (+1.23). *(Measured against a drifting corpus — mechanism sound, magnitude unestablished; see [Results](docs/Results.md).)*
 
+**The demo now answers with a decision.** Since retrieval cannot separate architectures that fetch the same documents, the console (default layout of `app_1.py`) leads with a *verdict* — `patch_urgently`, `hold`, `update_with_caveat`, `safe` or `insufficient_evidence` — computed by rule in `decide.py` and each gated on checkable evidence (e.g. a CISA KEV/CVE advisory *for that product*). `graph.py` walks it as a stdlib state machine: it abstains when the sources are healthy but empty, and retries only on a failed fetch. Pipeline and step trace sit under "How this was answered".
+
+Recent safety work: advisories count only for the product that owns them (KEV/NVD vendor attribution), CVE ids in an answer must appear in a release note, advisory or vendor page, off-topic questions are declined before searching, and a bounded web fallback (GR-2, one search, off unless `MARAG_WEB_FALLBACK=1`) is the only path off the local corpus.
+
 ---
 
 ## Quickstart
@@ -80,7 +84,7 @@ streamlit run app_1.py        # the demo, on http://localhost:8501
 ```bash
 python multiagent_rag_v3.py                # CLI, for execution traces
 python -m eval_harness.run_eval --help     # reproduce the evaluation
-pytest -q                                  # 732 offline tests, no network
+pytest -q                                  # 1,100+ offline tests, no network
 ```
 
 Everything else — environment variables, the presenter model, the evaluation harness, the Claude Code launcher — is in [Running the System](docs/Running-the-System.md).
@@ -110,6 +114,7 @@ Everything else — environment variables, the presenter model, the evaluation h
 | `rerank.py` | Candidate reranking — `none` / `bm25` / `embed`, selected by `MARAG_RERANK` |
 | `answer_agent.py` | Answer Presenter — prose answer with bracketed evidence |
 | `guardrail.py`, `grounding.py`, `yesno.py` | Answer-side checks: invented versions, groundedness, yes/no verdicts |
+| `decide.py`, `graph.py`, `websearch.py` | Five-verdict decision gate, the state machine that walks it (network-free, replayable), and the opt-in web fallback |
 | `vendor.py`, `intent.py`, `keywords.py`, `store.py` | Vendor detection, intent classification, query terms, retrieval store |
 | `self_improving_agent.py` | Persistent term-weight memory |
 | `corpus_snapshot.py` | Record/replay of the live corpus, for frozen comparisons |

@@ -47,7 +47,7 @@ import os
 import sqlite3
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 from fetch_union import doc_key
@@ -154,6 +154,13 @@ END;
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# How old a stored document may be and still stand in for a feed that is down.
+# The store's newest CVE row was last seen 2026-10-13, so before this bound a
+# November outage was answered with September advisories as if current.
+# ponytail: one global window; per-pool windows if releases need a longer one.
+FALLBACK_MAX_AGE_DAYS = int(os.environ.get("MARAG_STORE_MAX_AGE_DAYS", "14"))
 
 
 def _is_placeholder(row: Dict) -> bool:
@@ -379,7 +386,7 @@ class Store:
 
     @_synchronized
     def search(self, query: str, pool: Optional[str] = None,
-               limit: int = 5) -> List[Dict]:
+               limit: int = 5, max_age_days: Optional[int] = None) -> List[Dict]:
         """Stored documents matching `query`, best first.
 
         This is the offline path: when a fetcher cannot reach the endpoint,
@@ -415,6 +422,10 @@ class Store:
         if pool:
             sql += " AND d.pool = ?"
             params.append(pool)
+        if max_age_days is not None:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+            sql += " AND d.last_seen >= ?"
+            params.append(cutoff.isoformat(timespec="seconds"))
         sql += (" ORDER BY rank" if self.fts else " ORDER BY d.last_seen DESC")
         sql += " LIMIT ?"
         params.append(int(limit))
@@ -543,7 +554,10 @@ def open_store(path: Optional[str] = None) -> Store:
 
 
 def caching_fetch(store: Optional[Store], pool: str,
-                  fetch_fn: Callable[..., Sequence[Dict]]) -> Callable[..., List[Dict]]:
+                  fetch_fn: Callable[..., Sequence[Dict]],
+                  outage: Optional[Callable[[], int]] = None,
+                  max_age_days: Optional[int] = FALLBACK_MAX_AGE_DAYS,
+                  ) -> Callable[..., List[Dict]]:
     """Wrap one agent's fetch so results are stored, and outages are survivable.
 
     Drops straight into `union_fetch`, which takes the fetch function as an
@@ -556,14 +570,24 @@ def caching_fetch(store: Optional[Store], pool: str,
       * with no store, or with nothing stored yet, the original result is
         returned untouched, placeholder and all. The fallback may not invent a
         better outcome than the pipeline had before it existed.
+
+    `outage` is a counter of recorded outages (the app's fetch-error log). Given
+    one, an empty result is an outage only if the counter moved during the call:
+    "nothing new this week" is a live answer, and replacing it with stored rows
+    is how September advisories answered November questions. `max_age_days`
+    bounds how old a stored row may be to stand in for a live one.
     """
     def fetch(query: str, limit: int = 5, **kwargs) -> List[Dict]:
         rows: List[Dict] = []
+        before = outage() if outage else 0
+        failed = False
         try:
             rows = list(fetch_fn(query, limit=limit, **kwargs))
         except Exception:
-            rows = []
+            rows, failed = [], True
         live = [r for r in rows if isinstance(r, dict) and not _is_placeholder(r)]
+        if outage and not failed and not rows and outage() == before:
+            return rows
 
         if store is None:
             return rows
@@ -574,7 +598,8 @@ def caching_fetch(store: Optional[Store], pool: str,
                 pass
             return live
 
-        cached = store.search(query, pool=pool, limit=limit)
+        cached = store.search(query, pool=pool, limit=limit,
+                              max_age_days=max_age_days)
         return cached if cached else rows
 
     return fetch

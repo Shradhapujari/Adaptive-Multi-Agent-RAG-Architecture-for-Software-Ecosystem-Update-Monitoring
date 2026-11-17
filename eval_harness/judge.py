@@ -46,6 +46,18 @@ def _extract_json(text: str) -> Optional[dict]:
         return None
 
 
+# Decoding constraint for score_answer on backends that honour one (Ollama
+# `format`): prose and truncated JSON become impossible rather than counted.
+# The prompt still asks for the same three numbers; only the grammar changed.
+_AXIS = {"type": "number", "minimum": 0, "maximum": 1}
+ANSWER_SCHEMA = {
+    "type": "object",
+    "properties": {"faithfulness": _AXIS, "answer_relevance": _AXIS,
+                   "correctness": {"anyOf": [_AXIS, {"type": "null"}]}},
+    "required": ["faithfulness", "answer_relevance", "correctness"],
+}
+
+
 def _clamp01(x) -> Optional[float]:
     """A score in [0, 1], or None when the judge gave no number for the axis."""
     try:
@@ -139,7 +151,8 @@ class Judge:
             '{"faithfulness":0.8,"answer_relevance":0.9,"correctness":0.7}'
         )
         try:
-            raw = self.client.generate(prompt, temperature=0.0, max_tokens=200)
+            raw = self.client.generate(prompt, temperature=0.0, max_tokens=200,
+                                       json_schema=ANSWER_SCHEMA)
         except LLMError as e:
             raw = f"[LLMError] {e}"
         self.answer_calls += 1

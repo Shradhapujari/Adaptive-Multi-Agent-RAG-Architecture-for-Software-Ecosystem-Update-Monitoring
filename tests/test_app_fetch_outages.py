@@ -114,7 +114,7 @@ def test_the_store_fallback_still_sees_an_outage_as_empty(monkeypatch):
     from store import caching_fetch
 
     class _Store:
-        def search(self, q, pool=None, limit=5):
+        def search(self, q, pool=None, limit=5, **kw):
             return [{"title": "cached linux release", "url": "u"}]
 
         def record_documents(self, *a, **k):

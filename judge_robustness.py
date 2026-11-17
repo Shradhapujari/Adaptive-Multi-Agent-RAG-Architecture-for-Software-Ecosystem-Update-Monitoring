@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import glob
 import json
 import os
 import random
@@ -59,21 +60,47 @@ def load_rows(run_dir: str, extra_runs: Optional[List[str]] = None) -> List[dict
     return rows
 
 
-def contexts_of(row: dict) -> List[str]:
-    """Reconstruct what the original judge saw as retrieved context."""
-    return [f"{d.get('title','')}: {d.get('text','')}" for d in row.get("docs", [])] \
-        or [f"doc:{d}" for d in row.get("doc_ids", [])]
+def load_doc_index(pattern: str) -> Dict[str, dict]:
+    """doc_id -> doc, from every pools.jsonl matching `pattern` (first seen wins)."""
+    idx: Dict[str, dict] = {}
+    for path in sorted(glob.glob(pattern)):
+        with open(path) as f:
+            for line in f:
+                r = json.loads(line)
+                for d in (r.get("docs") or []) + (r.get("pool") or []):
+                    idx.setdefault(d["doc_id"], d)
+    return idx
+
+
+def contexts_of(row: dict, index: Optional[Dict[str, dict]] = None) -> Optional[List[str]]:
+    """What the original judge saw as retrieved context, or None if it cannot
+    be rebuilt.
+
+    per_query.jsonl keeps doc_ids, not text. Until 2026-10-25 this fell back to
+    "doc:<id>" strings, so the second judge scored faithfulness against ids
+    while the first had read the documents -- the judge *and* the evidence
+    changed. A row is now judged only when every document's text is found,
+    in the row itself or in `index` (pools dumped by other runs)."""
+    docs = row.get("docs") or [(index or {}).get(i) for i in row.get("doc_ids", [])]
+    if not docs or any(d is None for d in docs):
+        return None
+    return [f"{d.get('title','')}: {d.get('text','')}" for d in docs]
 
 
 def rejudge(rows: List[dict], judge: Judge, arms: List[str],
-            sample: int, seed: int, gt_by_qid: Optional[dict] = None) -> Dict:
+            sample: int, seed: int, gt_by_qid: Optional[dict] = None,
+            index: Optional[Dict[str, dict]] = None) -> Dict:
     """Re-score each arm's stored answer with a second judge."""
     by_q: Dict[object, Dict[str, dict]] = collections.defaultdict(dict)
     for r in rows:
         by_q[r["query_id"]][r["system"]] = r
 
     qids = [q for q, d in by_q.items() if all(a in d for a in arms)]
-    qids.sort(key=str)
+    unbuilt = [q for q in qids if any(contexts_of(by_q[q][a], index) is None for a in arms)]
+    if unbuilt:
+        print(f"[contexts] dropping {len(unbuilt)} of {len(qids)} question(s): "
+              f"document text not recoverable for at least one arm")
+    qids = sorted(set(qids) - set(unbuilt), key=str)
     if sample and sample < len(qids):
         random.Random(seed).shuffle(qids)
         qids = sorted(qids[:sample], key=str)
@@ -85,7 +112,7 @@ def rejudge(rows: List[dict], judge: Judge, arms: List[str],
             row = by_q[qid][arm]
             gt = (gt_by_qid or {}).get(qid)
             scores = judge.score_answer(row["query"], row["answer"],
-                                        contexts_of(row), gt)
+                                        contexts_of(row, index), gt)
             out[qid][arm] = scores
         print(f"  [{i}/{len(qids)}] q{qid}", flush=True)
     return {"rejudged": out, "original": by_q, "qids": qids}
@@ -169,14 +196,18 @@ def main() -> None:
     ap.add_argument("--out", default="judge_robustness.md")
     ap.add_argument("--extra-run", action="append", default=[], metavar="RUN_DIR",
                     help="fold in arms measured in another run directory")
+    ap.add_argument("--pools-from", default="",
+                    help="glob of pools.jsonl files to recover document text from "
+                         "when the run did not dump its own")
     ap.add_argument("--identical-retrieval", action="store_true",
                     help="restrict to questions where the two arms retrieved "
                          "the identical ranked documents")
     a = ap.parse_args()
 
     arms = [x.strip() for x in a.arms.split(",")]
-    if len(arms) != 2:
-        raise SystemExit("--arms takes exactly two systems: 'a,b'")
+    if len(arms) < 2:
+        raise SystemExit("--arms takes two or more systems: 'a,b[,c...]'; "
+                         "the paired test is the first two")
 
     judge = Judge(a.judge)
     if not judge.available():
@@ -202,7 +233,8 @@ def main() -> None:
 
     print(f"[re-judging] {a.run_dir} with {judge.spec} "
           f"(original judge: {original_judge})")
-    res = rejudge(rows, judge, arms, a.sample, a.seed)
+    index = load_doc_index(a.pools_from) if a.pools_from else None
+    res = rejudge(rows, judge, arms, a.sample, a.seed, index=index)
 
     L = [f"# Judge robustness — `{os.path.basename(a.run_dir)}`", "",
          f"Original judge: `{original_judge}`  ·  second judge: `{judge.spec}`",
@@ -232,7 +264,10 @@ def main() -> None:
     print("\n" + text)
     path = os.path.join(a.run_dir, a.out)
     open(path, "w").write(text + "\n")
-    print(f"[wrote] {path}")
+    with open(os.path.splitext(path)[0] + ".json", "w") as f:
+        json.dump({"judge": judge.spec, "original_judge": original_judge, "arms": arms,
+                   "scores": {str(q): v for q, v in res["rejudged"].items()}}, f)
+    print(f"[wrote] {path} (+ .json)")
 
 
 if __name__ == "__main__":

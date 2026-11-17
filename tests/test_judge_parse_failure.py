@@ -71,3 +71,37 @@ def test_none_scores_are_excluded_from_the_mean():
     agg = report.aggregate(rows, ks=[3])
     mean, _ci, n = agg["systems"]["s"]["faithfulness"]
     assert (mean, n) == (0.5, 1), "a None judgment must not drag the mean toward 0"
+
+
+def test_answer_scoring_asks_the_backend_for_its_schema():
+    seen = {}
+
+    class _C:
+        def generate(self, prompt, **kw):
+            seen.update(kw)
+            return '{"faithfulness": 1, "answer_relevance": 1, "correctness": null}'
+    j = Judge.__new__(Judge)
+    j.client = _C()
+    j.score_answer("q", "a", ["ctx"])
+    assert seen["json_schema"]["required"] == ["faithfulness", "answer_relevance", "correctness"]
+
+
+def test_ollama_sends_the_schema_as_format(monkeypatch):
+    import json
+    from eval_harness.providers import OllamaClient
+    sent = {}
+
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b'{"response": "{}"}'
+
+    def _open(req, timeout=0):
+        sent.update(json.loads(req.data))
+        return _Resp()
+    monkeypatch.setattr("urllib.request.urlopen", _open)
+    OllamaClient("qwen2.5:7b-instruct").generate("p", json_schema={"type": "object"})
+    assert sent["format"] == {"type": "object"}
+    sent.clear()
+    OllamaClient("qwen2.5:7b-instruct").generate("p")
+    assert "format" not in sent
