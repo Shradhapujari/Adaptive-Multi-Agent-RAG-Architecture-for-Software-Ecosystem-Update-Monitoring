@@ -377,7 +377,8 @@ def _counts(text: str, known: dict) -> List[Tuple[int, str, str]]:
     return out
 
 
-def _count_violations(text: str, labels: set, kinds: dict, known: dict) -> List[Violation]:
+def _count_violations(text: str, labels: set, kinds: dict, known: dict,
+                      cited_in: Optional[str] = None) -> List[Violation]:
     """A count of sources has to equal the sources cited for it.
 
     Two rules, both from what the reader can check on the page:
@@ -388,7 +389,11 @@ def _count_violations(text: str, labels: set, kinds: dict, known: dict) -> List[
     * A headline "N issues / problems / findings" over a numbered list equals
       the number of items. The prompt's own example said "three problems" over
       two, and the model copied the arithmetic.
+
+    `cited_in` is the text whose citations a count may rest on, when that is
+    not `text` itself: the verdict line carries none of its own.
     """
+    whole = text if cited_in is None else cited_in
     def cited(span: str, want) -> int:
         tags = {c.strip() for c in _CITE_RE.findall(span)} & labels
         return len({t for t in tags if want is None or kinds.get(t) in want})
@@ -399,7 +404,7 @@ def _count_violations(text: str, labels: set, kinds: dict, known: dict) -> List[
             want = next((w for key, w in _SOURCE_NOUNS if key in noun), False)
             if want is False:
                 continue                      # a finding noun: the list rule below
-            got = {cited(sentence, want), cited(text, want)}
+            got = {cited(sentence, want), cited(whole, want)}
             if n not in got:
                 bad.append(Violation(
                     "count_mismatch",
@@ -418,7 +423,7 @@ def _count_violations(text: str, labels: set, kinds: dict, known: dict) -> List[
     return bad
 
 
-def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
+def check(answer: str, evidence: Sequence, question: str = "", lead: str = "") -> Verdict:
     """Check a presented answer against the evidence it was built from.
 
     `question` is the user's own wording, and versions and dates in it are
@@ -428,6 +433,11 @@ def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
     KB5101650 was discarded and the rule-based stub shown instead. Every
     question naming a versioned product hit this -- iOS 26.4, Ubuntu 24.04.
     Omitting it keeps the old, stricter behaviour.
+
+    `lead` is the verdict sentence the console prints first ("Patch now: 7
+    advisory document(s)..."). Its counts are checked against the answer's
+    citations: the model cited 5 of the 7 under it, live Firefox 2026-11-17,
+    and nothing caught it because the lead was prefixed after this check.
     """
     text = (answer or "").strip()
     haystack, labels = _lines(evidence)
@@ -513,6 +523,10 @@ def check(answer: str, evidence: Sequence, question: str = "") -> Verdict:
     # A refusal counts nothing it has to cite.
     if not abstained:
         bad.extend(_count_violations(text, labels, _kinds(evidence), _known))
+        if lead:
+            bad.extend(Violation(v.code, "the verdict line above the answer says " + v.detail)
+                       for v in _count_violations(lead, labels, _kinds(evidence), _known,
+                                                  cited_in=text))
 
     known_versions = set(extract_versions(_ISO_RE.sub(" ", haystack), multipart_only=True))
     known_versions |= set(extract_versions(given, multipart_only=True))
@@ -876,6 +890,12 @@ def _demo() -> None:
                 for i in range(4)]
     para = deterministic_paragraph("linux", adv)
     assert check(para, adv).ok, (para, check(para, adv).violations)
+    # The verdict line's count rests on the answer's citations: 4 counted,
+    # 2 cited is the live Firefox 7-over-5 mismatch.
+    lead = "Patch now: 4 advisory document(s) with a CVE id name this product."
+    v = check("Two flaws were fixed [A0] [A1].", adv, lead=lead)
+    assert [x.code for x in v.violations] == ["count_mismatch"], v.violations
+    assert check("Four flaws were fixed [A0] [A1] [A2] [A3].", adv, lead=lead).ok
 
     # The prefix rule: a bare major is checked when the sources version that
     # product, and a source's 155.0.8047 is what makes "Chrome 155" true.

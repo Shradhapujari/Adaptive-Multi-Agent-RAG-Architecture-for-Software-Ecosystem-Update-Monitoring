@@ -2394,7 +2394,10 @@ def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = Non
             used, _ = _split_tables(answer_agent.details(presented.evidence),
                                     _verdict_keys(results), _answer_keys(results, presented), True)
             advisories.metric("Advisories", len(used["security"]))
-            community.metric("Community reports", len(results.get("community") or []))
+            # The rows the answer was given, as its Community tab lists them:
+            # every retrieved post said 5 beside a tab of 4 (2026-11-17).
+            community.metric("Community reports", len(
+                answer_agent.by_source(presented.evidence).get("Community", [])))
 
     st.markdown("#### Vulnerabilities & patches")
     if any(answer_agent.details(presented.evidence).values()):

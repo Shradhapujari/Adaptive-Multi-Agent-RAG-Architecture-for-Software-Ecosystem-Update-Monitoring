@@ -819,3 +819,18 @@ def test_thinking_block_is_dropped_and_not_found_passes(monkeypatch):
     # Cut off mid-reasoning: no answer, so the rule-composed paragraph.
     _patch_client(monkeypatch, _StubClient("<thinking>The sources say"))
     assert present_answer("q", RESULTS, model_spec="stub:model").mode == "rule-based"
+
+
+def test_verdict_line_count_must_match_the_answer_citations(monkeypatch):
+    # Live Firefox, 2026-11-17: "Patch now: 7 advisory document(s)" above a
+    # paragraph citing 5. The lead's count is checked against the paragraph.
+    _no_env(monkeypatch)
+    _patch_client(monkeypatch, _StubClient(
+        "Django shipped a fix [Release Notes - Django v5.2.1, 2026-08-20]."))
+    results = dict(RESULTS, decision={
+        "verdict": "patch_urgently",
+        "rationale": "1 advisory document(s) with a CVE id name this product"})
+    out = present_answer("Is it safe to update Linux?", results, model_spec="stub:model")
+    assert out.mode == "rule-based"
+    assert "verdict line" in out.note
+    assert "[Security Advisory - Linux advisory" in out.text

@@ -969,7 +969,10 @@ def _present(query: str, results: Dict, model_spec: Optional[str] = None,
                     # from the same evidence by code, so it cannot fail -- and
                     # not to a refusal, which would throw away a real answer
                     # over one bad span.
-                    verdict = guardrail.check(text, evidence, query)
+                    # The lead is checked too: it is printed above this text,
+                    # so its count has to match what the text cites.
+                    verdict = guardrail.check(text, evidence, query,
+                                              lead=verdict_lead(results.get("decision")))
                     if verdict.ok:
                         return PresentedAnswer(text, "llm", client.spec,
                                                evidence=evidence)
