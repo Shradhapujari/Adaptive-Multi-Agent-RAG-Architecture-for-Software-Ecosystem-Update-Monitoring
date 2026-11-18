@@ -2119,11 +2119,15 @@ def _source_rows(results: dict, presented=None) -> list:
 
 
 def _tab_sources(results: dict, presented=None) -> None:
+    # Only what the verdict or the answer cites, so the tab's count is the
+    # answer's: listing every retrieved row put 15 beside an answer citing 7.
     rows = _source_rows(results, presented)
-    if rows:
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+    cited = [r for r in rows if r["Verdict"] or r["Answer"]]
+    if cited:
+        st.caption(f"{len(cited)} cited · {len(rows) - len(cited)} more retrieved, not cited")
+        st.dataframe(cited, use_container_width=True, hide_index=True)
     else:
-        st.caption("No citable documents for this question.")
+        st.caption("No source is cited for this question.")
 
 
 def _tab_guardrails(results: dict, presented) -> None:
