@@ -79,3 +79,19 @@ def test_sources_mark_what_the_answer_cites_apart_from_the_verdict():
     text = f"Node.js v26.12.1 shipped [{ev[0].label}]."
     rows = app_1._source_rows(results, PresentedAnswer(text, "llm", evidence=ev))
     assert {r["Title"]: r["Answer"] for r in rows} == {rel["title"]: "cited", "npm broke": ""}
+
+
+def test_sources_tab_shows_only_cited_rows(monkeypatch):
+    # The tab's count is the answer's: 15 retrieved rows beside an answer
+    # citing 7 was the mismatch the advisor saw (2026-11-17).
+    from answer_agent import collect_evidence, PresentedAnswer
+    rel = _rel("26.12.1", "20261020")
+    post = {"title": "npm broke", "url": "https://reddit.com/y"}
+    results = {"releases": [rel], "cve": [], "community": [post], "decision": None}
+    ev = collect_evidence(results)
+    shown, notes = [], []
+    monkeypatch.setattr(app_1.st, "dataframe", lambda rows, **kw: shown.extend(rows))
+    monkeypatch.setattr(app_1.st, "caption", notes.append)
+    app_1._tab_sources(results, PresentedAnswer(f"Shipped [{ev[0].label}].", "llm", evidence=ev))
+    assert [r["Title"] for r in shown] == [rel["title"]]
+    assert notes == ["1 cited · 1 more retrieved, not cited"]
