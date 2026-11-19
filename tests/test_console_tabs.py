@@ -118,3 +118,31 @@ def test_chrome_headline_is_the_stable_channel_not_the_highest_feed_tag(monkeypa
     monkeypatch.setattr(app_1.requests, "get", lambda *a, **k: (_ for _ in ()).throw(OSError()))
     assert app_1._headline_release(results, "Latest Chrome version?")["version"] == "159.0.8147"
     app_1._stable_release.cache_clear()
+
+
+def test_firefox_and_edge_headlines_use_the_vendors_stable_channel(monkeypatch):
+    from types import SimpleNamespace
+    firefox = {"releases": {
+        "firefox-160.0": {"version": "160.0", "date": "2026-11-10", "category": "major"},
+        "firefox-160.0.1": {"version": "160.0.1", "date": "2026-11-17", "category": "stability"},
+        "firefox-161.0b5": {"version": "161.0b5", "date": "2026-11-18", "category": "dev"},
+        "firefox-153.7.0esr": {"version": "153.7.0esr", "date": "2026-11-18", "category": "esr"}}}
+    edge = [{"Product": "Beta", "Releases": [{"Platform": "Windows", "ProductVersion": "159.0.1",
+                                               "PublishedTime": "2026-11-18T00:00:00"}]},
+            {"Product": "Stable", "Releases": [{"Platform": "Windows", "ProductVersion": "158.0.4370.33",
+                                                 "PublishedTime": "2026-11-19T21:17:00"}]}]
+
+    class _Resp:
+        def __init__(self, j): self.j = j
+        def json(self): return self.j
+    monkeypatch.setattr(app_1.requests, "get",
+                        lambda url, **k: _Resp(firefox if "mozilla" in url else edge))
+    app_1._stable_release.cache_clear()
+    ff = {"grounding": SimpleNamespace(vendor_names=["firefox"]),
+          "releases": [{"product": "Firefox", "version": "160.0.0", "date": "20261110", "is_cve": False}]}
+    rel = app_1._headline_release(ff, "Is it safe to update Firefox?")
+    assert (rel["version"], rel["date"]) == ("160.0.1", "20261117")
+    # Edge has no feed rows; the stable API alone gives the headline.
+    ms = {"grounding": SimpleNamespace(vendor_names=["microsoft", "edge"]), "releases": []}
+    assert app_1._headline_release(ms, "Latest Microsoft Edge version?")["version"] == "158.0.4370.33"
+    app_1._stable_release.cache_clear()
