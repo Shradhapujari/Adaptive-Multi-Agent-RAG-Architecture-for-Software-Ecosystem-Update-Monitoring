@@ -19,7 +19,7 @@ The paper reports **+17.2%** retrieval quality over a single-agent baseline. Re-
 
 So the project's contribution is **a negative result and its remedy**, not an improvement claim. Full chain of measurements, confounds and superseded readings: [`eval_harness/FINDINGS.md`](eval_harness/FINDINGS.md); every number maps to a run id in [`results/PROVENANCE.md`](results/PROVENANCE.md).
 
-What does hold: **zero hallucinated version numbers** across version-specific evaluation, and the whole system runs **fully locally** on Apple Silicon via Ollama, with 1,100+ offline tests.
+What does hold: **zero hallucinated version numbers** across version-specific evaluation, and the whole system runs **fully locally** on Apple Silicon via Ollama, with 1,200+ offline tests.
 
 ---
 
@@ -62,9 +62,9 @@ Four specialized agents coordinated by an Orchestrator, with a retrieval-level f
 
 **Self-Improvement Memory** — expansion terms that lead to successful retrieval accumulate score, failures decrement it. No human feedback, no labeled data, no retraining. Top learned terms after 50 queries: `vulnerability` (+2.20), `patch` (+1.58), `advisory` (+1.23). *(Measured against a drifting corpus — mechanism sound, magnitude unestablished; see [Results](docs/Results.md).)*
 
-**The demo now answers with a decision.** Since retrieval cannot separate architectures that fetch the same documents, the console (default layout of `app_1.py`) leads with a *verdict* — `patch_urgently`, `hold`, `update_with_caveat`, `safe` or `insufficient_evidence` — computed by rule in `decide.py` and each gated on checkable evidence (e.g. a CISA KEV/CVE advisory *for that product*). `graph.py` walks it as a stdlib state machine: it abstains when the sources are healthy but empty, and retries only on a failed fetch. Pipeline and step trace sit under "How this was answered".
+**The demo now answers with a decision.** Since retrieval cannot separate architectures that fetch the same documents, the console (default layout of `app_1.py`) leads with a *verdict* — `patch_urgently`, `hold`, `update_with_caveat`, `safe` or `insufficient_evidence` — computed by rule in `decide.py` and each gated on checkable evidence (e.g. a CISA KEV/CVE advisory *for that product*). `graph.py` walks it as a stdlib state machine: it abstains when the sources are healthy but empty, and retries only on a failed fetch. The answer leads the Short tab; advanced detail sits in Settings, and the pipeline and step trace under "How this was answered". A checks/guardrails panel switches real steps on and off, and a live NVD CVE feed (`nvd.py`, retried on rate limits; set `NVD_API_KEY`, e.g. in `.streamlit/secrets.toml`, for the 50-requests/30 s tier) backs security questions when the store's advisories are stale.
 
-Recent safety work: advisories count only for the product that owns them (KEV/NVD vendor attribution), CVE ids in an answer must appear in a release note, advisory or vendor page, off-topic questions are declined before searching, and a bounded web fallback (GR-2, one search, off unless `MARAG_WEB_FALLBACK=1`) is the only path off the local corpus.
+Recent safety work: advisories count only for the product that owns them (KEV/NVD vendor attribution, matched on what the advisory text names), the verdict line's source count must match what the answer cites, CVE ids in an answer must appear in a release note, advisory or vendor page, off-topic questions are declined before searching, and a bounded web fallback (GR-2, one search, off unless `MARAG_WEB_FALLBACK=1`) is the only path off the local corpus.
 
 ---
 
@@ -84,7 +84,7 @@ streamlit run app_1.py        # the demo, on http://localhost:8501
 ```bash
 python multiagent_rag_v3.py                # CLI, for execution traces
 python -m eval_harness.run_eval --help     # reproduce the evaluation
-pytest -q                                  # 1,100+ offline tests, no network
+pytest -q                                  # 1,200+ offline tests, no network
 ```
 
 Everything else — environment variables, the presenter model, the evaluation harness, the Claude Code launcher — is in [Running the System](docs/Running-the-System.md).
@@ -115,6 +115,7 @@ Everything else — environment variables, the presenter model, the evaluation h
 | `answer_agent.py` | Answer Presenter — prose answer with bracketed evidence |
 | `guardrail.py`, `grounding.py`, `yesno.py` | Answer-side checks: invented versions, groundedness, yes/no verdicts |
 | `decide.py`, `graph.py`, `websearch.py` | Five-verdict decision gate, the state machine that walks it (network-free, replayable), and the opt-in web fallback |
+| `nvd.py` | Live NVD CVE 2.0 feed with retry, API-key header and newest-first fallback |
 | `vendor.py`, `intent.py`, `keywords.py`, `store.py` | Vendor detection, intent classification, query terms, retrieval store |
 | `self_improving_agent.py` | Persistent term-weight memory |
 | `corpus_snapshot.py` | Record/replay of the live corpus, for frozen comparisons |
@@ -127,12 +128,12 @@ Everything else — environment variables, the presenter model, the evaluation h
 | `data/` | Evaluation question sets (`benchmark_300.json`, `benchmark_1000.json`, …) and supporting data |
 | `results/` | Run outputs; [`results/PROVENANCE.md`](results/PROVENANCE.md) maps every reported number to a run id |
 | `results/legacy/` | Pre-re-scoring result files from the conference paper (`eval_50_results_v2.json`, `ablation_results.json`, the accuracy runs) |
-| `scripts/` | Reporting and phase scripts (`paper_figures.py`, `leak_report.py`, ablation phases) |
+| `scripts/` | Reporting and phase scripts (`paper_figures.py`, `leak_report.py`, ablation phases) and `annotate.py`, a terminal helper for labelling the decision sheet |
 | `tests/` | Offline test suite |
 | `paper/` | TOSEM manuscript source and figures — read [`paper/README.md`](paper/README.md) before editing the bibliography |
 | `specs/`, `slides/`, `Poster/` | Specifications, talk slides, and the poster |
 
-`app.py` is an earlier demo kept for reference; `app_1.py` is the one that ships.
+`app.py` is an earlier demo kept for reference; `app_1.py` is the one that ships. `DemoMain3.py` (run by `run_all.sh`) is a legacy ReAct demo; its extra dependencies are in `requirements-demo.txt`.
 
 ---
 
