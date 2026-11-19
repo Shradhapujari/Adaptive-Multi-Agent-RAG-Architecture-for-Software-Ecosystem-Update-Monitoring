@@ -22,7 +22,7 @@
     },
     "ios": {"owner": "Apple", "kev_vendors": ["apple"]},
     "safari": {"owner": "Apple", "kev_vendors": ["apple"], "kev_products": ["webkit"]},
-    "chrome": {"owner": "Google", "kev_vendors": ["google"], "kev_products": ["chromium"]},
+    "chrome": {"owner": "Google", "not_this_product": ["chrome-devtools-mcp"], "kev_vendors": ["google"], "kev_products": ["chromium"]},
     "android": {"owner": "Google", "kev_vendors": ["android", "google"]},
     "edge": {"owner": "Microsoft", "kev_vendors": ["microsoft"]},
     "windows": {"owner": "Microsoft", "kev_vendors": ["microsoft"], "kev_products": ["win32k"]},

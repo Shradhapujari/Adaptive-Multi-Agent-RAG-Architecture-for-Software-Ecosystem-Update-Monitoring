@@ -353,3 +353,23 @@ def test_an_unread_community_feed_blocks_a_caveat_but_an_unread_cve_feed_does_no
 def test_positive_evidence_still_decides_when_a_feed_is_down():
     pool = [_d(1, "nvd", "CVE-2026-1234 Ubuntu", "Ubuntu before 24.04.2 allows RCE")]
     assert D.decide(pool, Q, V, unchecked={"cve", "community"}).verdict == "patch_urgently"
+
+
+def test_chrome_question_drops_advisories_about_other_products():
+    """Live, 2026-11-19: "Latest Chrome version?" cited OpenClaw (which only
+    names a `googlemeet.chrome` command) and chrome-devtools-mcp (a separate
+    package; "prior to 1.5.0" is its version, not Chrome's)."""
+    vt = D._vendor_tokens(["chrome"])
+    ex = D.KB["chrome"]["not_this_product"]
+    def adv(text):
+        return {"doc_id": "x", "source": "nvd", "title": "chrome v1 — " + text[:60], "text": text}
+    openclaw = adv("OpenClaw versions 2026.5.1 through 2026.7.0 fail to apply the configured exec "
+                   "approval path to Google Meet node commands. The googlemeet.chrome command accepts "
+                   "caller-supplied audio command arrays")
+    mcp = adv("Insufficient policy enforcement in chrome-devtools-mcp in Google Chrome on Linux prior "
+              "to 1.5.0 allowed a local attacker to perform arbitrary read/write via a malicious file.")
+    real = adv("Use after free in XML in Google Chrome prior to 157.0.8103.50 allowed a remote attacker "
+               "to exploit heap corruption via a crafted HTML page.")
+    assert not D._about(openclaw, vt, set(), ex, ["chrome"])
+    assert not D._about(mcp, vt, set(), ex, ["chrome"])
+    assert D._about(real, vt, set(), ex, ["chrome"])
