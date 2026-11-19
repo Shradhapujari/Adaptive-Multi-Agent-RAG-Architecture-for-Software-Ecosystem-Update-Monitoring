@@ -54,13 +54,18 @@ def split_of(dataset_path: str) -> str:
 
 
 def git_state(root: str) -> tuple[str, bool]:
-    """(sha, dirty); dirty = tracked files changed. Not a repo -> ("unknown", True)."""
+    """(sha, dirty); dirty = tracked files changed outside results/. Not a repo -> ("unknown", True).
+
+    results/ is excluded because the harness itself rewrites the tracked
+    results/qrels_cache.json after every question.
+    """
     def run(*a):
         return subprocess.run(["git", *a], cwd=root, capture_output=True,
                               text=True, check=True).stdout
     try:
         return (run("rev-parse", "HEAD").strip(),
-                bool(run("status", "--porcelain", "--untracked-files=no").strip()))
+                bool(run("status", "--porcelain", "--untracked-files=no",
+                         "--", ".", ":(exclude)results").strip()))
     except (OSError, subprocess.CalledProcessError):
         return "unknown", True
 

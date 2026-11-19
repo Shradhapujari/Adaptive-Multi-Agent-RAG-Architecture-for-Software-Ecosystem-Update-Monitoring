@@ -198,3 +198,16 @@ def test_diagnostic_record_into_unreplayed_dir_with_dirty_tree_runs(cli, tmp_pat
     monkeypatch.setattr(P, "git_state", lambda root: ("abc", True))
     assert R.main(["--corpus", f"record:{tmp_path}", "--prediction", "p", "--diagnostic"]) == 0
     assert len(cli) == 1
+
+
+def test_git_state_ignores_tracked_files_under_results(tmp_path):
+    _git(tmp_path, "init")
+    (tmp_path / "results").mkdir()
+    (tmp_path / "results" / "x.json").write_text("{}")
+    (tmp_path / "a.txt").write_text("1")
+    _git(tmp_path, "add", "a.txt", "results/x.json")
+    _git(tmp_path, "commit", "-m", "x")
+    (tmp_path / "results" / "x.json").write_text('{"k": 1}')
+    assert P.git_state(str(tmp_path))[1] is False
+    (tmp_path / "a.txt").write_text("2")
+    assert P.git_state(str(tmp_path))[1] is True
