@@ -2044,7 +2044,7 @@ def _tab_short(results: dict, presented=None) -> None:
         if dec and dec.get("verdict") not in (None, "safe", "insufficient_evidence"):
             icon, label = _VERDICT_BADGE.get(dec["verdict"], ("⚪", dec["verdict"]))
             st.caption(f"Also: {icon} {label} — {dec.get('rationale') or ''}")
-        st.caption("CVEs and patches: Vulnerabilities & patches, below.")
+        st.caption("CVEs and patches: Settings › Advanced settings › Advanced checks.")
         return
     if not dec:
         st.markdown("### ⚪ Not enough evidence")
@@ -2052,9 +2052,9 @@ def _tab_short(results: dict, presented=None) -> None:
                    "system abstains rather than guess.")
         return
     st.markdown(f"### {_plain_verdict(dec['verdict'], query)}")
-    st.write(dec.get("rationale") or "—")
-    if line:
-        st.markdown(f"**Answer:** {line}")
+    # One line up front: the answer, or the verdict's reason when there is
+    # none. The reason is still the lead of Read more.
+    st.write(line or dec.get("rationale") or "—")
     if dec.get("source") == "web":
         st.caption("Answered from trusted vendor pages found by web search.")
 
@@ -2067,21 +2067,53 @@ def _answer_urls(results: dict, presented) -> set:
     return {s["url"] for s in trace.sources if s["used"] and s["url"]}
 
 
-def _tab_long(results: dict, presented, tables: bool = True) -> None:
+def _sentences(text: str) -> List[str]:
+    """Split a paragraph into sentences for a bullet list. Needs whitespace
+    and a capital after the stop, so "v1.2.3" and "[R1]." stay whole, and
+    never splits inside a “quoted title” -- advisory titles hold full stops."""
+    out, start = [], 0
+    for m in re.finditer(r"(?<=[.!?])\s+(?=[A-Z\[“])", text or ""):
+        seg = text[start:m.start()]
+        if seg.count("“") == seg.count("”"):
+            out.append(seg.strip())
+            start = m.end()
+    out.append((text or "")[start:].strip())
+    return [x for x in out if x]
+
+
+def _dim_citations(text: str, evidence) -> str:
+    """[Release Notes - Firefox v159.0.0, 2026-10-27] -> small grey text, so
+    the claim reads first and its source second."""
+    for e in evidence or []:
+        label = getattr(e, "label", "")
+        if label and "]" not in label:
+            text = text.replace(f"[{label}]", f":gray[({label})]")
+    return text
+
+
+def _tab_long(results: dict, presented) -> None:
+    """Read more: why, what the sources say, recent releases, then provenance."""
     lead = answer_agent.verdict_lead(results.get("decision"))
     text = presented.text or ""
+    # present_answer prefixes the lead; shown once, under its own heading.
+    text = text[len(lead):].strip() if lead and text.startswith(lead) else text
     if lead:
+        st.markdown("**Why this verdict**")
         st.info(lead)
-        # present_answer prefixes the lead; shown once, in the box above.
-        text = text[len(lead):].strip() if text.startswith(lead) else text
-    st.write(text or "No answer could be composed.")
+    st.markdown("**What the sources say**")
+    lines = _sentences(text)
+    st.markdown("\n".join(f"- {_dim_citations(x, presented.evidence)}" for x in lines)
+                if lines else "No answer could be composed.")
+    ctx = _maintenance_context(results)
+    if ctx:
+        st.markdown("**Recent releases** (last 6 months)")
+        st.markdown("\n".join(f"- **{c}** — " + " · ".join(r) for c, r in ctx.items()))
     # Was a hardcoded 0 over a paragraph citing three sources, with the
     # timing dict printed where the seconds go.
     trace = xai.explain(results.get("original_query", ""), presented.text, presented.evidence)
     secs = round(sum((results.get("timing") or {}).values()), 1)
-    st.caption(_answer_caption(presented, sum(s["used"] for s in trace.sources), secs))
-    if tables:
-        _detail_tables(presented)
+    st.divider()
+    st.caption(_answer_caption(presented, sum(x["used"] for x in trace.sources), secs))
 
 
 _TABLE_TITLES = (("security", "Security fixes — CVE / advisory"),
@@ -2215,6 +2247,7 @@ def _source_rows(results: dict, presented=None) -> list:
                                or (d.get("version") or d.get("versionNumber") or ""),
                 "Title": (d.get("title") or "")[:80],
                 "id": did,
+                "Link": d.get("url") or "",
             })
     # What the verdict and the answer used first; stable, so pool order holds within.
     return sorted(rows, key=lambda r: not (r["Verdict"] or r["Answer"]))
@@ -2455,7 +2488,8 @@ def _console_html(text: str) -> str:
     return f'<div class="sys-console">{body}</div>'
 
 
-def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = None) -> None:
+def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = None,
+                    details=None) -> None:
     st.markdown("### Software Update Decision Intelligence")
     st.caption("Is an update safe? Answered from live release notes, CISA KEV / NVD "
                "advisories and community reports — every claim cited.")
@@ -2487,53 +2521,94 @@ def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = Non
         _render_mermaid(_pipeline_mermaid(results), height=150)
     st.markdown(" ".join(f":blue-badge[{t}]" for t in _question_tags(q, results)))
 
-    # Verdict first: the answer, then the three numbers behind it. The pipeline
-    # diagram and the trace are how it was answered, so they go last.
+    tables = answer_agent.details(presented.evidence)
+    product = bool(getattr(results.get("grounding"), "vendors", None))
+    used, other = _split_tables(tables, _verdict_keys(results),
+                                _answer_keys(results, presented), product)
+    # The answer, then the sources it cites; everything else is one click
+    # away (Read more) or in the sidebar's Advanced checks.
     with st.container(border=True):
         _tab_short(results, presented)
-        if getattr(results.get("grounding"), "vendors", None):
+        if product:
             rel = _headline_release(results, q)
             latest, advisories, community = st.columns(3)
             latest.metric("Latest release", f"v{rel['version']}" if rel else "—")
             # Advisories the verdict or the answer uses, not every row retrieved:
             # the count sits beside the verdict and is read as its evidence.
-            used, _ = _split_tables(answer_agent.details(presented.evidence),
-                                    _verdict_keys(results), _answer_keys(results, presented), True)
             advisories.metric("Advisories", len(used["security"]))
             # The rows the answer was given, as its Community tab lists them:
             # every retrieved post said 5 beside a tab of 4 (2026-11-17).
-            community.metric("Community reports", len(
-                answer_agent.by_source(presented.evidence).get("Community", [])))
+            posts = answer_agent.by_source(presented.evidence).get("Community", [])
+            community.metric("Community reports", len(posts))
+            # Each number opens onto the documents behind it, linked, so a
+            # reader can check the live source rather than trust the count.
+            if rel:
+                with latest.popover("View source"):
+                    _link_line(f"{rel.get('product', '')} v{rel['version']}", rel.get("url"),
+                               f"{rel.get('source', 'release notes')} · {rel.get('date', '')}")
+            if used["security"]:
+                with advisories.popover("View advisories"):
+                    for r in used["security"]:
+                        _link_line(r["CVE"], r["Link"], " · ".join(x for x in (
+                            "CISA KEV" if r["CISA KEV"] else "NVD", r["Date"],
+                            f"fixed in {r['Fixed in']}" if r["Fixed in"] else "") if x),
+                            r["What was wrong"])
+            if posts:
+                with community.popover("View reports"):
+                    for e in posts:
+                        _link_line(e.title, e.url, " · ".join(
+                            x for x in (e.source or e.label, e.date) if x))
+        # The exact rows the answer stands on, named beside it.
+        chips = [str(r.get("CVE") or r.get("Release") or r.get("Page"))[:40]
+                 for rows in used.values() for r in rows]
+        if chips:
+            st.markdown("**Based on** " + " ".join(
+                f":green-badge[{_md_escape(c)}]" for c in dict.fromkeys(chips)))
+        with st.expander("Read more"):
+            _tab_long(results, presented)
+        with st.expander("How this was answered"):
+            dec = results.get("decision") or {}
+            if dec:
+                st.caption(f"confidence {dec.get('confidence', 0):.2f} · {dec.get('stop_reason', '')}")
+            _tab_loops(results, q)
+            # st.html, not st.markdown: markdown reads "$ ask ..." as LaTeX.
+            st.html(_console_html(_console_log(q, results, results["route"])))
+    _sources_list(results, presented)
+    if details is not None:
+        with details:
+            for label, keys in (("Vulnerabilities", ("security",)),
+                                ("Patches", ("patches", "pages"))):
+                # used rows first; their "Used by" column is the highlight
+                rows = {k: used[k] + other[k] for k in keys}
+                n = sum(map(len, rows.values()))
+                with st.expander(f"{label} ({n})"):
+                    _show_tables(rows) if n else st.caption("None in this question's evidence.")
+            with st.expander("Secrets"):
+                _tab_guardrails(results, presented)
 
-    st.markdown("#### Vulnerabilities & patches")
-    if any(answer_agent.details(presented.evidence).values()):
-        _detail_tables(presented, results)
-    else:
-        st.caption("No advisory, patch or vendor-page rows in this question's evidence.")
 
-    st.markdown("#### Security & maintenance context")
-    ctx = _maintenance_context(results)
-    for comp, rels in ctx.items():
-        st.markdown(f"**{comp}** — " + ", ".join(rels))
-    st.caption("Releases from the last 6 months among the documents this question "
-               "retrieved, by component." if ctx else
-               "No release from the last 6 months among the retrieved documents.")
+def _link_line(title: str, url: str, meta: str = "", body: str = "") -> None:
+    """One source in a quick-view list: linked title, grey provenance, gist."""
+    t = _md_escape(str(title or "")[:90]) or "untitled"
+    st.markdown((f"[{t}]({url})" if url else t) + (f"  \n:gray[{_md_escape(meta)}]" if meta else ""))
+    if body:
+        st.caption(body)
 
-    with st.expander("Detailed answer"):
-        _tab_long(results, presented, tables=False)
-    with st.expander("Sources"):
-        _tab_sources(results, presented)
-    with st.expander("Guardrails"):
-        _tab_guardrails(results, presented)
-    with st.expander("Feedback loops"):
-        _tab_loops(results, q)
 
-    with st.expander("How this was answered"):
-        dec = results.get("decision") or {}
-        if dec:
-            st.caption(f"confidence {dec.get('confidence', 0):.2f} · {dec.get('stop_reason', '')}")
-        # st.html, not st.markdown: markdown reads "$ ask ..." as LaTeX.
-        st.html(_console_html(_console_log(q, results, results["route"])))
+def _sources_list(results: dict, presented=None) -> None:
+    """The cited sources as a short linked list, under the answer."""
+    rows = _source_rows(results, presented)
+    cited = [r for r in rows if r["Verdict"] or r["Answer"]]
+    st.markdown(f"#### Sources ({len(cited)})")
+    for i, r in enumerate(cited, 1):
+        title = _md_escape(r["Title"]) or r["id"]
+        tags = " ".join(f":green-badge[{k.lower()}]" for k in ("Verdict", "Answer") if r[k])
+        link = f"[{title}]({r['Link']})" if r["Link"] else title
+        st.markdown(f"{i}. {link}  \n:gray[{r['Tier']}] {tags}")
+    if not cited:
+        st.caption("No source is cited for this question.")
+    if len(rows) > len(cited):
+        st.caption(f"{len(rows) - len(cited)} more retrieved, not cited")
 
 
 # ── SIDEBAR ───────────────────────────────────────────────
@@ -2582,114 +2657,118 @@ with st.sidebar:
         presenter_slot.caption(_presenter_caption(presenter_spec()))
     st.divider()
 
-    st.markdown("#### Settings")
-    mode = st.selectbox(
-        "Answering mode",
-        ["Decision console (new)", "Multi-agent pipeline",
-         "Single agent (paper baseline)", "Compare both side by side"],
-        # Compare by default. The pipeline on its own answers the question but
-        # says nothing about what the coordinating agents bought, which is the
-        # only claim this project makes; a visitor who does not already know to
-        # go looking for the baseline never sees it. Costs a second retrieval
-        # per ask -- the arms share no work -- and that is the price of the
-        # comparison being the default view rather than a setting.
-        index=0,
-        help="The baseline is the evaluation's own `single_agent` arm: raw "
-             "query to the retriever and one synthesis call, with every "
-             "coordinating agent removed. Same question, so the difference on "
-             "screen is the difference the paper measures.")
-    single_mode = mode.startswith("Single")
-    compare_mode = mode.startswith("Compare")
-    console_mode = mode.startswith("Decision console")
-    # Collapsed: nine controls standing open above the question box read as
-    # a configuration screen, and the only one a first-time visitor needs is
-    # the mode picker above. Everything here keeps its default, so the demo
-    # behaves identically whether or not this is ever opened.
-    with st.expander("Advanced settings", expanded=False):
-        from model_select import MODELS
-        st.selectbox("Presenter model",
-                     ["Auto (cheapest reachable)"] + [m["spec"] for m in MODELS],
-                     key="presenter_pick",
-                     help="Which model writes the cited paragraph (and the baseline's "
-                          "prose). Auto probes for the cheapest reachable one; a model "
-                          "that is not reachable on this host falls back to rule-based "
-                          "prose and the caption says so. Overrides PRESENTER_MODEL "
-                          "in secrets.")
-        source_label = st.selectbox(
-            "Data source",
-            ["Retrieval agent decides", "Lake only (releasetrain.io live)",
-             "Local store only"],
-            help="Agent: fetch live, fall back to the local store per feed when an "
-                 "endpoint is down, and let intent decide which kinds are citable. "
-                 "Lake: live only, no fallback. Store: what earlier runs retrieved.")
-        source = {"R": "agent", "L": "lake", "Lo": "store"}["Lo" if source_label.startswith("Local")
-                                                           else source_label[0]]
-        result_limit = st.slider("Results per agent", 1, 10, 5)
-        show_details = st.toggle("Show details", value=False,
-                                 help="Off: the question and a one-sentence answer. "
-                                      "On: every agent's step, the evidence tabs and "
-                                      "the cited paragraph.")
-        show_pipeline = st.toggle("Show pipeline steps", value=True,
-                                  disabled=not show_details) and show_details
-        show_raw = st.toggle("Show raw API data", value=False,
-                             disabled=not show_details) and show_details
-        yesno_on = st.toggle("Yes/No consensus", value=True, disabled=single_mode,
-                             help="For questions that take a one-word answer, count how "
-                                  "the retrieved thread's commenters actually answered it.")
-        unclear_as_no = st.toggle("Count non-committal comments as No", value=True,
-                                  disabled=single_mode or not yesno_on,
-                                  help="A commenter who neither confirms nor denies is "
-                                       "read as a no. Defensible for “did this happen to "
-                                       "you?” — someone it happened to says so — but it "
-                                       "is an inference from silence, not from the comment.")
-        survey_on = st.toggle(f"Survey-informed evaluator (n={survey.respondents()})",
-                              value=True, disabled=single_mode,
-                              help="Blend the 2024 software-update survey's user "
-                                   "priorities into the quality score, and report which "
-                                   "of them these results address.")
-    # The panel's checks. Each box switches a real step of run_pipeline (see
-    # CHECK_DEFAULTS); the always-on list names checks that have no switch.
-    _ck = lambda label, key, help_: st.checkbox(  # noqa: E731
-        label, value=CHECK_DEFAULTS[key], key=f"ck_{key}", help=help_,
-        disabled=single_mode)
-    with st.expander("Advanced checks", expanded=False):
-        checks = {
-            "vendor_check": _ck("Vendor check", "vendor_check",
-                                "Drop releases, posts and advisories about another product."),
-            "temporal_filter": _ck("Temporal filter", "temporal_filter",
-                                   "Keep only documents inside the asked date window."),
-            "intent_filter": _ck("Intent filter", "intent_filter",
-                                 "Cite only the document kinds the question's intent allows."),
-            "resolve_vendor": _ck("Resolve vendor", "resolve_vendor",
-                                  "Detect the product from the releasetrain catalog."),
-            "resolve_temporal": _ck("Resolve temporal constraints", "resolve_temporal",
-                                    "Turn \"this week\" or \"today\" into dates before fetching."),
-        }
-    with st.expander("Guardrails", expanded=False):
-        checks |= {
-            "retry_terms": _ck("Retry new terms", "retry_terms",
-                               "When a healthy fetch finds no evidence, run once more on "
-                               "the rewriter's terms; keep that run only if it finds some."),
-            "nist_retry": _ck("NIST: retry loop", "nist_retry",
-                              "Retry the live NVD feed up to 3 times on a rate limit or "
-                              "server error instead of reading it as no CVEs."),
-            "nist_sort": _ck("NIST: fallback sort", "nist_sort",
-                             "NVD lists matches oldest-first; read the newest ones instead."),
-            "web_search": _ck("Web search for questions the feeds can't answer", "web_search",
-                              "Trusted vendor pages, plus a web fallback when no document "
-                              "is about the asked product."),
-            "llm_extract": _ck("Model-assisted extraction when rules find no version",
-                               "llm_extract",
-                               "For a version question whose documents state no version the "
-                               "rules can read, the presenter model reads one; it is shown only "
-                               "if that exact value is in the document it cites."),
-        }
-        st.caption("ALWAYS ON")
-        for _name, _what in ALWAYS_ON:
-            st.checkbox(_name, value=True, disabled=True, key=f"ao_{_name}", help=_what)
-    if single_mode:
-        st.caption("Baseline arm selected — the agents above it are switched "
-                   "off, which is what makes it the baseline.")
+    # One arrow holds every control: the main screen is the question and its
+    # answer, and Settings > Advanced settings > Advanced checks is where the
+    # heavy detail (vulnerabilities, patches, secret scan) is read on demand.
+    with st.expander("Settings", expanded=False):
+        mode = st.selectbox(
+            "Answering mode",
+            ["Decision console (new)", "Multi-agent pipeline",
+             "Single agent (paper baseline)", "Compare both side by side"],
+            # Compare by default. The pipeline on its own answers the question but
+            # says nothing about what the coordinating agents bought, which is the
+            # only claim this project makes; a visitor who does not already know to
+            # go looking for the baseline never sees it. Costs a second retrieval
+            # per ask -- the arms share no work -- and that is the price of the
+            # comparison being the default view rather than a setting.
+            index=0,
+            help="The baseline is the evaluation's own `single_agent` arm: raw "
+                 "query to the retriever and one synthesis call, with every "
+                 "coordinating agent removed. Same question, so the difference on "
+                 "screen is the difference the paper measures.")
+        single_mode = mode.startswith("Single")
+        compare_mode = mode.startswith("Compare")
+        console_mode = mode.startswith("Decision console")
+        # Collapsed: nine controls standing open above the question box read as
+        # a configuration screen, and the only one a first-time visitor needs is
+        # the mode picker above. Everything here keeps its default, so the demo
+        # behaves identically whether or not this is ever opened.
+        with st.expander("Advanced settings", expanded=False):
+            from model_select import MODELS
+            st.selectbox("Presenter model",
+                         ["Auto (cheapest reachable)"] + [m["spec"] for m in MODELS],
+                         key="presenter_pick",
+                         help="Which model writes the cited paragraph (and the baseline's "
+                              "prose). Auto probes for the cheapest reachable one; a model "
+                              "that is not reachable on this host falls back to rule-based "
+                              "prose and the caption says so. Overrides PRESENTER_MODEL "
+                              "in secrets.")
+            source_label = st.selectbox(
+                "Data source",
+                ["Retrieval agent decides", "Lake only (releasetrain.io live)",
+                 "Local store only"],
+                help="Agent: fetch live, fall back to the local store per feed when an "
+                     "endpoint is down, and let intent decide which kinds are citable. "
+                     "Lake: live only, no fallback. Store: what earlier runs retrieved.")
+            source = {"R": "agent", "L": "lake", "Lo": "store"}["Lo" if source_label.startswith("Local")
+                                                               else source_label[0]]
+            result_limit = st.slider("Results per agent", 1, 10, 5)
+            show_details = st.toggle("Show details", value=False,
+                                     help="Off: the question and a one-sentence answer. "
+                                          "On: every agent's step, the evidence tabs and "
+                                          "the cited paragraph.")
+            show_pipeline = st.toggle("Show pipeline steps", value=True,
+                                      disabled=not show_details) and show_details
+            show_raw = st.toggle("Show raw API data", value=False,
+                                 disabled=not show_details) and show_details
+            yesno_on = st.toggle("Yes/No consensus", value=True, disabled=single_mode,
+                                 help="For questions that take a one-word answer, count how "
+                                      "the retrieved thread's commenters actually answered it.")
+            unclear_as_no = st.toggle("Count non-committal comments as No", value=True,
+                                      disabled=single_mode or not yesno_on,
+                                      help="A commenter who neither confirms nor denies is "
+                                           "read as a no. Defensible for “did this happen to "
+                                           "you?” — someone it happened to says so — but it "
+                                           "is an inference from silence, not from the comment.")
+            survey_on = st.toggle(f"Survey-informed evaluator (n={survey.respondents()})",
+                                  value=True, disabled=single_mode,
+                                  help="Blend the 2024 software-update survey's user "
+                                       "priorities into the quality score, and report which "
+                                       "of them these results address.")
+            # The panel's checks. Each box switches a real step of run_pipeline (see
+            # CHECK_DEFAULTS); the always-on list names checks that have no switch.
+            _ck = lambda label, key, help_: st.checkbox(  # noqa: E731
+                label, value=CHECK_DEFAULTS[key], key=f"ck_{key}", help=help_,
+                disabled=single_mode)
+            with st.expander("Advanced checks", expanded=False):
+                checks = {
+                    "vendor_check": _ck("Vendor check", "vendor_check",
+                                        "Drop releases, posts and advisories about another product."),
+                    "temporal_filter": _ck("Temporal filter", "temporal_filter",
+                                           "Keep only documents inside the asked date window."),
+                    "intent_filter": _ck("Intent filter", "intent_filter",
+                                         "Cite only the document kinds the question's intent allows."),
+                    "resolve_vendor": _ck("Resolve vendor", "resolve_vendor",
+                                          "Detect the product from the releasetrain catalog."),
+                    "resolve_temporal": _ck("Resolve temporal constraints", "resolve_temporal",
+                                            "Turn \"this week\" or \"today\" into dates before fetching."),
+                }
+                detail_slot = st.container()
+            with st.expander("Guardrails", expanded=False):
+                checks |= {
+                    "retry_terms": _ck("Retry new terms", "retry_terms",
+                                       "When a healthy fetch finds no evidence, run once more on "
+                                       "the rewriter's terms; keep that run only if it finds some."),
+                    "nist_retry": _ck("NIST: retry loop", "nist_retry",
+                                      "Retry the live NVD feed up to 3 times on a rate limit or "
+                                      "server error instead of reading it as no CVEs."),
+                    "nist_sort": _ck("NIST: fallback sort", "nist_sort",
+                                     "NVD lists matches oldest-first; read the newest ones instead."),
+                    "web_search": _ck("Web search for questions the feeds can't answer", "web_search",
+                                      "Trusted vendor pages, plus a web fallback when no document "
+                                      "is about the asked product."),
+                    "llm_extract": _ck("Model-assisted extraction when rules find no version",
+                                       "llm_extract",
+                                       "For a version question whose documents state no version the "
+                                       "rules can read, the presenter model reads one; it is shown only "
+                                       "if that exact value is in the document it cites."),
+                }
+                st.caption("ALWAYS ON")
+                for _name, _what in ALWAYS_ON:
+                    st.checkbox(_name, value=True, disabled=True, key=f"ao_{_name}", help=_what)
+        if single_mode:
+            st.caption("Baseline arm selected — the agents above it are switched "
+                       "off, which is what makes it the baseline.")
 
     st.divider()
     with st.expander("Pick a Reddit question", expanded=False):
@@ -3006,7 +3085,7 @@ if view == "Results":
 # Decision console is the default Ask layout: clean input, five tabs, live
 # console. It owns its own input and renders nothing of the classic view below.
 if console_mode:
-    render_ask_view(result_limit, source, checks)
+    render_ask_view(result_limit, source, checks, detail_slot)
     st.stop()
 
 if "main_query" not in st.session_state:
