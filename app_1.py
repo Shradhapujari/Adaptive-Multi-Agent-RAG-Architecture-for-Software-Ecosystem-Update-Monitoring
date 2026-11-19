@@ -1087,7 +1087,14 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
             # searched as "chrome webrtc" first: NVD ANDs the words, so that
             # finds Chrome's WebRTC CVEs, which the newest-N "chrome" search
             # crowded out (2 of 5 citations were WebRTC, 2026-11-19).
-            for name in [f"{v.name} {p}" for v in g.vendors[:2] for p in v.parts] + g.vendor_names[:2]:
+            # A name that is also an ordinary word is searched with the word
+            # that makes it the product: "edge" returned VAPIX Edge and AMD
+            # Versal AI Edge, "microsoft edge" returns Microsoft's.
+            def kw(v) -> str:
+                need = decide.KB.get(v.name, {}).get("name_requires") or []
+                return f"{need[0]} {v.name}" if need else v.name
+            for name in ([f"{kw(v)} {p}" for v in g.vendors[:2] for p in v.parts]
+                         + [kw(v) for v in g.vendors[:2]]):
                 try:
                     shared["cve"] = shared["cve"] + nvd.fetch(
                         name, limit=max(limit * 4, 20), days=days,

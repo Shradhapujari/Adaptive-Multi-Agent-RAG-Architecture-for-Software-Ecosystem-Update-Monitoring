@@ -381,6 +381,22 @@ def _platform_variant_mismatch(d: dict, vtoks: set, qtoks: set) -> bool:
                for m in rx.finditer(body))
 
 
+def _lacks_required_word(d: dict, vendors: Sequence[str]) -> bool:
+    """True when the advisory names an asked product that is also an ordinary
+    word, without the word that makes it that product (vendor_kb.json
+    `name_requires`). "The VAPIX Edge storage API ..." and "AMD Versal AI Edge
+    Series ..." named Edge, passed the subject rule, and were cited in an Edge
+    answer (live, 2026-11-19). Judged per product the advisory names, so a
+    Chrome advisory is not held to Edge's requirement in an Edge-and-Chrome
+    question."""
+    body = _text(d).lower()
+    named = [str(v).lower() for v in vendors if _word_at(str(v).lower(), body) is not None]
+    if not named:
+        return False
+    need = {v: KB.get(v, {}).get("name_requires") for v in named}
+    return all(need[v] and not any(w in body for w in need[v]) for v in named)
+
+
 def _about(d: dict, vtoks: set, qtoks: set, exclude: Sequence[str] = (),
            vendors: Sequence[str] = ()) -> bool:
     """Is the document about the asked product? With a known vendor, the vendor
@@ -393,6 +409,8 @@ def _about(d: dict, vtoks: set, qtoks: set, exclude: Sequence[str] = (),
     toks = _tokens(_text(d))
     if vtoks and d.get("source") in ADVISORY and d.get("kev_vendor"):
         return kev_owns(d, vendors, exclude)
+    if vtoks and d.get("source") in ADVISORY and _lacks_required_word(d, vendors):
+        return False
     if vtoks:
         if not toks & vtoks:
             return False

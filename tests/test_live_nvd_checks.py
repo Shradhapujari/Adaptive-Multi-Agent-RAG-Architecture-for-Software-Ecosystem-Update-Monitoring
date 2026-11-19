@@ -68,3 +68,20 @@ def test_a_component_in_the_question_is_searched_with_its_product(monkeypatch):
     asked.clear()
     app_1.run_pipeline("Is it safe to update Chrome?", show_steps=False)
     assert asked == ["chrome"]
+
+
+def test_a_name_that_is_also_a_word_is_searched_with_its_owner_word(monkeypatch):
+    """"edge" alone returned other products' advisories (2026-11-19); the
+    search is "microsoft edge", from vendor_kb.json `name_requires`."""
+    asked = []
+    monkeypatch.setattr(app_1, "union_fetch", lambda *a, **k: [])
+    monkeypatch.setattr(app_1, "terminal_sources",
+                        lambda *a, **k: ({"community": [], "releases": [], "cve": []}, []))
+    monkeypatch.setattr(app_1, "rewrite_query", lambda q: Rewrite(q, "rule-based"))
+    monkeypatch.setattr(app_1, "get_store", lambda: None)
+    monkeypatch.setattr(nvd, "fetch", lambda kw, *a, **k: asked.append(kw) or [])
+    app_1.run_pipeline("Is it safe to update Edge?", show_steps=False)
+    assert asked == ["microsoft edge"]
+    asked.clear()
+    app_1.run_pipeline("Is it safe to update Chrome?", show_steps=False)
+    assert asked == ["chrome"]
