@@ -144,7 +144,7 @@ def _vendor_tokens(vendors: Iterable[str]) -> set:
 # "<product> is a ...", "<product> before <version> allows ...", or "In the
 # <product>, ..." -- which has no predicate here and so is left alone.
 _PREDICATE = re.compile(
-    r"\b(?:contains?|is|are|was|were|allows?|before|prior\s+to|suffers|fails|"
+    r"\b(?:contains?|is|are|was|were|allows?|before|prior\s+to|suffers|fails?|"
     r"does\s+not|has\s+an?|have\s+an?)\b", re.I)
 
 # "...was fixed in Firefox 157.0.1." The product named as the thing patched,
