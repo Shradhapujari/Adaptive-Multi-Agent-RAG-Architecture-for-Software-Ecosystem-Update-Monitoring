@@ -373,3 +373,17 @@ def test_chrome_question_drops_advisories_about_other_products():
     assert not D._about(openclaw, vt, set(), ex, ["chrome"])
     assert not D._about(mcp, vt, set(), ex, ["chrome"])
     assert D._about(real, vt, set(), ex, ["chrome"])
+
+
+def test_component_named_like_a_vendor_does_not_disown_the_product():
+    """"Buffer overflow in WebRTC in Google Chrome": WebRTC is a KEV vendor,
+    but the vendor right before Chrome is Google. Taking the first vendor named
+    dropped two real Chrome advisories (2026-11-19)."""
+    def adv(text):
+        return {"doc_id": "x", "source": "nvd", "title": "", "text": text}
+    webrtc = adv("Buffer overflow in WebRTC in Google Chrome prior to 154.0.8037.97 allowed a "
+                 "remote attacker to execute arbitrary code inside the sandbox.")
+    assert not D._foreign_vendor_first(webrtc, ["chrome"])
+    # Still blocked: the vendor right before the product is a foreign one.
+    assert D._foreign_vendor_first(adv("Cisco IOS XE Software contains a flaw that allows ..."), ["ios"])
+    assert D._foreign_vendor_first(adv("Zoom Windows client before 6.1 allows ..."), ["windows"])
