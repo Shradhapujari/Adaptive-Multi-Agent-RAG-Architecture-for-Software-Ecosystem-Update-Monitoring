@@ -59,3 +59,6 @@ results/ui_feedback.jsonl
 # Review prep notes stay local -- they quote live run state, not the repo.
 QA_PREP_*.md
 docs/QA-Prep-*.md
+
+# private held-out test split: never pushed (see build_heldout.py)
+data/heldout/
