@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 620" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">System architecture</title>
+  <desc id="d">A question is date-grounded, then walked through a rewrite, retrieve, classify state machine fed by release notes, community posts, CISA KEV, live NVD and vendor pages. Outcomes feed a rule-based decision gate, an answer presenter, answer guardrails and the console.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <style>
+      .bg{fill:#ffffff}
+      .t{font-size:13px;font-weight:600;fill:#0f172a}
+      .s{font-size:11px;fill:#475569}
+      .h{font-size:12px;font-weight:700;fill:#334155;letter-spacing:.04em}
+      .ev{fill:#dbeafe;stroke:#2563eb;stroke-width:1.5}
+      .po{fill:#ccfbf1;stroke:#0d9488;stroke-width:1.5}
+      .da{fill:#f1f5f9;stroke:#64748b;stroke-width:1.5}
+      .op{fill:#f8fafc;stroke:#64748b;stroke-width:1.5;stroke-dasharray:5 4}
+      .box{fill:none;stroke:#94a3b8;stroke-width:1.2;stroke-dasharray:6 4}
+      .l{stroke:#475569;stroke-width:1.5;fill:none;marker-end:url(#a)}
+      .ld{stroke:#475569;stroke-width:1.5;fill:none;stroke-dasharray:4 3;marker-end:url(#a)}
+    </style>
+  </defs>
+  <rect class="bg" width="960" height="620"/>
+
+  <!-- inputs feeding the loop -->
+  <rect class="da" x="300" y="22" width="150" height="52" rx="8"/>
+  <text class="t" x="375" y="44" text-anchor="middle">Self-Improvement</text>
+  <text class="t" x="375" y="60" text-anchor="middle">Memory</text>
+  <rect class="po" x="480" y="22" width="300" height="52" rx="8"/>
+  <text class="t" x="630" y="44" text-anchor="middle">Live sources</text>
+  <text class="s" x="630" y="61" text-anchor="middle">release notes · Reddit · CISA KEV · NVD · vendor pages</text>
+  <rect class="op" x="800" y="22" width="140" height="52" rx="8"/>
+  <text class="t" x="870" y="44" text-anchor="middle">Web fallback</text>
+  <text class="s" x="870" y="61" text-anchor="middle">GR-2, opt-in, 1 search</text>
+  <path class="ld" d="M800,48 H782"/>
+  <path class="ld" d="M375,74 V150"/>
+  <path class="l" d="M630,74 V150"/>
+
+  <!-- pipeline -->
+  <rect class="box" x="14" y="104" width="932" height="178" rx="12"/>
+  <text class="h" x="28" y="124">graph.py  STATE MACHINE</text>
+
+  <rect class="po" x="30" y="150" width="120" height="70" rx="8"/>
+  <text class="t" x="90" y="180" text-anchor="middle">Question</text>
+  <text class="s" x="90" y="198" text-anchor="middle">+ off-topic check</text>
+  <rect class="po" x="180" y="150" width="120" height="70" rx="8"/>
+  <text class="t" x="240" y="180" text-anchor="middle">Temporal</text>
+  <text class="t" x="240" y="196" text-anchor="middle">Grounder</text>
+  <rect class="ev" x="330" y="150" width="120" height="70" rx="8"/>
+  <text class="t" x="390" y="180" text-anchor="middle">Query</text>
+  <text class="t" x="390" y="196" text-anchor="middle">Rewriter</text>
+  <rect class="ev" x="480" y="150" width="300" height="70" rx="8"/>
+  <text class="t" x="630" y="180" text-anchor="middle">Retriever</text>
+  <text class="s" x="630" y="198" text-anchor="middle">union of every phrasing, vendor-aware, reranked</text>
+  <rect class="po" x="810" y="150" width="120" height="70" rx="8"/>
+  <text class="t" x="870" y="180" text-anchor="middle">Classify</text>
+  <text class="s" x="870" y="198" text-anchor="middle">what the docs hold</text>
+
+  <path class="l" d="M150,185 H180"/>
+  <path class="l" d="M300,185 H330"/>
+  <path class="l" d="M450,185 H480"/>
+  <path class="l" d="M780,185 H810"/>
+  <path class="l" d="M870,220 V248 H390 V222"/>
+  <text class="s" x="630" y="243" text-anchor="middle">fetch failed → rewrite again. A healthy but empty fetch abstains; nothing retries it.</text>
+  <text class="s" x="870" y="272" text-anchor="middle">answer · verify · abstain</text>
+
+  <!-- decision row -->
+  <path class="l" d="M870,282 V306 H165 V332"/>
+  <rect class="po" x="30" y="332" width="270" height="104" rx="8"/>
+  <text class="t" x="165" y="356" text-anchor="middle">Decision gate  (decide.py)</text>
+  <text class="s" x="165" y="376" text-anchor="middle">rule-based, no model; each verdict needs</text>
+  <text class="s" x="165" y="391" text-anchor="middle">checkable evidence about that product</text>
+  <text class="s" x="165" y="414" text-anchor="middle">patch_urgently · hold · update_with_caveat</text>
+  <text class="s" x="165" y="429" text-anchor="middle">safe · insufficient_evidence</text>
+
+  <rect class="po" x="345" y="332" width="270" height="104" rx="8"/>
+  <text class="t" x="480" y="356" text-anchor="middle">Answer Presenter</text>
+  <text class="s" x="480" y="376" text-anchor="middle">prose with bracketed evidence,</text>
+  <text class="s" x="480" y="391" text-anchor="middle">version-first Short answer</text>
+  <text class="s" x="480" y="414" text-anchor="middle">Llama 3.1 8B via Ollama,</text>
+  <text class="s" x="480" y="429" text-anchor="middle">template answer when no model</text>
+
+  <rect class="po" x="660" y="332" width="270" height="104" rx="8"/>
+  <text class="t" x="795" y="356" text-anchor="middle">Answer guardrails</text>
+  <text class="s" x="795" y="376" text-anchor="middle">no invented versions · CVE ids must</text>
+  <text class="s" x="795" y="391" text-anchor="middle">appear in a source · verdict count</text>
+  <text class="s" x="795" y="406" text-anchor="middle">matches the sources cited</text>
+  <text class="s" x="795" y="429" text-anchor="middle">grounding.py · guardrail.py · yesno.py</text>
+
+  <path class="l" d="M300,384 H345"/>
+  <path class="l" d="M615,384 H660"/>
+
+  <!-- console -->
+  <path class="l" d="M795,436 V474"/>
+  <rect class="po" x="30" y="474" width="900" height="70" rx="8"/>
+  <text class="t" x="480" y="499" text-anchor="middle">Console  (app_1.py, Streamlit)</text>
+  <text class="s" x="480" y="518" text-anchor="middle">Short answer · Sources (only what the verdict or answer cites) · Settings and a checks panel that switches real steps</text>
+  <text class="s" x="480" y="533" text-anchor="middle">How this was answered: pipeline strip with each step's time and finding</text>
+
+  <!-- legend -->
+  <rect class="ev" x="30" y="572" width="16" height="16" rx="3"/>
+  <text class="s" x="54" y="584">Evaluated agents (multiagent_rag_v3.py)</text>
+  <rect class="po" x="300" y="572" width="16" height="16" rx="3"/>
+  <text class="s" x="324" y="584">Added after the evaluation</text>
+  <rect class="da" x="520" y="572" width="16" height="16" rx="3"/>
+  <text class="s" x="544" y="584">Data and memory</text>
+  <rect class="op" x="680" y="572" width="16" height="16" rx="3"/>
+  <text class="s" x="704" y="584">Opt-in</text>
+  <text class="s" x="30" y="608">Dashed arrows: bias and fallback inputs. Solid arrows: control flow.</text>
+</svg>
