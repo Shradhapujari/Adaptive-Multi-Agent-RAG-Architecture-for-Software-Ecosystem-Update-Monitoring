@@ -1398,6 +1398,36 @@ def run_fast(query: str, limit: int = 5, source: str = "agent") -> Optional[dict
 
 _CITE = re.compile(r"\s*\[[^\]]*\]")
 
+# The single-agent *template* answer (EvaluatorAgent's assembled dump, used
+# when no prose model is reachable, arm `single_agent_template`) leads with a
+# metadata block -- Query/Verified/Confidence/Retrieved -- then the answer
+# under an "✅ ANSWER (synthesized by ...):" label. Without stripping it,
+# split_summary returned the echoed "Query: ..." line as the headline, so the
+# compact compare column showed the question back instead of the answer.
+_TMPL_META = re.compile(r"^\s*(?:Query|Verified|Confidence|Retrieved)\s*:", re.I)
+
+
+def _strip_template_header(text: str) -> str:
+    """Drop the template dump's metadata header so its answer is the headline.
+
+    No-op on prose answers (they do not open with the metadata block), so the
+    multi-agent and prose single-agent paths are unaffected. The no-model case
+    keeps its own first content line ("⚠️ NO ANSWER — no local model reachable
+    …"), which is the honest headline there.
+    """
+    lines = (text or "").splitlines()
+    if not (lines and _TMPL_META.match(lines[0])):
+        return text
+    out, in_meta = [], True
+    for ln in lines:
+        if in_meta and (_TMPL_META.match(ln) or not ln.strip()):
+            continue
+        in_meta = False
+        if "synthesized by" in ln.lower() and ln.rstrip().endswith(":"):
+            continue  # the "✅ ANSWER (synthesized by …):" label, not the answer
+        out.append(ln)
+    return "\n".join(out).strip() or text
+
 
 def _one_line(text: str) -> str:
     """The first sentence of a presented answer, citations stripped.
@@ -1408,7 +1438,7 @@ def _one_line(text: str) -> str:
     published half a quote -- `says \u201cI had a similar issue on a Windows 2019
     server.` -- with the closing quote and the citation gone.
     """
-    plain = _CITE.sub("", text or "").strip()
+    plain = _CITE.sub("", _strip_template_header(text or "")).strip()
     head, _items = answer_agent.split_summary(plain)
     return head or answer_agent._one_sentence(plain) or "No answer could be composed."
 
