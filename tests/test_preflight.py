@@ -59,6 +59,7 @@ def test_git_state_ignores_untracked_files(tmp_path):
 # ── Task 2: lock, split, CLI enforcement, recorded keys ──────────────────
 import json
 import os
+import time
 
 import pytest
 
@@ -146,11 +147,11 @@ class _DeadJudge:
         return False
 
 
-def _stub_run(tmp_path, monkeypatch, manifest=None):
-    ds = tmp_path / "ds.json"
-    ds.write_text(json.dumps([{"id": 1, "query": "q", "category": "c", "ground_truth": None}]))
+def _stub_run(tmp_path, monkeypatch, manifest=None, name="ds", query="q"):
+    ds = tmp_path / f"{name}.json"
+    ds.write_text(json.dumps([{"id": 1, "query": query, "category": "c", "ground_truth": None}]))
     if manifest:
-        (tmp_path / "ds.manifest.json").write_text(json.dumps(manifest))
+        (tmp_path / f"{name}.manifest.json").write_text(json.dumps(manifest))
     monkeypatch.setattr(R, "Judge", _DeadJudge)
     monkeypatch.setattr(R.corpus_snapshot, "activate", lambda spec: None)
     monkeypatch.setattr(R, "build_generators", lambda specs, top_k=4: [_Gen()])
@@ -167,9 +168,16 @@ def test_run_records_refusals_on_every_run(tmp_path, monkeypatch):
     assert not (tmp_path / "test_split_looks.log").exists()
 
 
-def test_test_split_run_leaves_exactly_one_look(tmp_path, monkeypatch):
-    d = _stub_run(tmp_path, monkeypatch, manifest={"split": "test"})
+def test_test_split_runs_log_and_print_looks_per_dataset(tmp_path, monkeypatch, capsys):
+    t = {"split": "test"}
+    d = _stub_run(tmp_path, monkeypatch, t)
+    assert "test split: look 1 at this set" in capsys.readouterr().out
+    time.sleep(1.1)  # run_id is a per-second timestamp + dataset hash
+    _stub_run(tmp_path, monkeypatch, t)
+    assert "test split: look 2 at this set" in capsys.readouterr().out
+    _stub_run(tmp_path, monkeypatch, t, name="other", query="different")
+    assert "test split: look 1 at this set" in capsys.readouterr().out
     lines = (tmp_path / "test_split_looks.log").read_text().splitlines()
-    assert len(lines) == 1
-    ts, run_id, sha, pred = lines[0].split("\t")
-    assert run_id == os.path.basename(d)
+    assert len(lines) == 3
+    ts, run_id, sha, dshash, pred = lines[0].split("\t")
+    assert run_id == os.path.basename(d) and run_id.endswith(dshash)

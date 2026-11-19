@@ -530,9 +530,14 @@ def run(cfg: EvalConfig) -> str:
                     preflight_refusals=_refused, diagnostic=bool(_refused),
                     split=_split)
     if _split == "test":
-        with open(os.path.join(cfg.results_dir, "test_split_looks.log"), "a") as f:
+        log = os.path.join(cfg.results_dir, "test_split_looks.log")
+        with open(log, "a") as f:
             f.write("\t".join([datetime.now(timezone.utc).isoformat(), run_id,
-                              _sha, cfg.prediction.replace("\n", " ")]) + "\n")
+                              _sha, ds_hash, cfg.prediction.replace("\n", " ")]) + "\n")
+        with open(log) as f:
+            rows = [l.split("\t") for l in f.read().splitlines()]
+        looks = len({r[1] for r in rows if len(r) > 4 and r[3] == ds_hash})
+        print(f"[harness] test split: look {looks} at this set")
     cfg_dict["n_questions"] = len(records)
     # Which arm this run actually is. Reading it back off the environment at
     # write time would be a guess; ask the reranker the harness really used.
