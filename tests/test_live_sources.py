@@ -184,3 +184,119 @@ def test_compat_searches_last_year(monkeypatch):
     _search_returns(monkeypatch, [], seen=seen)
     L.fetch("compat", "Does Django 5 support Python 3.13?")
     assert seen[0]["timelimit"] == "y"
+
+
+# ─────────────────────────────────────────────── Task 4: package safety (OSV)
+
+REQ = "Is requests 2.31.0 safe? (pip)"
+
+
+def osv(*vulns):
+    return {"vulns": list(vulns)}
+
+
+FIXED = {"id": "GHSA-9wx4-h78v-vm56", "aliases": ["CVE-2024-35195"], "summary": "Session verify bypass",
+         "affected": [{"ranges": [{"events": [{"introduced": "0"}, {"fixed": "2.32.0"}]}]}]}
+UNFIXED = {"id": "GHSA-aaaa", "aliases": ["CVE-2026-1"], "summary": "x",
+           "affected": [{"ranges": [{"events": [{"introduced": "0"}]}]}]}
+NO_CVE = {"id": "PYSEC-2026-1", "aliases": [], "summary": "y",
+          "affected": [{"ranges": [{"events": [{"introduced": "0"}, {"fixed": "2.32.0"}]}]}]}
+OLD_FIX = {"id": "GHSA-old", "aliases": ["CVE-2018-1"], "summary": "z",   # fix older than the asked version
+           "affected": [{"ranges": [{"events": [{"introduced": "0"}, {"fixed": "2.20.0"}]}]}]}
+
+
+@pytest.fixture
+def stub(monkeypatch):
+    """Stub _get_json by URL substring; `stub.table` is editable, `stub.posts` records OSV bodies."""
+    class S:
+        table = {"pypi.org/pypi/requests/json": ({"info": {"version": "2.34.2"}}, None),
+                 "api.osv.dev": (osv(), None)}
+        posts = []
+
+    def fake(url, post=None, timeout=10):
+        if post is not None:
+            S.posts.append(post)
+        for key, val in S.table.items():
+            if key in url:
+                return val
+        return None, "HTTP 404"
+    monkeypatch.setattr(L, "_get_json", fake)
+    return S
+
+
+def test_fixed_cve_advisory_reaches_verdict(stub):
+    stub.table["api.osv.dev"] = (osv(FIXED), None)
+    r = L.package_safety(REQ)
+    assert [d["title"] for d in r["verdict_docs"]] == ["GHSA-9wx4-h78v-vm56"]
+    v = r["verdict_docs"][0]
+    assert v["text"].startswith("requests 2.31.0: ") and "CVE-2024-35195" in v["text"]
+    assert "Fixed in 2.32.0." in v["text"] and v["source"] == "cve"
+    assert v["url"] == "https://osv.dev/vulnerability/GHSA-9wx4-h78v-vm56"
+
+
+def test_unfixed_advisory_stays_out_of_verdict(stub):
+    stub.table["api.osv.dev"] = (osv(UNFIXED), None)
+    r = L.package_safety(REQ)
+    assert r["verdict_docs"] == []
+    assert "requests 2.31.0: unfixed advisory GHSA-aaaa, no fixed release yet" in r["answer_docs"][0]["text"]
+
+
+def test_fix_older_than_checked_version_is_not_a_fix(stub):
+    stub.table["api.osv.dev"] = (osv(OLD_FIX), None)
+    r = L.package_safety(REQ)
+    assert r["verdict_docs"] == [] and "no fixed release yet" in r["answer_docs"][0]["text"]
+
+
+def test_no_cve_advisory_is_shown_only(stub):
+    stub.table["api.osv.dev"] = (osv(NO_CVE), None)
+    r = L.package_safety(REQ)
+    assert r["verdict_docs"] == [] and r["answer_docs"][0]["label"] == "OSV - PYSEC-2026-1"
+
+
+def test_clean_result_is_not_a_green_light(stub):
+    r = L.package_safety("Is the requests package safe?")
+    assert r["verdict_docs"] == []
+    assert "OSV: no known advisories against requests 2.34.2" in r["answer_docs"][0]["text"]
+    assert r["meta"]["resolved"] and r["meta"]["error"] is None
+
+
+def test_question_version_is_checked_not_latest(stub):
+    L.package_safety(REQ)
+    assert stub.posts[-1] == {"version": "2.31.0", "package": {"name": "requests", "ecosystem": "PyPI"}}
+
+
+def test_no_ecosystem_prefers_pypi(stub):
+    stub.table["registry.npmjs.org/requests/latest"] = ({"version": "0.3.0"}, None)
+    r = L.package_safety("Is the requests package safe?")
+    assert r["meta"]["source"].startswith("OSV via PyPI")
+    assert stub.posts[-1]["package"]["ecosystem"] == "PyPI"
+
+
+def test_npm_when_only_npm_knows_it(stub):
+    stub.table = {"registry.npmjs.org/left-pad/latest": ({"version": "1.3.0"}, None),
+                  "api.osv.dev": (osv(), None)}
+    r = L.package_safety("Is the left-pad package safe?")
+    assert r["meta"]["source"] == "OSV via npm, left-pad 1.3.0"
+
+
+def test_unknown_package_is_unresolved(stub):
+    stub.table = {"api.osv.dev": (osv(), None)}
+    r = L.package_safety("Is the zzqq package safe?")
+    assert not r["meta"]["resolved"] and r["verdict_docs"] == [] and r["meta"]["error"]
+    assert not any("no known advisories" in d["text"] for d in r["answer_docs"])
+
+
+def test_osv_failure_is_an_error_not_clean(stub):
+    stub.table["api.osv.dev"] = (None, "timeout")
+    r = L.package_safety("Is the requests package safe?")
+    assert r["meta"]["error"] == "timeout" and r["verdict_docs"] == []
+    assert not any("no known advisories" in d["text"] for d in r["answer_docs"])
+
+
+def test_lowest_newer_fix_is_named_in_version_order(stub):
+    two = {"id": "GHSA-two", "aliases": ["CVE-2026-2"], "summary": "s",
+           "affected": [{"ranges": [{"events": [{"introduced": "0"}, {"fixed": "2.10.0"}]},
+                                    {"events": [{"introduced": "2.31.0"}, {"fixed": "2.9.0"}]}]}]}
+    stub.table["api.osv.dev"] = (osv(two), None)
+    r = L.package_safety("Is requests 2.8.0 safe? (pip)")
+    assert "Fixed in 2.9.0." in r["verdict_docs"][0]["text"]

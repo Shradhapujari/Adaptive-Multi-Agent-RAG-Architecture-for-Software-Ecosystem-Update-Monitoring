@@ -272,3 +272,91 @@ def fetch(kind_: str, query: str) -> Tuple[List[dict], dict]:
     if kind_ == "compat":
         return _plain(kind_, query, "y", "DuckDuckGo, last year")
     return _plain(kind_, query, None, "DuckDuckGo")
+
+
+# ─────────────────────────────────────────────── package safety (OSV)
+
+OSV_QUERY = "https://api.osv.dev/v1/query"
+_REGISTRY = {"PyPI": ("https://pypi.org/pypi/{}/json", lambda d: (d.get("info") or {}).get("version")),
+             "npm": ("https://registry.npmjs.org/{}/latest", lambda d: d.get("version"))}
+
+
+def _newer(fix: str, version: str) -> bool:
+    """Is `fix` a later release than `version`? An unparseable pair counts as
+    a fix, so the advisory is cited as fixable rather than called unfixed."""
+    from packaging.version import InvalidVersion, Version
+    try:
+        return Version(fix) > Version(version)
+    except InvalidVersion:
+        return True
+
+
+def _vkey(v: str):
+    """Sort key: real version order where parseable, text order after."""
+    from packaging.version import InvalidVersion, Version
+    try:
+        return (0, Version(v), "")
+    except InvalidVersion:
+        return (1, Version("0"), v)
+
+
+def _latest(name: str, ecosystem: str) -> Optional[str]:
+    url, read = _REGISTRY[ecosystem]
+    data, err = _get_json(url.format(name))
+    return read(data) if not err and isinstance(data, dict) else None
+
+
+def package_safety(query: str) -> dict:
+    """OSV advisories for the package the question names.
+
+    verdict_docs: advisories with a CVE id and a fix newer than the checked
+    version -- the only live evidence allowed near the verdict, because
+    "Patch now" is then advice the user can follow. answer_docs: every
+    advisory, unfixed and CVE-less ones included, for the paragraph. A clean
+    result is stated, never turned into a green light.
+    """
+    out = {"verdict_docs": [], "answer_docs": []}
+    ref = package_ref(query)
+    if not ref:
+        return out | {"meta": _meta("package_safety", "OSV", [], "no package named", False)}
+    name, eco, asked = ref
+    ecos = [eco] if eco else ["PyPI", "npm"]
+    found = next(((e, v) for e in ecos for v in [_latest(name, e)] if v), None)
+    if not found:
+        return out | {"meta": _meta("package_safety", "OSV", [],
+                                    f"{name} not found on {' or '.join(ecos)}", False)}
+    eco, latest = found
+    version = asked or latest
+    source = f"OSV via {eco}, {name} {version}"
+    data, err = _get_json(OSV_QUERY, post={"version": version,
+                                           "package": {"name": name, "ecosystem": eco}})
+    if err or not isinstance(data, dict):
+        return out | {"meta": _meta("package_safety", source, [], err or "bad reply", True)}
+    import guardrail
+    for v in data.get("vulns") or []:
+        vid = str(v.get("id", ""))
+        cves = [a for a in [vid, *(v.get("aliases") or [])] if str(a).upper().startswith("CVE-")]
+        fixes = [ev["fixed"] for aff in v.get("affected") or () for rg in aff.get("ranges") or ()
+                 for ev in rg.get("events") or () if "fixed" in ev]
+        newer = [f for f in fixes if _newer(f, version)]
+        summary = guardrail.scrub(str(v.get("summary") or v.get("details") or "")[:300])[0]
+        url = f"https://osv.dev/vulnerability/{vid}"
+        date = str(v.get("published") or "")[:10]
+        if newer:
+            fix = min(newer, key=_vkey)
+            text = (f"{name} {version}: {vid} ({', '.join(cves) or 'no CVE id'}) {summary}. "
+                    f"Fixed in {fix}.")
+            if cves:
+                out["verdict_docs"].append({"title": vid, "text": text, "body": text, "url": url,
+                                            "source": "cve", "is_cve": True, "date": date})
+        else:
+            text = f"{name} {version}: unfixed advisory {vid}, no fixed release yet. {summary}"
+        d = _doc({"title": vid, "body": text, "url": url}, f"OSV - {vid}", date, "osv.dev")
+        if d:
+            out["answer_docs"].append(d)
+    if not out["answer_docs"]:
+        d = _doc({"title": f"{name} {version}", "url": f"https://osv.dev/list?q={name}",
+                  "body": f"OSV: no known advisories against {name} {version}."},
+                 f"OSV - {name} {version}", "", "osv.dev")
+        out["answer_docs"] = [d] if d else []
+    return out | {"meta": _meta("package_safety", source, out["answer_docs"], None, True)}
