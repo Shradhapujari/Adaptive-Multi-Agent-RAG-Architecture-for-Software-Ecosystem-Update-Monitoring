@@ -1,7 +1,56 @@
 """Reasons an eval run cannot carry a research claim (the run gate)."""
 
+import fcntl
+import json
 import os
 import subprocess
+import sys
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+import corpus_snapshot
+
+# One eval per host, not per checkout: every worktree shares this file.
+LOCK_PATH = os.path.expanduser("~/.marag_eval.lock")
+
+
+class Busy(Exception):
+    def __init__(self, pid: str):
+        super().__init__(f"another eval is running (pid {pid})")
+        self.pid = pid
+
+
+def hold_lock(path: str):
+    """Take the host lock; the caller keeps the returned file open. Stale files don't block."""
+    f = open(path, "a+")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        f.seek(0)
+        pid = f.read().strip() or "unknown"
+        f.close()
+        raise Busy(pid) from None
+    f.seek(0)
+    f.truncate()
+    f.write(str(os.getpid()))
+    f.flush()
+    return f
+
+
+def split_of(dataset_path: str) -> str:
+    """"split" from <dataset>.manifest.json; "dev" if the file or key is missing."""
+    base = dataset_path
+    for ext in (".jsonl", ".json"):
+        if base.endswith(ext):
+            base = base[:-len(ext)]
+            break
+    try:
+        with open(base + ".manifest.json") as f:
+            return json.load(f).get("split") or "dev"
+    except (OSError, ValueError, AttributeError):
+        return "dev"
 
 
 def git_state(root: str) -> tuple[str, bool]:
@@ -25,7 +74,7 @@ def refusals(corpus: str, prediction: str, git_dirty: bool) -> list[str]:
         out.append("live-corpus: no MARAG_CORPUS snapshot, so sources can move between arms")
     elif mode == "replay":
         out.append("lenient-replay: replay serves live on a miss; use strict:<dir>")
-    elif mode == "record" and os.path.exists(os.path.join(d, ".replayed")):
+    elif mode == "record" and os.path.exists(os.path.join(d, corpus_snapshot.REPLAYED)):
         out.append("record-into-replayed: this snapshot was replayed; recording into it mutates a frozen corpus")
     if git_dirty:
         out.append("dirty-tree: tracked files differ from HEAD, so the run is not reproducible")

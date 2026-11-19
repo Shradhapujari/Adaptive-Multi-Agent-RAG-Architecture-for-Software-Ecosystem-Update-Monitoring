@@ -58,6 +58,8 @@ import multiagent_rag_v3 as marag
 from .judge import Judge, cache_tag
 from .metrics import retrieval_metrics, mean_ci
 from . import report as report_mod
+from . import preflight
+from datetime import datetime, timezone
 
 
 QRELS_CACHE = "qrels_cache.json"
@@ -518,6 +520,19 @@ def run(cfg: EvalConfig) -> str:
         print(f"[harness] judge answer-score parse failures: {_jf}/{_jc} "
               f"({100.0 * _jf / _jc:.1f}%) -- scored as None, excluded from the means")
     cfg_dict["dataset_hash"] = ds_hash
+    # The run gate, recorded on every run: run() never exits on a refusal
+    # (main() does), so a direct call is simply marked diagnostic.
+    _sha, _dirty = preflight.git_state(_ROOT)
+    _refused = preflight.refusals(cfg.corpus, cfg.prediction, _dirty)
+    _split = preflight.split_of(cfg.dataset if os.path.isabs(cfg.dataset)
+                                else os.path.join(_ROOT, cfg.dataset))
+    cfg_dict.update(git_sha=_sha, git_dirty=_dirty, prediction=cfg.prediction,
+                    preflight_refusals=_refused, diagnostic=bool(_refused),
+                    split=_split)
+    if _split == "test":
+        with open(os.path.join(cfg.results_dir, "test_split_looks.log"), "a") as f:
+            f.write("\t".join([datetime.now(timezone.utc).isoformat(), run_id,
+                              _sha, cfg.prediction.replace("\n", " ")]) + "\n")
     cfg_dict["n_questions"] = len(records)
     # Which arm this run actually is. Reading it back off the environment at
     # write time would be a guess; ask the reranker the harness really used.
@@ -580,7 +595,7 @@ def run(cfg: EvalConfig) -> str:
     return run_dir
 
 
-def _parse_args() -> EvalConfig:
+def _parse_args(argv=None) -> EvalConfig:
     cfg = EvalConfig()
     p = argparse.ArgumentParser(description="Multi-Agent RAG System Tier-1 evaluation harness")
     p.add_argument("--dataset", default=cfg.dataset)
@@ -613,7 +628,11 @@ def _parse_args() -> EvalConfig:
     p.add_argument("--corpus", default=cfg.corpus,
                    help="record:<dir> | replay:<dir> — freeze the live sources "
                         "so arms of an ablation see identical documents")
-    a = p.parse_args()
+    p.add_argument("--prediction", default=cfg.prediction,
+                   help="one line: what you expect this run to show, stated before it runs")
+    p.add_argument("--diagnostic", action="store_true",
+                   help="run even though preflight refuses it; the run cannot be quoted")
+    a = p.parse_args(argv)
     cfg.dataset = a.dataset
     cfg.stratify = a.stratify
     cfg.limit = a.limit
@@ -627,8 +646,29 @@ def _parse_args() -> EvalConfig:
     cfg.resume = a.resume
     cfg.exclude_own_post = a.exclude_own_post
     cfg.dump_pools = a.dump_pools
+    cfg.prediction = a.prediction
+    cfg.diagnostic = a.diagnostic
     return cfg
 
 
+def main(argv=None) -> int:
+    cfg = _parse_args(argv)
+    try:
+        _lock = preflight.hold_lock(preflight.LOCK_PATH)  # held until exit
+    except preflight.Busy as e:
+        print(f"[harness] refusing to start: an eval is already running (pid {e.pid})",
+              file=sys.stderr)
+        return 3
+    _sha, dirty = preflight.git_state(_ROOT)
+    why = preflight.refusals(cfg.corpus, cfg.prediction, dirty)
+    if why and not cfg.diagnostic:
+        print("[harness] refusing to start:\n  " + "\n  ".join(why)
+              + "\npass --diagnostic to run anyway; a diagnostic run cannot be quoted",
+              file=sys.stderr)
+        return 2
+    run(cfg)
+    return 0
+
+
 if __name__ == "__main__":
-    run(_parse_args())
+    sys.exit(main())
