@@ -1,0 +1,9 @@
+# DemoMain3.py only -- the legacy ReAct-agent demo that run_all.sh runs.
+# Kept out of requirements.txt on purpose: that file is what the public
+# Streamlit app installs, and this demo is a command-line extra.
+# langchain 1.x removed create_react_agent/AgentExecutor; langchain-classic
+# still ships them.
+-r requirements.txt
+langchain-classic>=1.0.0
+langchain-core>=1.0.0
+langchain-ollama>=1.1.0
