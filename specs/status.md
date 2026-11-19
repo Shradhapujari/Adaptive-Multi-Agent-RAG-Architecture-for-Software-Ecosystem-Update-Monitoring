@@ -5,8 +5,8 @@ where things stand, then `specs/roadmap.md` for the phase definitions, then §14
 for the paper track's history. **Update this file at the end of a work session**, not
 just the code.
 
-Last updated: **2026-09-29** (§15 is where things stand and what is left --
-start there; §14 is the paper track, merged in from `HANDOFF.md`;
+Last updated: **2026-11-19** (§16 is the Week 13 update, 12–19 Nov -- start
+there; §15 is where things stood on 2026-09-29; §14 is the paper track, merged in from `HANDOFF.md`;
 §13 is the Streamlit demo blocker and its retests; §12 is the rules-file ablation; §11 is the Week 3 update;
 §10 is the Week 2 update and the sections above it are the 2026-08-31 snapshot
 from the infra/eval-side session, all kept verbatim so the record of what was
@@ -1366,3 +1366,82 @@ that was merely irrelevant — is not detectable mechanically and never will be.
 Budget a full read before submission regardless of what CI says.
 
 No `run_eval` process was running when this was written.
+
+---
+
+## 16. Week 13 update — 2026-11-19 (COMP 291 Week 13, review window 12–19 Nov)
+
+Everything below is on `main` through PRs #139, #140, #142, #143, #144 and #145.
+**1170 tests pass** (`pytest -q tests`, 2026-11-18; 1115 on 2026-11-12). No
+`run_eval` process was running when this was written.
+
+### 16.1 What landed
+
+**The answer's count is the sources it cites** (advisor feedback, PRs #143 and
+#144). Live on "What security fixes are in the latest Firefox?" (2026-11-17), the
+verdict line said "7 advisory document(s)" and the headline "fixed 7 security
+bug(s)", the paragraph cited 5, and the Sources tab listed 15 rows.
+`guardrail.check()` already compared counts with citations, but it ran on the
+model's paragraph before `present_answer` prefixed the verdict line, so it never
+saw the 7.
+
+- `155722a` -- `check()` takes the verdict line as `lead` and checks its counts
+  against the paragraph's citations. A mismatch goes back to the model once,
+  then falls back to the rule-based paragraph, which cites everything it counts.
+  The Community reports metric now counts the Community tab's rows (it said 5
+  beside a tab of 4).
+- `2b2facd` -- the Sources tab lists only what the verdict or the answer cites,
+  under "N cited · M more retrieved, not cited".
+- Re-run after both: 7 in the verdict line, the headline and the citations; the
+  Sources tab said 11 cited, the paragraph's 11 citations (checked in the
+  console 2026-11-18).
+- Cost: when the model under-cites twice the reader gets the plainer
+  rule-based wording. Grounded, less fluent.
+
+**Verdict rules** (`decide.py`, PR #140), each from a real wrong answer:
+an unread advisory or community feed makes "safe" abstain (`fc18920`); a cut
+advisory's runtime is not its owner (`36a5cce`); "lost", "missing" and
+"disappeared" count as problem reports (`4f4f2af`); no asked version caps
+confidence at 0.8 instead of 1.00 (`7b7fb79`).
+
+**Evidence** (PR #142): live NVD feed and a Guardrails panel that switches real
+steps (`8736565`); an empty live feed is not an outage, and the store fallback
+only serves rows from the last 14 days (`5fb36c6`); the vendor filter may empty
+the release pool instead of restoring rows it rejected (`71f530d`); opt-in
+model-assisted version reading, kept only if the cited document states it
+(`154583f`).
+
+**Vendor matching** (PR #139): generic catalogue words no longer crowd out the
+product (`fd4f414`), and "safe" is a catalogue entry, not a product (`df7d6d1`).
+
+**Console** (PR #142, #145): the pipeline drawn as a strip above the question
+box with each step's time and finding (`c7fca1c`); off-topic questions declined
+before searching (`21771bd`); the template answer's metadata header is no
+longer its headline (`d3c8bfe`).
+
+**Paper** (`71c0f90`): the decision console described; the Qwen re-judge
+withdrawn rather than swapped in, because the comparison was confounded.
+
+### 16.2 What did not move
+
+1. **Annotation pilot and κ** -- no labels committed since 2026-10-09; third
+   week slipped. The interim report still has no abstention-quality number.
+2. **LLM retrieval judge on b500** -- not run since 2026-11-12.
+3. **Reddit fetch time** -- unchanged, and no longer the bottleneck: on a
+   full-pipeline question writing the answer paragraph takes 47–62 s, while the
+   verdict takes 0.0 s (rules) and the fetches about 15 s.
+
+### 16.3 Corrections to §15.2
+
+- Item 5 is stale: the console answers live questions (the Firefox and Node.js
+  runs above), so "the Streamlit demo still declines every question" no longer
+  holds.
+- Items 1–4 were not revisited this week.
+
+### 16.4 Next week (to 2026-11-26)
+
+1. Annotation pilot, 30–50 rows, and κ.
+2. LLM retrieval judge on b500.
+3. Faster answers: a shorter presenter prompt or a smaller presenter model.
+4. Widen comparison detection ("is zoom better or teams?" misses it), with a test.
+5. Push to `main` by Friday noon.
