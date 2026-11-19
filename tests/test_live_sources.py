@@ -64,3 +64,123 @@ def test_frozen_paper_modules_do_not_import_live_sources():
     for f in frozen:
         assert not re.search(r"\bimport live_sources\b|\bfrom live_sources\b",
                              (root / f).read_text()), f
+
+
+# ─────────────────────────────────────────────── Task 3: answer-only fetchers
+
+def _search_returns(monkeypatch, hits, err=None, seen=None):
+    def fake(q, limit=5, timelimit=None, news=False):
+        if seen is not None:
+            seen.append({"q": q, "timelimit": timelimit, "news": news})
+        return list(hits), err
+    monkeypatch.setattr(websearch, "search", fake)
+
+
+def _json_by_url(monkeypatch, table):
+    """Stub _get_json: table maps a URL substring to (data, error)."""
+    def fake(url, post=None, timeout=10):
+        for key, val in table.items():
+            if key in url:
+                return val
+        return None, "HTTP 404"
+    monkeypatch.setattr(L, "_get_json", fake)
+
+
+def test_down_now_reads_status_page(monkeypatch):
+    _json_by_url(monkeypatch, {"githubstatus.com": ({"status": {"description": "Partial Outage"},
+        "incidents": [{"name": "Actions delayed", "status": "investigating",
+                       "updated_at": "2026-11-19T10:00:00Z"}]}, None)})
+    docs, meta = L.fetch("down_now", "Is GitHub down?")
+    assert meta["resolved"] and meta["error"] is None and meta["source"] == "GitHub status page"
+    assert "Partial Outage" in docs[0]["text"] and "Actions delayed" in docs[0]["text"]
+    assert docs[0]["label"] == "Status page - githubstatus.com"
+    assert docs[0]["text"].startswith("[untrusted:community]")
+
+
+def test_status_page_failure_falls_back_to_incident(monkeypatch):
+    _json_by_url(monkeypatch, {"githubstatus.com": (None, "HTTP 503")})
+    _search_returns(monkeypatch, [{"title": "GitHub outage", "body": "b", "url": "https://n.com/a",
+                                   "date": "2026-11-19T09:00:00+00:00", "source": "N"}])
+    docs, meta = L.fetch("down_now", "Is GitHub down?")
+    assert docs and "HTTP 503" in meta["error"]
+
+
+def test_incident_newest_first_with_dates(monkeypatch):
+    seen = []
+    _search_returns(monkeypatch, [
+        {"title": "old", "body": "b", "url": "https://a.com/1", "date": "2026-11-01T00:00:00+00:00", "source": "A"},
+        {"title": "new", "body": "b", "url": "https://v.com/2", "date": "2026-11-17T22:01:21+00:00", "source": "The Verge"},
+    ], seen=seen)
+    docs, meta = L.fetch("incident", "What was the Microsoft outage about?")
+    assert [d["title"] for d in docs] == ["new", "old"]
+    assert docs[0]["label"] == "News - The Verge, 2026-11-17" and docs[0]["date"] == "2026-11-17"
+    assert seen[0] == {"q": "What was the Microsoft outage about?", "timelimit": "m", "news": True}
+    assert meta["source"] == "DuckDuckGo news, last month" and not meta["resolved"]
+
+
+def test_incident_undated_hit_sorts_last(monkeypatch):
+    _search_returns(monkeypatch, [
+        {"title": "undated", "body": "b", "url": "https://a.com/1", "source": "A"},
+        {"title": "dated", "body": "b", "url": "https://b.com/2", "date": "2026-11-10T00:00:00+00:00", "source": "B"},
+    ])
+    docs, _ = L.fetch("incident", "Microsoft outage")
+    assert [d["title"] for d in docs] == ["dated", "undated"]
+    assert docs[1]["label"] == "News - A"
+
+
+def test_incident_falls_back_to_text_when_news_is_empty(monkeypatch):
+    seen = []
+    def fake(q, limit=5, timelimit=None, news=False):
+        seen.append(news)
+        return ([] if news else [{"title": "t", "body": "b", "href": "https://w.org/x"}]), None
+    monkeypatch.setattr(websearch, "search", fake)
+    docs, _ = L.fetch("incident", "Microsoft outage")
+    assert seen == [True, False] and docs[0]["label"] == "Web - w.org"
+
+
+PY = [{"cycle": "3.10", "eol": "2026-10-31", "latest": "3.10.19"},
+      {"cycle": "3.9", "eol": "2025-10-31", "latest": "3.9.25"}]
+
+
+def test_eol_reads_cycle(monkeypatch):
+    L._eol_slugs.cache_clear()
+    _json_by_url(monkeypatch, {"all.json": (["python", "nodejs"], None), "/python.json": (PY, None)})
+    docs, meta = L.fetch("eol", "Is Python 3.9 still supported?")
+    assert meta["resolved"] and meta["source"] == "endoflife.date"
+    assert "Python 3.9: end of life 2025-10-31, latest 3.9.25" in docs[0]["text"]
+    assert docs[0]["label"] == "endoflife.date - python 3.9"
+
+
+def test_eol_alias_postgres(monkeypatch):
+    L._eol_slugs.cache_clear()
+    asked = []
+    def fake(url, post=None, timeout=10):
+        asked.append(url)
+        if url.endswith("all.json"):
+            return ["postgresql"], None
+        return [{"cycle": "13", "eol": "2025-11-13", "latest": "13.22"}], None
+    monkeypatch.setattr(L, "_get_json", fake)
+    docs, meta = L.fetch("eol", "Is Postgres 13 still supported?")
+    assert asked[-1] == "https://endoflife.date/api/postgresql.json" and meta["resolved"]
+
+
+def test_eol_unknown_slug_falls_back_to_web(monkeypatch):
+    L._eol_slugs.cache_clear()
+    _json_by_url(monkeypatch, {"all.json": (["python"], None)})
+    seen = []
+    _search_returns(monkeypatch, [{"title": "Bun EOL", "body": "b", "href": "https://bun.sh/x"}], seen=seen)
+    docs, meta = L.fetch("eol", "Is Bun 1.2 still supported?")
+    assert seen[0]["q"] == "bun end of life" and not meta["resolved"] and docs
+
+
+def test_search_error_reaches_meta(monkeypatch):
+    _search_returns(monkeypatch, [], err="search failed: RuntimeError")
+    docs, meta = L.fetch("howto", "How do I fix EACCES on npm install?")
+    assert docs == [] and meta["error"] == "search failed: RuntimeError"
+
+
+def test_compat_searches_last_year(monkeypatch):
+    seen = []
+    _search_returns(monkeypatch, [], seen=seen)
+    L.fetch("compat", "Does Django 5 support Python 3.13?")
+    assert seen[0]["timelimit"] == "y"

@@ -20,9 +20,11 @@ the console's existing behaviour, which is the old answer, not a wrong one.
 from __future__ import annotations
 
 import re
-from typing import Optional, Sequence, Tuple
+from functools import lru_cache
+from typing import List, Optional, Sequence, Tuple
 
 import graph
+import websearch
 
 KINDS = ("package_safety", "down_now", "incident", "eol", "compare", "compat", "howto")
 KIND_LABEL = {"package_safety": "Package safety", "down_now": "Is it down",
@@ -37,6 +39,12 @@ STATUS_HOSTS = {
     "docker": "www.dockerstatus.com", "discord": "discordstatus.com",
     "atlassian": "status.atlassian.com",
 }
+
+_STATUS_NAME = {"github": "GitHub", "npm": "npm", "cloudflare": "Cloudflare",
+                "openai": "OpenAI", "reddit": "Reddit", "vercel": "Vercel",
+                "docker": "Docker", "discord": "Discord", "atlassian": "Atlassian"}
+EOL_ALIASES = {"node": "nodejs", "node.js": "nodejs", "postgres": "postgresql",
+               "k8s": "kubernetes"}
 
 _I = re.I
 _PKG_CUE = re.compile(r"\b(?:package|library|module|npm|pip|pypi)\b", _I)
@@ -111,3 +119,156 @@ def kind(query: str, vendors: Sequence[str] = ()) -> Optional[str]:
     if _HOWTO.search(q) or _ERRNO.search(q):
         return "howto"
     return None
+
+
+# ─────────────────────────────────────────────────────────── fetchers
+
+def _get_json(url: str, post: Optional[dict] = None, timeout: int = 10):
+    """(data, error). Never raises: a dead source is reported, not a crash."""
+    import requests
+    try:
+        r = (requests.post(url, json=post, timeout=timeout) if post is not None
+             else requests.get(url, timeout=timeout))
+        if r.status_code >= 400:
+            return None, f"HTTP {r.status_code}"
+        return r.json(), None
+    except ValueError:
+        return None, "not JSON"
+    except Exception as e:  # noqa: BLE001
+        return None, type(e).__name__
+
+
+def _doc(hit: dict, label: str, date: str = "", host: str = "") -> Optional[dict]:
+    """A hit screened and wrapped like every web doc, then labelled."""
+    d = websearch._to_doc(0, hit)
+    if d:
+        d.update(label=label, source="live", date=date,
+                 host=host or websearch._host(d["url"]))
+    return d
+
+
+def _web_docs(hits: List[dict], news: bool) -> List[dict]:
+    out = []
+    for h in hits:
+        url = str(h.get("href") or h.get("url") or "")
+        host = websearch._host(url)
+        if news:
+            date = str(h.get("date") or "")[:10]
+            label = f"News - {h.get('source') or host}" + (f", {date}" if date else "")
+        else:
+            date, label = "", f"Web - {host}"
+        d = _doc(h, label, date, host)
+        if d:
+            out.append(d)
+    return sorted(out, key=lambda d: d["date"], reverse=True)   # undated ("") last
+
+
+def _meta(kind_: str, source: str, docs: list, error, resolved: bool) -> dict:
+    return {"kind": kind_, "source": source, "n": len(docs), "error": error,
+            "resolved": resolved}
+
+
+def _down_now(query: str):
+    product = status_product(query)
+    host = STATUS_HOSTS[product]
+    data, err = _get_json(f"https://{host}/api/v2/summary.json")
+    if err or not isinstance(data, dict):
+        docs, meta = _incident(query)
+        meta.update(kind="down_now", error=f"{_STATUS_NAME[product]} status page: {err or 'bad reply'}"
+                    + (f"; {meta['error']}" if meta["error"] else ""))
+        return docs, meta
+    name = _STATUS_NAME[product]
+    text = f"{name} status: {(data.get('status') or {}).get('description', 'unknown')}."
+    for i in data.get("incidents") or []:
+        text += (f" Incident: {i.get('name', '')} - {i.get('status', '')}"
+                 f" (updated {str(i.get('updated_at', ''))[:16]}).")
+    short = host.removeprefix("www.")
+    date = str((data.get("page") or {}).get("updated_at") or "")[:10]
+    d = _doc({"title": f"{name} status", "body": text, "url": f"https://{host}"},
+             f"Status page - {short}", date, short)
+    docs = [d] if d else []
+    return docs, _meta("down_now", f"{name} status page", docs, None, True)
+
+
+def _incident(query: str):
+    hits, err = websearch.search(query, timelimit="m", news=True)
+    if hits:
+        docs = _web_docs(hits, news=True)
+        return docs, _meta("incident", "DuckDuckGo news, last month", docs, None, False)
+    hits, err2 = websearch.search(query, timelimit="m")
+    docs = _web_docs(hits, news=False)
+    return docs, _meta("incident", "DuckDuckGo, last month", docs, err2 or err, False)
+
+
+@lru_cache(maxsize=1)
+def _eol_slugs() -> frozenset:
+    """endoflife.date's product slugs. A failed fetch raises, so it isn't cached."""
+    data, err = _get_json("https://endoflife.date/api/all.json")
+    if err or not isinstance(data, list):
+        raise LookupError(err or "bad reply")
+    return frozenset(data)
+
+
+_WORD = re.compile(r"[a-z0-9][\w.+-]*", _I)
+_NAME_BEFORE_VERSION = re.compile(r"\b([a-z][\w.+-]*)\s+v?(\d+(?:\.\d+)*)\b", _I)
+
+
+def _eol(query: str):
+    try:
+        slugs = _eol_slugs()
+    except LookupError:
+        slugs = frozenset()
+    m = _NAME_BEFORE_VERSION.search(query)
+    words = ([m.group(1).lower()] if m else []) + [w.lower() for w in _WORD.findall(query)]
+    slug = word = None
+    for w in words:
+        cand = EOL_ALIASES.get(w, w)
+        if cand in slugs:
+            slug, word = cand, w
+            break
+    if not slug:
+        name = m.group(1).lower() if m else ""
+        hits, err = websearch.search(f"{name} end of life" if name else query)
+        docs = _web_docs(hits, news=False)
+        return docs, _meta("eol", "DuckDuckGo (not on endoflife.date)", docs, err, False)
+    cycles, err = _get_json(f"https://endoflife.date/api/{slug}.json")
+    if err or not isinstance(cycles, list):
+        return [], _meta("eol", "endoflife.date", [], err or "bad reply", True)
+    vm = re.search(rf"\b{re.escape(word)}\s+v?(\d+(?:\.\d+)*)", query, _I)
+    asked = vm.group(1) if vm else None
+    pick = [c for c in cycles if asked and (str(c.get("cycle")) == asked
+                                            or asked.startswith(f"{c.get('cycle')}."))][:1]
+    pick = pick or cycles[:4]
+
+    def line(c):
+        eol = c.get("eol")
+        when = ("no end-of-life date yet" if eol is False else
+                "end of life (date not given)" if eol is True else f"end of life {eol}")
+        return f"{word.capitalize()} {c.get('cycle')}: {when}, latest {c.get('latest', '?')}"
+
+    text = "; ".join(line(c) for c in pick) + "."
+    label = f"endoflife.date - {word}" + (f" {pick[0].get('cycle')}" if len(pick) == 1 else "")
+    d = _doc({"title": f"{word} end of life", "body": text,
+              "url": f"https://endoflife.date/{slug}"}, label, "", "endoflife.date")
+    docs = [d] if d else []
+    return docs, _meta("eol", "endoflife.date", docs, None, True)
+
+
+def _plain(kind_: str, query: str, timelimit: Optional[str], source: str):
+    hits, err = websearch.search(query, timelimit=timelimit)
+    docs = _web_docs(hits, news=False)
+    return docs, _meta(kind_, source, docs, err, False)
+
+
+def fetch(kind_: str, query: str) -> Tuple[List[dict], dict]:
+    """(docs, meta) for one of the answer-only types. meta: kind, source, n,
+    error, resolved (the product was found by name in a structured source)."""
+    if kind_ == "down_now":
+        return _down_now(query)
+    if kind_ == "incident":
+        return _incident(query)
+    if kind_ == "eol":
+        return _eol(query)
+    if kind_ == "compat":
+        return _plain(kind_, query, "y", "DuckDuckGo, last year")
+    return _plain(kind_, query, None, "DuckDuckGo")
