@@ -35,6 +35,13 @@ def _sha(run_dir):
 
 
 def check(row: dict, root: str) -> list[str]:
+    try:
+        return _check(row, root)
+    except Exception as e:  # one malformed row must not stop the rest being checked
+        return [f"error {type(e).__name__}: {e}"]
+
+
+def _check(row: dict, root: str) -> list[str]:
     bad = []
     path = os.path.join(root, row["file"])
     if not os.path.exists(path) or row["quote"] not in open(path, encoding="utf-8").read():
@@ -83,7 +90,11 @@ def check(row: dict, root: str) -> list[str]:
     else:
         return bad + [f"unknown stat {stat!r} or wrong run count"]
     d = len(row["value"].split(".")[1]) if "." in row["value"] else 0
-    if round(got, d) != float(row["value"]):
+    try:
+        want = float(row["value"])
+    except ValueError:
+        return bad + [f"value {row['value']!r} is not a number"]
+    if round(got, d) != want:
         bad.append(f"value {row['value']} does not re-derive (got {got:.6g})")
     return bad
 
@@ -101,7 +112,16 @@ def main(argv) -> int:
     with open(os.path.join(a.root, a.claims), encoding="utf-8") as f:
         lines = f.read().splitlines()
     # ponytail: no quoting; a tab inside a quote cell breaks the row
-    for i, line in enumerate(lines[1:], start=2):
+    header = "\t".join(COLS)
+    first = 2
+    if lines[:1] == [header]:
+        pass
+    else:  # a bad header is a failure, and the line is then checked as data
+        n += 1
+        failed += 1
+        first = 1
+        print(f"line 1: header must be {header}")
+    for i, line in enumerate(lines[first - 1:], start=first):
         if not line.strip() or line.startswith("#"):
             continue
         n += 1

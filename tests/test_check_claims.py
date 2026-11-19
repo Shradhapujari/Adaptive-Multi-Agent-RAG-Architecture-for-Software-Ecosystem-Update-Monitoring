@@ -141,7 +141,7 @@ def _line(r):
 
 def test_main_skips_blank_and_comment_lines_and_reports_bad_rows_by_line(tmp_path, capsys):
     r = _row(tmp_path)
-    p = _claims(tmp_path, "file\tquote", "", "# note", _line(r), "too\tfew")
+    p = _claims(tmp_path, "\t".join(C.COLS), "", "# note", _line(r), "too\tfew")
     assert C.main(["--root", str(tmp_path), "--claims", p]) == 1
     out = capsys.readouterr().out
     assert "line 5" in out
@@ -150,10 +150,49 @@ def test_main_skips_blank_and_comment_lines_and_reports_bad_rows_by_line(tmp_pat
 
 def test_main_exit_code_and_footer(tmp_path, capsys):
     r = _row(tmp_path)
-    p = _claims(tmp_path, "file\tquote", _line(r))
+    p = _claims(tmp_path, "\t".join(C.COLS), _line(r))
     assert C.main(["--root", str(tmp_path), "--claims", p]) == 0
     out = capsys.readouterr().out
     assert out.rstrip().endswith("checked 1, failed 0, not re-derived 0\n"
                                  "numbers without a row in claims.tsv are not checked")
-    p = _claims(tmp_path, "file\tquote", _line(_row(tmp_path, value="0.31")))
+    p = _claims(tmp_path, "\t".join(C.COLS), _line(_row(tmp_path, value="0.31")))
     assert C.main(["--root", str(tmp_path), "--claims", p]) == 1
+
+
+def test_headerless_file_fails_but_first_claim_is_still_checked(tmp_path, capsys):
+    p = _claims(tmp_path, _line(_row(tmp_path)))
+    assert C.main(["--root", str(tmp_path), "--claims", p]) == 1
+    out = capsys.readouterr().out
+    assert "line 1: header must be file\tquote" in out
+    assert "checked 2, failed 1, not re-derived 0" in out
+
+
+def test_empty_file_fails_on_the_header(tmp_path, capsys):
+    (tmp_path / "e.tsv").write_text("")
+    assert C.main(["--root", str(tmp_path), "--claims", "e.tsv"]) == 1
+    assert "line 1: header must be" in capsys.readouterr().out
+
+
+def test_non_numeric_value_fails_that_row_and_the_next_is_checked(tmp_path, capsys):
+    r = _row(tmp_path)
+    p = _claims(tmp_path, "\t".join(C.COLS), _line({**r, "value": "abc"}), _line(r))
+    assert C.main(["--root", str(tmp_path), "--claims", p]) == 1
+    out = capsys.readouterr().out
+    assert "line 2" in out and "line 3" not in out
+    assert "checked 2, failed 1" in out
+
+
+def test_string_valued_metric_is_a_complaint_not_a_traceback(tmp_path):
+    h = _run(tmp_path, "r1", ["a", "b"])
+    out = C.check(_row(tmp_path, sha256=h), str(tmp_path))
+    assert out and any("error" in s for s in out), out
+
+
+def test_delta_with_a_config_lacking_corpus_is_a_complaint(tmp_path):
+    r = _delta(tmp_path)
+    cp = tmp_path / "results" / "r2" / "config.json"
+    c = json.loads(cp.read_text())
+    del c["corpus"]
+    cp.write_text(json.dumps(c))
+    out = C.check(r, str(tmp_path))
+    assert out and any("inadmissible" in s or "error" in s for s in out), out
