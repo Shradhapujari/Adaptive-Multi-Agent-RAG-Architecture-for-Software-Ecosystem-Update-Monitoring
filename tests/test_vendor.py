@@ -318,3 +318,11 @@ def test_a_component_named_in_a_known_product_is_not_a_second_product():
     assert set(names("Is Node.js in Ubuntu 24.04 outdated?")) == {"node.js", "ubuntu"}
     # More than one word between is not a component reading.
     assert set(names("Why are NVIDIA drivers not available in Debian Sid?")) == {"nvidia", "debian"}
+
+
+def test_a_dropped_component_is_kept_as_a_part_of_its_product():
+    cat = ["chrome", "webrtc", "node.js", "ubuntu"]
+    got = detect_vendors("Any WebRTC vulnerabilities in Chrome?", catalog=cat)
+    assert [(v.name, v.parts) for v in got] == [("chrome", ("webrtc",))]
+    got = detect_vendors("Is Node.js in Ubuntu 24.04 outdated?", catalog=cat)
+    assert all(v.parts == () for v in got)

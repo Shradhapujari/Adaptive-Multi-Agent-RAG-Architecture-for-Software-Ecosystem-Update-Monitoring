@@ -1077,7 +1077,11 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
             import nvd
             days = ((_clock().date() - temporal.window[0]).days + 1
                     if temporal.window else 90)
-            for name in g.vendor_names[:2]:
+            # A component named in the product ("WebRTC ... in Chrome") is
+            # searched as "chrome webrtc" first: NVD ANDs the words, so that
+            # finds Chrome's WebRTC CVEs, which the newest-N "chrome" search
+            # crowded out (2 of 5 citations were WebRTC, 2026-11-19).
+            for name in [f"{v.name} {p}" for v in g.vendors[:2] for p in v.parts] + g.vendor_names[:2]:
                 try:
                     shared["cve"] = shared["cve"] + nvd.fetch(
                         name, limit=max(limit * 4, 20), days=days,
