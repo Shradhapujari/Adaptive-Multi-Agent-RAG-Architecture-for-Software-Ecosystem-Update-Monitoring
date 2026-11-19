@@ -311,7 +311,31 @@ def detect_vendors(query: str, catalog: Optional[Sequence[str]] = None,
             found.append(VendorMatch(name=name, matched=name))
             claimed.append(name)
 
-    return found[:limit]
+    return _drop_components(low, found)[:limit]
+
+
+def _drop_components(low: str, found: List[VendorMatch]) -> List[VendorMatch]:
+    """"Any WebRTC vulnerabilities in Chrome?": WebRTC is a catalogue name, but
+    here it is a part of Chrome, and as a second asked product it let a Mozilla
+    WebRTC advisory answer a Chrome question (live, 2026-11-19). A name is
+    dropped when it reads "<name> [one word] in <other>", the other is a
+    product this system knows (`known_products`) and it is not -- so "Node.js
+    in Ubuntu" still asks about both.
+
+    ponytail: word-gap heuristic. Three words let "NVIDIA drivers not
+    available in Debian" drop NVIDIA; one word changes 1 of 1014 benchmark
+    questions ("AI agent have in Kubernetes"). Upgrade path is a component
+    list per product in vendor_kb.json."""
+    if len(found) < 2:
+        return found
+    known = set(known_products())
+    def part_of(a: VendorMatch) -> bool:
+        return a.name not in known and any(
+            b is not a and b.name.split()[-1] in known and re.search(   # "google chrome" too
+                rf"(?<![\w.-]){re.escape(a.matched)}(?:\s+\S+)?\s+in\s+(?:the\s+)?"
+                rf"{re.escape(b.matched)}(?![\w-])", low)
+            for b in found)
+    return [v for v in found if not part_of(v)]
 
 
 _SUGGEST_WORD = re.compile(r"[a-z][a-z0-9.+#-]*[a-z0-9+#]")

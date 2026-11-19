@@ -304,3 +304,17 @@ def test_generic_catalogue_words_do_not_crowd_out_the_product(tmp_path):
     q = ("Firefox 151: Weather from New Tab Page disappeared and there's no "
          "option in settings anymore. How to get it back?")
     assert [v.name for v in detect_vendors(q, catalog)] == ["firefox"]
+
+
+def test_a_component_named_in_a_known_product_is_not_a_second_product():
+    """"Any WebRTC vulnerabilities in Chrome?" asked about webrtc too, which let
+    a Mozilla WebRTC advisory answer a Chrome question (2026-11-19)."""
+    cat = ["chrome", "google chrome", "webrtc", "node.js", "ubuntu", "nvidia", "debian"]
+    names = lambda q: [v.name for v in detect_vendors(q, catalog=cat)]
+    assert names("Any WebRTC vulnerabilities in Chrome?") == ["chrome"]
+    assert names("WebRTC bugs in Google Chrome") == ["google chrome"]
+    assert names("Any WebRTC vulnerabilities?") == ["webrtc"]
+    # A known product in another stays: the question is about both.
+    assert set(names("Is Node.js in Ubuntu 24.04 outdated?")) == {"node.js", "ubuntu"}
+    # More than one word between is not a component reading.
+    assert set(names("Why are NVIDIA drivers not available in Debian Sid?")) == {"nvidia", "debian"}
