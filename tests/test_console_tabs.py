@@ -169,3 +169,18 @@ def test_chrome_release_rows_are_labelled_with_their_channel(monkeypatch):
     monkeypatch.setattr(app_1.requests, "get", lambda *a, **k: (_ for _ in ()).throw(OSError()))
     assert "Channel" not in app_1._label_channels(rows)[0]
     app_1._chrome_channels.cache_clear()
+
+
+def test_unshipped_chrome_builds_are_dropped_before_the_answer(monkeypatch):
+    monkeypatch.setattr(app_1, "_chrome_channels", lambda _h: {
+        "157.0.8103": "stable", "159.0.8154": "beta", "160.0.8157": "dev", "160.0.8170": "canary"})
+    rows = [{"product": "Chrome", "version": v, "is_cve": False}
+            for v in ("157.0.8103", "159.0.8154", "160.0.8157", "160.0.8170", "159.0.8147")]
+    adv = {"product": "chrome", "version": "160.0.8170", "is_cve": True}    # advisory: kept
+    ff = {"product": "Firefox", "version": "160.0.0", "is_cve": False}       # not Chrome: kept
+    kept = app_1._drop_prerelease(rows + [adv, ff])
+    assert [r["version"] for r in kept] == ["157.0.8103", "159.0.8154", "160.0.8170", "160.0.0"]
+    assert adv in kept and ff in kept
+    # API down: nothing dropped.
+    monkeypatch.setattr(app_1, "_chrome_channels", lambda _h: {})
+    assert app_1._drop_prerelease(rows) == rows

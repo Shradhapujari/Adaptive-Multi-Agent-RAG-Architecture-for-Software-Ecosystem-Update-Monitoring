@@ -1135,6 +1135,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         # evidence for a question about a deleted kernel.
         results["community"] = vendor.filter_community(results["community"],
                                                        g.vendors, terms=g.terms)
+    results["releases"] = _drop_prerelease(results["releases"])
 
     # The CVE feed is Reddit, not an advisory feed, so it gets the same vendor
     # scoping as the community pool and then has to prove it is about security
@@ -1385,6 +1386,7 @@ def run_fast(query: str, limit: int = 5, source: str = "agent") -> Optional[dict
     rows = vendor.filter_by_vendor(rows, g.vendors)
     shipped = [r for r in rows if not r.get("is_cve") and vendor.is_release_record(r)]
     advisories = [r for r in rows if r not in shipped]
+    shipped = _drop_prerelease(shipped)
     if _latest_release(shipped, query) is None:
         return None
     t_fetch = round(time.time() - t0, 2)
@@ -2206,6 +2208,26 @@ def _chrome_channels(_hour: int) -> Dict[str, str]:
     except Exception:
         return {}
     return out
+
+
+_SHIPPED_CHANNELS = {"stable", "extended", "beta"}
+
+
+def _drop_prerelease(rows: list) -> list:
+    """Chrome release rows that never reached a stable, extended or beta user
+    -- canary, dev, or a branch tag on no channel -- removed, so neither the
+    answer nor the verdict cites one. The answer cited four 160.x Canary
+    builds as releases (live, 2026-11-19). API down: rows kept as they are."""
+    def build(r):
+        if str(r.get("product", "")).lower() != "chrome" or r.get("is_cve"):
+            return None
+        return ".".join(str(r.get("version", "")).split(".")[:3]) or None
+    if not any(build(r) for r in rows):
+        return rows
+    known = _chrome_channels(int(time.time() // 3600))
+    if not known:
+        return rows
+    return [r for r in rows if not (b := build(r)) or known.get(b) in _SHIPPED_CHANNELS]
 
 
 def _label_channels(rows: list) -> list:
