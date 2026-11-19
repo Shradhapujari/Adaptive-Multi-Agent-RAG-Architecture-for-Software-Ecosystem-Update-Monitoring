@@ -196,13 +196,13 @@ def osv(*vulns):
 
 
 FIXED = {"id": "GHSA-9wx4-h78v-vm56", "aliases": ["CVE-2024-35195"], "summary": "Session verify bypass",
-         "affected": [{"ranges": [{"events": [{"introduced": "0"}, {"fixed": "2.32.0"}]}]}]}
+         "affected": [{"ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "2.32.0"}]}]}]}
 UNFIXED = {"id": "GHSA-aaaa", "aliases": ["CVE-2026-1"], "summary": "x",
-           "affected": [{"ranges": [{"events": [{"introduced": "0"}]}]}]}
+           "affected": [{"ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}]}]}]}
 NO_CVE = {"id": "PYSEC-2026-1", "aliases": [], "summary": "y",
-          "affected": [{"ranges": [{"events": [{"introduced": "0"}, {"fixed": "2.32.0"}]}]}]}
+          "affected": [{"ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "2.32.0"}]}]}]}
 OLD_FIX = {"id": "GHSA-old", "aliases": ["CVE-2018-1"], "summary": "z",   # fix older than the asked version
-           "affected": [{"ranges": [{"events": [{"introduced": "0"}, {"fixed": "2.20.0"}]}]}]}
+           "affected": [{"ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "2.20.0"}]}]}]}
 
 
 @pytest.fixture
@@ -295,8 +295,8 @@ def test_osv_failure_is_an_error_not_clean(stub):
 
 def test_lowest_newer_fix_is_named_in_version_order(stub):
     two = {"id": "GHSA-two", "aliases": ["CVE-2026-2"], "summary": "s",
-           "affected": [{"ranges": [{"events": [{"introduced": "0"}, {"fixed": "2.10.0"}]},
-                                    {"events": [{"introduced": "2.31.0"}, {"fixed": "2.9.0"}]}]}]}
+           "affected": [{"ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "2.10.0"}]},
+                                    {"type": "ECOSYSTEM", "events": [{"introduced": "2.31.0"}, {"fixed": "2.9.0"}]}]}]}
     stub.table["api.osv.dev"] = (osv(two), None)
     r = L.package_safety("Is requests 2.8.0 safe? (pip)")
     assert "Fixed in 2.9.0." in r["verdict_docs"][0]["text"]
@@ -305,3 +305,74 @@ def test_lowest_newer_fix_is_named_in_version_order(stub):
 def test_bare_a_or_b_is_a_comparison():
     assert L.kind("Postgres or MySQL for a new project?") == "compare"
     assert L.kind("React or Vue in 2026?") == "compare"
+
+
+# ─────────────────────────────────────────────── final review fixes
+
+def test_git_commit_fix_is_not_a_fixed_release(stub):
+    """Review #2: PYSEC ranges carry GIT commits; a SHA is not a release."""
+    git_only = {"id": "PYSEC-2026-9", "aliases": ["CVE-2026-9"], "summary": "s",
+                "affected": [{"ranges": [{"type": "GIT", "repo": "https://github.com/psf/requests",
+                                          "events": [{"introduced": "0"},
+                                                     {"fixed": "74ea7cf7a6a27a4eeb2ae24e162bcc942a6706d5"}]}]}]}
+    stub.table["api.osv.dev"] = (osv(git_only), None)
+    r = L.package_safety(REQ)
+    assert r["verdict_docs"] == [] and "no fixed release yet" in r["answer_docs"][0]["text"]
+
+
+def test_fix_for_another_package_does_not_count(stub):
+    other = {"id": "GHSA-o", "aliases": ["CVE-2026-8"], "summary": "s",
+             "affected": [{"package": {"name": "requests-toolbelt", "ecosystem": "PyPI"},
+                           "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "9.0"}]}]}]}
+    stub.table["api.osv.dev"] = (osv(other), None)
+    assert L.package_safety(REQ)["verdict_docs"] == []
+
+
+def test_verdict_row_names_its_cve_and_fix_in_the_paragraph(stub):
+    """Review #3: the row behind "Yes, update now" reached the paragraph blank."""
+    import answer_agent
+    stub.table["api.osv.dev"] = (osv(FIXED), None)
+    r = L.package_safety(REQ)
+    ev = answer_agent.collect_evidence({"decision_advisories": r["verdict_docs"]})
+    assert "CVE-2024-35195" in ev[0].label and "Fixed in 2.32.0" in ev[0].detail
+
+
+def test_news_publisher_name_is_scrubbed_and_capped(monkeypatch):
+    """Review #4: the publisher field sits outside the [untrusted] wrapper."""
+    _search_returns(monkeypatch, [{"title": "t", "body": "b", "url": "https://n.com/a",
+                                   "date": "2026-11-19T00:00:00+00:00", "source": "Evil\u200b" * 50}])
+    docs, _ = L.fetch("incident", "Microsoft outage")
+    label = docs[0]["label"]
+    assert "\u200b" not in label and len(label) <= len("News - ") + 60 + len(", 2026-11-19")
+
+
+def test_eol_never_answers_for_a_stray_word(monkeypatch):
+    """Review #5: "go" in "should I go with Deno" picked Go, stated as fact."""
+    L._eol_slugs.cache_clear()
+    _json_by_url(monkeypatch, {"all.json": (["go", "python"], None)})
+    seen = []
+    _search_returns(monkeypatch, [{"title": "Bun EOL", "body": "b", "href": "https://bun.sh/x"}], seen=seen)
+    docs, meta = L.fetch("eol", "Is Bun 1.2 still supported or should I go with Deno?")
+    assert not meta["resolved"] and seen[0]["q"] == "bun end of life"
+
+
+def test_eol_site_down_is_reported_not_called_missing(monkeypatch):
+    L._eol_slugs.cache_clear()
+    _json_by_url(monkeypatch, {"all.json": (None, "HTTP 503")})
+    _search_returns(monkeypatch, [])
+    _, meta = L.fetch("eol", "Is Python 3.9 still supported?")
+    assert "endoflife.date unreachable" in meta["source"] and "HTTP 503" in meta["error"]
+
+
+@pytest.mark.parametrize("q,want", [
+    ("Is GitHub down?", True), ("Is Python 3.9 still supported?", True),
+    ("Does Django 5 support Python 3.13?", True), ("Postgres or MySQL for a new project?", True),
+    ("Does Chrome 131 fix CVE-2024-1234?", False),
+    ("What does the latest Chrome update fix?", False),
+    ("Kernel panic after update - how to fix?", False),
+    ("Is Docker Desktop 4.36 safe to update? My container went down", False),
+    ("VS Code updated and keeps freezing", False),
+])
+def test_answer_only_needs_no_update_or_security_words(q, want):
+    """Review #1: an update/CVE question that also reads as how-to keeps its verdict."""
+    assert L.answer_only(L.kind(q), q) is want

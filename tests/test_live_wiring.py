@@ -142,7 +142,7 @@ def test_live_answer_headline_is_the_answer_not_an_abstention(monkeypatch):
         monkeypatch.setattr(app_1.st, fn, lambda s, *a, **k: shown.append(str(s)))
     app_1._tab_short({"decision": None, "original_query": "Is Python 3.9 still supported?",
                       "live": {"kind": "eol", "source": "endoflife.date", "n": 1, "error": None,
-                               "resolved": True}},
+                               "resolved": True, "answer_only": True}},
                      PresentedAnswer("Python 3.9 reached end of life on 2025-10-31 [S1].", "llm"))
     assert shown[1] == "### Python 3.9 reached end of life on 2025-10-31."   # headlines drop [S1]
     assert any("End of life question → endoflife.date" in s for s in shown)
@@ -164,8 +164,28 @@ def test_osv_rows_are_attributed_to_osv_in_sources(monkeypatch):
     """Live check 2026-11-19: OSV advisories were listed as "CISA KEV / NVD"."""
     monkeypatch.setattr(live_sources, "_get_json", lambda url, post=None, timeout=10: (
         ({"vulns": [{"id": "GHSA-x", "aliases": ["CVE-2024-1"], "summary": "s",
-                     "affected": [{"ranges": [{"events": [{"introduced": "0"}, {"fixed": "2.32.0"}]}]}]}]}, None)
+                     "affected": [{"ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "2.32.0"}]}]}]}]}, None)
         if post else ({"info": {"version": "2.34.2"}}, None)))
     pkg = live_sources.package_safety("Is requests 2.31.0 safe? (pip)")
     rows = app_1._source_rows({"decision_advisories": pkg["verdict_docs"]})
     assert [r["Tier"] for r in rows] == ["OSV"]
+
+
+
+def test_cve_question_keeps_its_verdict_with_web_on(empty_lake, monkeypatch):
+    """Review #1: "fix" made this a how-to, and "Patch now" disappeared."""
+    adv = {"title": "Chrome CVE-2024-1234", "notes": "CVE-2024-1234 use after free in Google Chrome",
+           "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-1234", "is_cve": True, "product": "chrome"}
+    monkeypatch.setattr(app_1, "terminal_sources",
+                        lambda *a, **k: ({"community": [], "releases": [], "cve": [adv]}, []))
+    r = app_1.run_pipeline("Does Chrome 131 fix CVE-2024-1234?", show_steps=False, web_fallback=True)
+    assert r["decision"] is not None and not r["live"]["answer_only"]
+    assert r["web"][-1]["url"] == "https://www.githubstatus.com"   # appended, not leading
+
+
+def test_clean_package_result_carries_no_verdict(empty_lake, monkeypatch):
+    """Review #10: with no OSV hit the feed pool is unscoped, and its "safe" would be a false green."""
+    monkeypatch.setattr(live_sources, "package_safety", lambda q: {
+        "verdict_docs": [], "answer_docs": [dict(ANSWER_DOC)], "meta": dict(PKG_META)})
+    r = app_1.run_pipeline("Is the requests package safe to use?", show_steps=False, web_fallback=True)
+    assert r["decision"] is None and r["live"]["answer_only"]

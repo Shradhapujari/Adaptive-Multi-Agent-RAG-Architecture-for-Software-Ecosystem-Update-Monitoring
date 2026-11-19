@@ -47,6 +47,13 @@ EOL_ALIASES = {"node": "nodejs", "node.js": "nodejs", "postgres": "postgresql",
                "k8s": "kubernetes"}
 
 _I = re.I
+# Types whose answer replaces the act/hold verdict -- unless the question also
+# talks about an update or a security fix, in which case the verdict stays and
+# the live docs are extra context. "Does Chrome 131 fix CVE-2024-1234?" reads
+# as a how-to ("fix") and lost its "Patch now" before this (review, 2026-11-19).
+ANSWER_ONLY = frozenset({"down_now", "incident", "eol", "compare", "compat", "howto"})
+_UPDATE_CUE = re.compile(r"\b(?:updat\w*|upgrad\w*|patch\w*|cves?|cve-\d+-\d+|vulnerab\w*"
+                         r"|exploit\w*|security|safe|releases?|released)\b", re.I)
 _PKG_CUE = re.compile(r"\b(?:package|library|module|npm|pip|pypi)\b", _I)
 _SAFETY = re.compile(r"\b(?:safe|unsafe|vulnerab\w*|secure|malicious|compromised|backdoor\w*|cves?)\b", _I)
 _DOWN = re.compile(r"\b(?:is|are)\b.*\bdown\b|\bdown (?:right )?now\b|\bnot (?:working|loading)\b", _I)
@@ -100,6 +107,12 @@ def package_ref(query: str) -> Optional[Tuple[str, Optional[str], Optional[str]]
     after = query[query.lower().index(name) + len(name):]
     v = _VERSION.search(after)
     return name, _ecosystem(query), v.group(1) if v else None
+
+
+def answer_only(kind_: Optional[str], query: str) -> bool:
+    """Does the live answer stand in for the verdict? Package safety decides
+    this from its own result (no OSV verdict row -> no verdict)."""
+    return kind_ in ANSWER_ONLY and not _UPDATE_CUE.search(query or "")
 
 
 def kind(query: str, vendors: Sequence[str] = ()) -> Optional[str]:
@@ -156,7 +169,9 @@ def _web_docs(hits: List[dict], news: bool) -> List[dict]:
         host = websearch._host(url)
         if news:
             date = str(h.get("date") or "")[:10]
-            label = f"News - {h.get('source') or host}" + (f", {date}" if date else "")
+            import guardrail
+            pub = guardrail.scrub(guardrail.normalize(str(h.get("source") or "")))[0].strip()[:60] or host
+            label = f"News - {pub}" + (f", {date}" if date else "")
         else:
             date, label = "", f"Web - {host}"
         d = _doc(h, label, date, host)
@@ -216,12 +231,16 @@ _NAME_BEFORE_VERSION = re.compile(r"\b([a-z][\w.+-]*)\s+v?(\d+(?:\.\d+)*)\b", _I
 
 
 def _eol(query: str):
+    site_err = None
     try:
         slugs = _eol_slugs()
-    except LookupError:
-        slugs = frozenset()
+    except LookupError as e:
+        slugs, site_err = frozenset(), str(e)
     m = _NAME_BEFORE_VERSION.search(query)
-    words = ([m.group(1).lower()] if m else []) + [w.lower() for w in _WORD.findall(query)]
+    # The name before the version, or (no version) a capitalised word: any
+    # word at all let "should I go with Deno" pick Go and state it as fact.
+    words = ([m.group(1).lower()] if m else
+             [w.lower() for w in _WORD.findall(query) if w[:1].isupper()])
     slug = word = None
     for w in words:
         cand = EOL_ALIASES.get(w, w)
@@ -232,6 +251,9 @@ def _eol(query: str):
         name = m.group(1).lower() if m else ""
         hits, err = websearch.search(f"{name} end of life" if name else query)
         docs = _web_docs(hits, news=False)
+        if site_err:
+            return docs, _meta("eol", "DuckDuckGo (endoflife.date unreachable)", docs,
+                               f"endoflife.date: {site_err}" + (f"; {err}" if err else ""), False)
         return docs, _meta("eol", "DuckDuckGo (not on endoflife.date)", docs, err, False)
     cycles, err = _get_json(f"https://endoflife.date/api/{slug}.json")
     if err or not isinstance(cycles, list):
@@ -338,10 +360,14 @@ def package_safety(query: str) -> dict:
     for v in data.get("vulns") or []:
         vid = str(v.get("id", ""))
         cves = [a for a in [vid, *(v.get("aliases") or [])] if str(a).upper().startswith("CVE-")]
-        fixes = [ev["fixed"] for aff in v.get("affected") or () for rg in aff.get("ranges") or ()
+        # Release fixes only: GIT ranges carry commit SHAs, which aren't a
+        # release anyone can install; and only this package's entries.
+        fixes = [ev["fixed"] for aff in v.get("affected") or ()
+                 if str((aff.get("package") or {}).get("name") or name).lower() == name.lower()
+                 for rg in aff.get("ranges") or () if rg.get("type") in ("ECOSYSTEM", "SEMVER")
                  for ev in rg.get("events") or () if "fixed" in ev]
         newer = [f for f in fixes if _newer(f, version)]
-        summary = guardrail.scrub(str(v.get("summary") or v.get("details") or "")[:300])[0]
+        summary = guardrail.scrub(guardrail.normalize(str(v.get("summary") or v.get("details") or "")[:300]))[0]
         url = f"https://osv.dev/vulnerability/{vid}"
         date = str(v.get("published") or "")[:10]
         if newer:
@@ -350,6 +376,7 @@ def package_safety(query: str) -> dict:
                     f"Fixed in {fix}.")
             if cves:
                 out["verdict_docs"].append({"title": vid, "text": text, "body": text, "url": url,
+                                            "notes": text, "product": name, "version": version,
                                             "source": "cve", "is_cve": True, "date": date,
                                             "tier": "OSV"})   # the Sources table's attribution
         else:

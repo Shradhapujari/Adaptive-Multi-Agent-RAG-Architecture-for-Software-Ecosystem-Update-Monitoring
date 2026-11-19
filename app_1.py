@@ -1267,7 +1267,10 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         pkg = live_sources.package_safety(query)
         results["decision_advisories"] = (results.get("decision_advisories") or []) + pkg["verdict_docs"]
         results["web"] = (results.get("web") or []) + pkg["answer_docs"]
-        results["live"] = pkg["meta"]
+        # No OSV verdict row: the feed pool is unscoped for a package the
+        # catalog doesn't know, so any verdict it reaches is noise -- and a
+        # "safe" from it would be a false green.
+        results["live"] = pkg["meta"] | {"answer_only": not pkg["verdict_docs"]}
         results["timing"]["live"] = round(time.time() - t0, 2)
 
     # Step 6 — Decision Gate
@@ -1334,14 +1337,17 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         results["timing"]["web_search"] = round(time.time() - t0, 2)
     if live_kind and live_kind != "package_safety":
         t0 = time.time()
-        live_docs, results["live"] = live_sources.fetch(live_kind, query)
-        # First, because the answer cites only the first few web docs and
-        # these are the answer to the question asked.
-        results["web"] = live_docs + (results.get("web") or [])
+        live_docs, meta = live_sources.fetch(live_kind, query)
+        results["live"] = meta | {"answer_only": live_sources.answer_only(live_kind, query)}
+        # When the live answer is the answer, it goes first: the paragraph
+        # cites only the first few web docs. Otherwise it is extra context.
+        results["web"] = (live_docs + (results.get("web") or []) if results["live"]["answer_only"]
+                          else (results.get("web") or []) + live_docs)
         results["timing"]["live"] = round(time.time() - t0, 2)
-        # No act/hold verdict for an outage, EOL, comparison or how-to
-        # question: there is no update to act on, and a feed advisory about
-        # the product read "Patch now" on "Is GitHub down?".
+    # No act/hold verdict when the live answer stands in for it: an outage,
+    # EOL, comparison or how-to question with no update in it ("Is GitHub
+    # down?" read "Patch now" off a feed advisory), or a package OSV cleared.
+    if (results.get("live") or {}).get("answer_only"):
         results["decision"] = None
     # GR-2 fires only when the local lake was ABSENT on a *healthy* fetch: the
     # documents came back and none was about the asked product. A degraded
@@ -2047,7 +2053,7 @@ def _tab_short(results: dict, presented=None) -> None:
     query = results.get("original_query", "")
     st.caption(f"**Q:** {_md_escape(query)}")
     live = results.get("live")
-    if live and live.get("kind") != "package_safety":
+    if live and live.get("answer_only"):
         # An outage, EOL, comparison or how-to question has no verdict
         # (run_pipeline drops it), so the answer itself is the headline. The
         # abstention and "Which product?" branches below are for the feeds.
