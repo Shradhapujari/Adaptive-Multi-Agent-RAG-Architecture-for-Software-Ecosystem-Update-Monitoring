@@ -55,6 +55,8 @@ _EOL = re.compile(r"\bend[- ]of[- ]life\b|\beol\b|\bstill supported\b|\bend of s
                   r"|\bsupport(?:ed)? (?:until|ends?)\b", _I)
 _CHOOSE = re.compile(r"\bshould i (?:use|pick|choose|go with|learn)\b.*\bor\b"
                      r"|\bwhich (?:should|is better)\b", _I)
+# "Postgres or MySQL for a new project?": two capitalised names either side of "or".
+_A_OR_B = re.compile(r"\b[A-Z][\w.+#-]* or [A-Z][\w.+#-]*")
 _COMPAT = re.compile(r"\bcompatib\w*|\bworks? with\b|\bdoes \S+(?: \S+)? support\b", _I)
 _HOWTO = re.compile(r"\bhow (?:do|can|to|should)\b|\berror\b|\bfix\b|\bexception\b|\bfailed\b", _I)
 _ERRNO = re.compile(r"\bE[A-Z]{3,}\b")          # EACCES, ENOENT: case-sensitive
@@ -112,7 +114,7 @@ def kind(query: str, vendors: Sequence[str] = ()) -> Optional[str]:
         return "incident"
     if _EOL.search(q):
         return "eol"
-    if graph._COMPARE_RE.search(q) or _CHOOSE.search(q):
+    if graph._COMPARE_RE.search(q) or _CHOOSE.search(q) or _A_OR_B.search(q):
         return "compare"
     if _COMPAT.search(q):
         return "compat"

@@ -300,3 +300,8 @@ def test_lowest_newer_fix_is_named_in_version_order(stub):
     stub.table["api.osv.dev"] = (osv(two), None)
     r = L.package_safety("Is requests 2.8.0 safe? (pip)")
     assert "Fixed in 2.9.0." in r["verdict_docs"][0]["text"]
+
+
+def test_bare_a_or_b_is_a_comparison():
+    assert L.kind("Postgres or MySQL for a new project?") == "compare"
+    assert L.kind("React or Vue in 2026?") == "compare"

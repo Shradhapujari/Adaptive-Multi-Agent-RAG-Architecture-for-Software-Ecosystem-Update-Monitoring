@@ -76,7 +76,7 @@ def test_trusted_and_live_docs_both_kept(empty_lake, monkeypatch):
                         lambda *a, **k: ([page], {"backend": True, "n": 1, "used": True, "hosts": [], "error": None}))
     r = app_1.run_pipeline("Is GitHub down?", show_steps=False, web_fallback=True)
     assert r["live"]["kind"] == "down_now"
-    assert [d["url"] for d in r["web"]] == ["https://github.blog/x", "https://www.githubstatus.com"]
+    assert [d["url"] for d in r["web"]] == ["https://www.githubstatus.com", "https://github.blog/x"]
 
 
 def test_live_label_is_used_as_evidence_label():
@@ -111,3 +111,23 @@ def test_feed_question_keeps_the_fast_path(monkeypatch):
     monkeypatch.setattr(app_1, "present_answer", lambda *a, **k: None)
     app_1.ask("What is the latest Linux version?", checks={"web_search": True})
     assert called
+
+
+def test_answer_only_question_shows_no_verdict(empty_lake, monkeypatch):
+    """Only package safety gets a verdict; "Is GitHub down?" must not read "Patch now"."""
+    adv = {"title": "GitHub Enterprise CVE-2026-9999", "notes": "CVE-2026-9999 in GitHub Enterprise Server",
+           "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-9999", "is_cve": True, "product": "github"}
+    monkeypatch.setattr(app_1, "terminal_sources",
+                        lambda *a, **k: ({"community": [], "releases": [], "cve": [adv]}, []))
+    r = app_1.run_pipeline("Is GitHub down?", show_steps=False, web_fallback=True)
+    assert r["live"]["kind"] == "down_now" and r["decision"] is None
+
+
+def test_live_docs_lead_the_web_pool(empty_lake, monkeypatch):
+    pages = [{"title": f"vendor {i}", "text": "t", "url": f"https://python.org/{i}",
+              "source": "web_trusted"} for i in range(4)]
+    monkeypatch.setattr(websearch, "trusted",
+                        lambda *a, **k: (pages, {"backend": True, "n": 4, "used": True, "hosts": [], "error": None}))
+    r = app_1.run_pipeline("Is Python 3.9 still supported?", show_steps=False, web_fallback=True)
+    ev = answer_agent.collect_evidence(r)
+    assert "Status page - githubstatus.com" in [e.label for e in ev]   # the stubbed live doc

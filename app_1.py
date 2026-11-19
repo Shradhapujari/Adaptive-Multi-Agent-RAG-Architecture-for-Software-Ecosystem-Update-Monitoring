@@ -1335,8 +1335,14 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     if live_kind and live_kind != "package_safety":
         t0 = time.time()
         live_docs, results["live"] = live_sources.fetch(live_kind, query)
-        results["web"] = (results.get("web") or []) + live_docs
+        # First, because the answer cites only the first few web docs and
+        # these are the answer to the question asked.
+        results["web"] = live_docs + (results.get("web") or [])
         results["timing"]["live"] = round(time.time() - t0, 2)
+        # No act/hold verdict for an outage, EOL, comparison or how-to
+        # question: there is no update to act on, and a feed advisory about
+        # the product read "Patch now" on "Is GitHub down?".
+        results["decision"] = None
     # GR-2 fires only when the local lake was ABSENT on a *healthy* fetch: the
     # documents came back and none was about the asked product. A degraded
     # fetch is the rewrite-retry case, not a web-search case, and a verdict that
