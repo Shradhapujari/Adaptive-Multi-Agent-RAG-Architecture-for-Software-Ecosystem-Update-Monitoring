@@ -27,12 +27,14 @@ def _run(tmp_path, name, vals, system="s", snap="snapA", dh="h", **cfg):
 
 def _row(tmp_path, vals=(0.2, 0.4), **over):
     (tmp_path / "paper").mkdir(exist_ok=True)
-    (tmp_path / "paper" / "x.tex").write_text("we got nDCG 0.30, ok")
+    (tmp_path / "paper" / "x.tex").write_text("we got nDCG 0.30, ok; delta -0.20; count 3")
     h = _run(tmp_path, "r1", list(vals)) if not (tmp_path / "results" / "r1").exists() else \
         hashlib.sha256((tmp_path / "results/r1/per_query.jsonl").read_bytes()).hexdigest()
     r = {"file": "paper/x.tex", "quote": "0.30", "runs": "r1", "system": "s",
          "metric": "ir.ndcg@3", "stat": "mean", "value": "0.30", "n": "2", "sha256": h}
     r.update(over)
+    if "quote" not in over:
+        r["quote"] = r["value"]  # a claim's quote prints its value
     return r
 
 
@@ -125,7 +127,7 @@ def test_count(tmp_path):
 
 
 def test_manual_is_checked_for_hash_and_admissibility_but_not_rederived(tmp_path):
-    assert C.check(_row(tmp_path, stat="manual", value="0.99", quote="0.30"), str(tmp_path)) == []
+    assert C.check(_row(tmp_path, stat="manual", value="0.30"), str(tmp_path)) == []
     _bad(tmp_path, "sha256", stat="manual", sha256="0" * 64)
 
 
@@ -196,3 +198,38 @@ def test_delta_with_a_config_lacking_corpus_is_a_complaint(tmp_path):
     cp.write_text(json.dumps(c))
     out = C.check(r, str(tmp_path))
     assert out and any("inadmissible" in s or "error" in s for s in out), out
+
+
+def test_empty_quote_fails(tmp_path):
+    _bad(tmp_path, "empty", quote="  ")
+
+
+def test_value_must_appear_in_the_quote_for_every_stat(tmp_path):
+    # the paper moved 0.30 -> 0.41 and only the quote cell was updated
+    (tmp_path / "paper").mkdir()
+    for stat in ("mean", "manual"):
+        r = _row(tmp_path, stat=stat, quote="0.41")
+        (tmp_path / "paper" / "x.tex").write_text("we got nDCG 0.41")
+        out = C.check(r, str(tmp_path))
+        assert any("not in the quote" in s for s in out), out
+
+
+def test_mistyped_system_is_a_complaint_for_every_stat(tmp_path):
+    h = _run(tmp_path, "r1", [1, 0, 1])
+    for stat, metric, value in (("mean", "ir.ndcg@3", "0.30"), ("count", "ok", "0")):
+        out = C.check(_row(tmp_path, stat=stat, metric=metric, value=value, n="3",
+                           sha256=h, system="typo", quote="0.30"),
+                      str(tmp_path))
+        assert any("no rows" in s for s in out), (stat, out)
+
+
+def test_count_of_a_mistyped_metric_is_a_complaint(tmp_path):
+    h = _run(tmp_path, "r1", [1, 0, 1])
+    out = C.check(_row(tmp_path, stat="count", metric="typo", value="0", n="3", sha256=h,
+                       quote="0.30"), str(tmp_path))
+    assert any("no values" in s for s in out), out
+
+
+def test_delta_corpus_dir_relative_and_absolute_are_the_same_dir(tmp_path):
+    r = _delta(tmp_path, snap2=str(tmp_path / "snapA"))
+    assert C.check(r, str(tmp_path)) == []

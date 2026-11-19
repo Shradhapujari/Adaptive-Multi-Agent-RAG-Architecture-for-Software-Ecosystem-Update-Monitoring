@@ -44,8 +44,14 @@ def check(row: dict, root: str) -> list[str]:
 def _check(row: dict, root: str) -> list[str]:
     bad = []
     path = os.path.join(root, row["file"])
-    if not os.path.exists(path) or row["quote"] not in open(path, encoding="utf-8").read():
+    if not row["quote"].strip():
+        bad.append("quote is empty")
+    elif not os.path.exists(path) or row["quote"] not in open(path, encoding="utf-8").read():
         bad.append(f"quote {row['quote']!r} not found in {row['file']}")
+    # ponytail: substring match, so the value must be written as printed in the
+    # quote (no percent conversion: 0.30 cannot back a quote that says 30%)
+    if row["value"].lstrip("+-") not in row["quote"]:
+        bad.append(f"value {row['value']} not in the quote {row['quote']!r}")
     names = row["runs"].split(",")
     hashes = row["sha256"].split(",")
     if len(names) != len(hashes):
@@ -69,8 +75,12 @@ def _check(row: dict, root: str) -> list[str]:
     stat, per_run = row["stat"], []
     for run in runs:
         rows = [r for r in run["rows"] if r.get("system") == row["system"]]
+        if not rows:
+            return bad + [f"{run['name']}: no rows for system {row['system']!r}"]
         vals = [_get(r, row["metric"]) for r in rows]
         if stat == "count":
+            if all(v is None for v in vals):
+                return bad + [f"{run['name']}: no values for {row['system']} {row['metric']}"]
             per_run.append(sum(1 for v in vals if v))
             continue
         vals = [v for v in vals if v is not None]
@@ -80,7 +90,9 @@ def _check(row: dict, root: str) -> list[str]:
     if stat == "delta":
         if len(runs) != 2:
             return bad + ["delta needs exactly two runs"]
-        if runs[0]["cfg"]["corpus"].get("dir") != runs[1]["cfg"]["corpus"].get("dir"):
+        dirs = {os.path.realpath(os.path.join(root, str(r["cfg"]["corpus"].get("dir"))))
+                for r in runs}
+        if len(dirs) != 1:
             bad.append("delta across different corpus.dir")
         if runs[0]["cfg"].get("dataset_hash") != runs[1]["cfg"].get("dataset_hash"):
             bad.append("delta across different dataset_hash")
