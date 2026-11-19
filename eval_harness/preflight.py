@@ -3,6 +3,7 @@
 import fcntl
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -70,6 +71,12 @@ def git_state(root: str) -> tuple[str, bool]:
         return "unknown", True
 
 
+def marag_env() -> dict:
+    """The MARAG_* knobs in force, for config.json. Names that look like credentials are never written."""
+    return {k: v for k, v in sorted(os.environ.items())
+            if k.startswith("MARAG_") and not re.search(r"KEY|TOKEN|SECRET|PASS", k)}
+
+
 def refusals(corpus: str, prediction: str, git_dirty: bool) -> list[str]:
     out = []
     corpus = (corpus or "").strip()
@@ -107,6 +114,10 @@ def merge_gate(prior: dict | None, cur: dict, has_rows: bool) -> dict:
         refs += [r for r in cur["preflight_refusals"] if r not in refs]
         moved = [f"{k} {prior.get(k)!r} -> {cur[k]!r}" for k in ("git_sha", "corpus")
                  if prior.get(k) != cur[k]]
+        # marag_env only where the prior record has it: gate.json predating
+        # the field is not evidence that the knobs moved.
+        if "marag_env" in prior and prior["marag_env"] != cur.get("marag_env"):
+            moved.append(f"marag_env {prior['marag_env']!r} -> {cur.get('marag_env')!r}")
         if moved:
             refs.append("resumed-across-change: " + "; ".join(moved))
         g["preflight_refusals"] = refs

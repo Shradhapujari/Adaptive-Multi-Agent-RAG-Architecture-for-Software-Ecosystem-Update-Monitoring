@@ -257,6 +257,7 @@ def _gate(cfg: EvalConfig, run_dir: str) -> dict:
     pred = prior.get("prediction", "") if prior is not None else cfg.prediction
     sha, dirty = preflight.git_state(_ROOT)
     cur = {"git_sha": sha, "git_dirty": dirty, "corpus": cfg.corpus, "prediction": pred,
+           "marag_env": preflight.marag_env(),
            "preflight_refusals": preflight.refusals(cfg.corpus, pred, dirty),
            "diagnostic": cfg.diagnostic}
     has_rows = bool(run_dir) and os.path.exists(os.path.join(run_dir, PER_QUERY))
@@ -571,7 +572,8 @@ def run(cfg: EvalConfig) -> str:
     cfg_dict["dataset_hash"] = ds_hash
     # The gate fields come from the record taken before the loop (gate.json).
     cfg_dict.update({k: gate[k] for k in ("git_sha", "git_dirty", "prediction",
-                                          "preflight_refusals", "diagnostic")},
+                                          "preflight_refusals", "diagnostic",
+                                          "marag_env")},
                     split=_split)
     cfg_dict["n_questions"] = len(records)
     # Which arm this run actually is. Reading it back off the environment at

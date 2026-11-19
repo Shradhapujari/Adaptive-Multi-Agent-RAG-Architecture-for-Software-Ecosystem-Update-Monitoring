@@ -254,6 +254,7 @@ def test_fresh_run_writes_gate_json(tmp_path, monkeypatch):
     _sha(monkeypatch, "s1")
     d = _stub_run(tmp_path, monkeypatch, corpus=f"strict:{tmp_path}", prediction="p")
     g = _gatej(d)
+    assert isinstance(g.pop("marag_env"), dict)
     assert g == {"git_sha": "s1", "git_dirty": False, "corpus": f"strict:{tmp_path}",
                  "prediction": "p", "preflight_refusals": [], "diagnostic": False}
 
@@ -348,3 +349,30 @@ def test_test_split_look_is_logged_before_the_loop_and_not_on_resume(tmp_path, m
     run_id = log.read_text().split("\t")[1]
     _resume(tmp_path, monkeypatch, tmp_path / run_id, manifest=t)
     assert len(log.read_text().splitlines()) == 1
+def test_marag_env_records_knobs_and_never_credentials(monkeypatch):
+    monkeypatch.setenv("MARAG_RERANK", "embed")
+    monkeypatch.setenv("MARAG_FAKE_API_KEY", "must-not-be-written")
+    env = P.marag_env()
+    assert env["MARAG_RERANK"] == "embed"
+    assert "MARAG_FAKE_API_KEY" not in env
+
+
+def test_resume_under_different_marag_knobs_is_refused(tmp_path, monkeypatch):
+    # b1000 flat: a replay needed MARAG_MAX_VENDORS=1 to match its recording
+    _sha(monkeypatch, "s1")
+    monkeypatch.setenv("MARAG_MAX_VENDORS", "1")
+    d = _stub_run(tmp_path, monkeypatch, corpus=f"strict:{tmp_path}", prediction="p")
+    assert _gatej(d)["marag_env"]["MARAG_MAX_VENDORS"] == "1"
+    monkeypatch.setenv("MARAG_MAX_VENDORS", "2")
+    _resume(tmp_path, monkeypatch, d, corpus=f"strict:{tmp_path}", prediction="p")
+    c = _cfgj(d)
+    assert any(r.startswith("resumed-across-change") and "marag_env" in r
+               for r in c["preflight_refusals"]) and c["diagnostic"] is True
+    assert c["marag_env"]["MARAG_MAX_VENDORS"] == "1"
+
+
+def test_gate_json_without_marag_env_is_not_a_knob_change():
+    prior = {"git_sha": "s", "git_dirty": False, "corpus": "c", "prediction": "p",
+             "preflight_refusals": [], "diagnostic": False}
+    cur = dict(prior, marag_env={"MARAG_RERANK": "embed"})
+    assert P.merge_gate(prior, cur, True)["preflight_refusals"] == []
