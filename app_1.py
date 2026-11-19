@@ -1945,7 +1945,9 @@ def _stable_release(name: str, _hour: int) -> Optional[dict]:
     except Exception:
         return None
     return {"product": product, "version": version, "channel": "stable", "source": source,
-            "date": day.replace("-", ""), "is_cve": False}
+            "date": day.replace("-", ""), "is_cve": False,
+            # The API the version was read from, so View source opens the data itself.
+            "url": url}
 
 
 def _no_product_note(results: dict) -> str:
@@ -2608,7 +2610,7 @@ def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = Non
             # reader can check the live source rather than trust the count.
             if rel:
                 with latest.popover("View source"):
-                    _link_line(f"{rel.get('product', '')} v{rel['version']}", rel.get("url"),
+                    _link_line(f"{rel.get('product', '')} v{rel['version']}", _doc_url(rel),
                                f"{rel.get('source', 'release notes')} · {rel.get('date', '')}")
             if used["security"]:
                 with advisories.popover("View advisories"):
@@ -2619,9 +2621,10 @@ def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = Non
                             r["What was wrong"])
             if posts:
                 with community.popover("View reports"):
+                    by_title = {_clean_title(d.get("title")): d for d in results.get("community") or []}
                     for e in posts:
-                        _link_line(e.title, e.url, " · ".join(
-                            x for x in (e.source or e.label, e.date) if x))
+                        row = by_title.get(_clean_title(e.title), {})
+                        _link_line(e.title, e.url or _doc_url(row), e.label)
         # The exact rows the answer stands on, named beside it.
         chips = [str(r.get("CVE") or r.get("Release") or r.get("Page"))[:40]
                  for rows in used.values() for r in rows]
@@ -2649,6 +2652,22 @@ def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = Non
                     _show_tables(rows) if n else st.caption("None in this question's evidence.")
             with st.expander("Secrets"):
                 _tab_guardrails(results, presented)
+
+
+def _clean_title(t) -> str:
+    return re.sub(r"\s+", " ", str(t or "")).strip().lower()[:80]
+
+
+def _doc_url(d: dict) -> str:
+    """A document's own page. Release rows keep it in `notes` (the feed's
+    versionReleaseNotes), Reddit rows only as an id."""
+    if d.get("url"):
+        return d["url"]
+    m = re.search(r"https?://\S+", str(d.get("notes") or d.get("versionReleaseNotes") or ""))
+    if m:
+        return m.group(0).rstrip(").,")
+    rid = d.get("redditId") or d.get("reddit_id")
+    return f"https://www.reddit.com/comments/{rid}" if rid else ""
 
 
 def _link_line(title: str, url: str, meta: str = "", body: str = "") -> None:
