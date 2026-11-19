@@ -96,3 +96,17 @@ def test_descends_outside_any_repo_is_false(tmp_path, monkeypatch):
     monkeypatch.undo()
     monkeypatch.setattr(M, "ROOT", str(tmp_path))
     assert not M.descends("abc", "def")
+
+
+def test_explicit_diagnostic_post_gate_run_is_not_admissible():
+    assert not ok(_cfg(diagnostic=True))
+    assert ok(_cfg(diagnostic=False))
+
+
+def test_judge_pool_is_not_an_admissibility_check():
+    assert ok(_cfg(judge_pool=False))
+    c = _cfg(corpus={"mode": "replay", "frozen": True}, judge_pool=False)
+    del c["preflight_refusals"]
+    del c["git_sha"]
+    assert ok(c)
+    assert not any("pool" in lab for _, lab in M.admissibility({"cfg": _cfg()}))

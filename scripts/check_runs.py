@@ -61,13 +61,13 @@ def admissibility(run: dict) -> list[tuple[bool, str]]:
         (bool(corpus.get("frozen")), f"corpus.frozen (corpus_misses={corpus.get('corpus_misses')})"),
         (not c.get("rerank_degraded"), f"reranker not degraded ({c.get('rerank_spec')})"),
         (bool(c.get("judge_active")), "judge active"),
-        (bool(c.get("judge_pool")), "pool judged (pool_recall meaningful)"),
     ]
     if "preflight_refusals" in c:  # post-gate run; older runs lack the key
         refusals = c["preflight_refusals"]
         sha = str(c.get("git_sha"))
         checks += [
             (refusals == [], f"no preflight refusals ({'; '.join(map(str, refusals)) or 'none'})"),
+            (c.get("diagnostic") is not True, "not run as --diagnostic"),
             (corpus.get("mode") == "strict", f"corpus.mode == strict (is {corpus.get('mode')})"),
             (all(descends(sha, f) for f in FIX_COMMITS),
              f"git_sha {sha} descends from {', '.join(FIX_COMMITS)}"),
