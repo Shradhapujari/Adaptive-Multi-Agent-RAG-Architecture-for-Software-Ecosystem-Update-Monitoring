@@ -17,7 +17,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import grounding  # noqa: E402
 from vendor import load_catalog  # noqa: E402
 
-CATALOG = load_catalog(fetch=False)
+# The cache is refreshed from /api/c/names, and "safe" has come and gone from
+# it, so the two rows this rule is about are added rather than assumed.
+CATALOG = list(dict.fromkeys([*load_catalog(fetch=False), "safe", "known"]))
 
 
 @pytest.mark.parametrize("q, expected", [
