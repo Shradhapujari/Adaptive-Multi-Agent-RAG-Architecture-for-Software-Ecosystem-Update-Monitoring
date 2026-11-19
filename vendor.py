@@ -42,8 +42,8 @@ import difflib
 import json
 import os
 import re
-from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence
+from dataclasses import dataclass, replace
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 __all__ = [
     "advisory_names_vendor",
@@ -183,6 +183,7 @@ class VendorMatch:
     name: str            # the catalog spelling, lowercased
     matched: str         # the substring of the query that matched
     via_alias: bool = False
+    parts: Tuple[str, ...] = ()   # components named in it: "WebRTC ... in Chrome"
 
     @property
     def display(self) -> str:
@@ -329,13 +330,21 @@ def _drop_components(low: str, found: List[VendorMatch]) -> List[VendorMatch]:
     if len(found) < 2:
         return found
     known = set(known_products())
-    def part_of(a: VendorMatch) -> bool:
-        return a.name not in known and any(
-            b is not a and b.name.split()[-1] in known and re.search(   # "google chrome" too
-                rf"(?<![\w.-]){re.escape(a.matched)}(?:\s+\S+)?\s+in\s+(?:the\s+)?"
-                rf"{re.escape(b.matched)}(?![\w-])", low)
-            for b in found)
-    return [v for v in found if not part_of(v)]
+    def owner(a: VendorMatch) -> Optional[VendorMatch]:
+        if a.name in known:
+            return None
+        return next((b for b in found if b is not a
+                     and b.name.split()[-1] in known and re.search(   # "google chrome" too
+                         rf"(?<![\w.-]){re.escape(a.matched)}(?:\s+\S+)?\s+in\s+(?:the\s+)?"
+                         rf"{re.escape(b.matched)}(?![\w-])", low)), None)
+    # The dropped name is kept on its owner as a part: retrieval searches
+    # "chrome webrtc", which finds Chrome's WebRTC advisories and not Mozilla's.
+    parts = {}
+    for a in found:
+        if (b := owner(a)) is not None:
+            parts.setdefault(b.name, []).append(a.name)
+    return [replace(v, parts=tuple(parts.get(v.name, ()))) for v in found
+            if owner(v) is None]
 
 
 _SUGGEST_WORD = re.compile(r"[a-z][a-z0-9.+#-]*[a-z0-9+#]")
