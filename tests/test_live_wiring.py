@@ -158,3 +158,14 @@ def test_package_ecosystem_questions_pass_the_entry_gate_when_live(q):
 
 def test_off_topic_how_to_stays_declined_when_live():
     assert app_1._off_topic_note("How do I bake bread?", live=True)
+
+
+def test_osv_rows_are_attributed_to_osv_in_sources(monkeypatch):
+    """Live check 2026-11-19: OSV advisories were listed as "CISA KEV / NVD"."""
+    monkeypatch.setattr(live_sources, "_get_json", lambda url, post=None, timeout=10: (
+        ({"vulns": [{"id": "GHSA-x", "aliases": ["CVE-2024-1"], "summary": "s",
+                     "affected": [{"ranges": [{"events": [{"introduced": "0"}, {"fixed": "2.32.0"}]}]}]}]}, None)
+        if post else ({"info": {"version": "2.34.2"}}, None)))
+    pkg = live_sources.package_safety("Is requests 2.31.0 safe? (pip)")
+    rows = app_1._source_rows({"decision_advisories": pkg["verdict_docs"]})
+    assert [r["Tier"] for r in rows] == ["OSV"]

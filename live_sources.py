@@ -350,7 +350,8 @@ def package_safety(query: str) -> dict:
                     f"Fixed in {fix}.")
             if cves:
                 out["verdict_docs"].append({"title": vid, "text": text, "body": text, "url": url,
-                                            "source": "cve", "is_cve": True, "date": date})
+                                            "source": "cve", "is_cve": True, "date": date,
+                                            "tier": "OSV"})   # the Sources table's attribution
         else:
             text = f"{name} {version}: unfixed advisory {vid}, no fixed release yet. {summary}"
         d = _doc({"title": vid, "body": text, "url": url}, f"OSV - {vid}", date, "osv.dev")
