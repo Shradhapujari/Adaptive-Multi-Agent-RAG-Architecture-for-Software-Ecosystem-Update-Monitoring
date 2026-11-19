@@ -834,3 +834,40 @@ def test_verdict_line_count_must_match_the_answer_citations(monkeypatch):
     assert out.mode == "rule-based"
     assert "verdict line" in out.note
     assert "[Security Advisory - Linux advisory" in out.text
+
+
+# --- Long Answer vs the feed's headline version (2026-10-22 demo defect) ----
+
+def _node_rows():
+    return [{"product": "nodejs", "version": f"26.{m}.0", "date": f"2026-{m:02d}-01",
+             "notes": "Routine release.", "security": [], "url": ""}
+            for m in range(1, 13)] + [
+        {"product": "nodejs", "version": "26.12.1", "date": "2026-12-05",
+         "notes": "Patch release.", "security": [], "url": "https://example.invalid/n"}]
+
+
+def test_headline_release_leads_the_evidence_even_when_ranked_out():
+    rows = _node_rows()
+    head = rows[-1]
+    ev = collect_evidence({"releases": rows[:-1], "headline": head}, per_kind=4)
+    assert "26.12.1" in ev[0].label, ev[0].label
+    assert sum("26.12.1" in e.label for e in ev) == 1
+
+
+def test_answer_naming_an_older_version_than_the_headline_is_rejected():
+    rows = _node_rows()
+    ev = collect_evidence({"releases": rows, "headline": rows[-1]}, per_kind=13)
+    older = f"The latest Node.js release is v26.12.0 [{ev[1].label}]."
+    v = guardrail.check(older, ev, "latest node.js version?", latest="26.12.1")
+    assert [x.code for x in v.violations] == ["stale_version"], v.violations
+    # Without the headline the same answer passes: 26.12.0 is a real row.
+    assert guardrail.check(older, ev, "latest node.js version?").ok
+    right = f"The latest Node.js release is v26.12.1 [{ev[0].label}]."
+    assert guardrail.check(right, ev, "latest node.js version?", latest="26.12.1").ok
+
+
+def test_headline_from_a_stable_api_is_not_an_unsupported_version():
+    ev = collect_evidence({"releases": _node_rows()[:2]}, per_kind=4)
+    ans = f"Chrome stable is 157.0.8103.79 [{ev[0].label}]."
+    v = guardrail.check(ans, ev, "latest chrome version?", latest="157.0.8103.79")
+    assert "unsupported_version" not in [x.code for x in v.violations], v.violations
