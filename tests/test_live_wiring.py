@@ -131,3 +131,19 @@ def test_live_docs_lead_the_web_pool(empty_lake, monkeypatch):
     r = app_1.run_pipeline("Is Python 3.9 still supported?", show_steps=False, web_fallback=True)
     ev = answer_agent.collect_evidence(r)
     assert "Status page - githubstatus.com" in [e.label for e in ev]   # the stubbed live doc
+
+
+def test_live_answer_headline_is_the_answer_not_an_abstention(monkeypatch):
+    """Live check 2026-11-19: "Is Python 3.9 still supported?" cited endoflife.date
+    and still read "Not enough evidence — no document is about the asked product"."""
+    from answer_agent import PresentedAnswer
+    shown = []
+    for fn in ("markdown", "write", "caption"):
+        monkeypatch.setattr(app_1.st, fn, lambda s, *a, **k: shown.append(str(s)))
+    app_1._tab_short({"decision": None, "original_query": "Is Python 3.9 still supported?",
+                      "live": {"kind": "eol", "source": "endoflife.date", "n": 1, "error": None,
+                               "resolved": True}},
+                     PresentedAnswer("Python 3.9 reached end of life on 2025-10-31 [S1].", "llm"))
+    assert shown[1] == "### Python 3.9 reached end of life on 2025-10-31."   # headlines drop [S1]
+    assert any("End of life question → endoflife.date" in s for s in shown)
+    assert not any("Not enough evidence" in s or "Which product" in s for s in shown)

@@ -2037,6 +2037,17 @@ def _tab_short(results: dict, presented=None) -> None:
     dec = results.get("decision")
     query = results.get("original_query", "")
     st.caption(f"**Q:** {_md_escape(query)}")
+    live = results.get("live")
+    if live and live.get("kind") != "package_safety":
+        # An outage, EOL, comparison or how-to question has no verdict
+        # (run_pipeline drops it), so the answer itself is the headline. The
+        # abstention and "Which product?" branches below are for the feeds.
+        import live_sources
+        line = _answer_line(results, presented.text) if presented is not None else ""
+        st.markdown(f"### {line or 'See the sources below'}")
+        st.caption(f"{live_sources.KIND_LABEL.get(live['kind'], live['kind'])} question → "
+                   f"{live['source']}" + (f" — {live['error']}" if live.get("error") else ""))
+        return
     asks_value = graph.asks(query) in ("version", "date")
     g = results.get("grounding")
     no_product = g is not None and not getattr(g, "vendors", None)
