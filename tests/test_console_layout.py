@@ -114,3 +114,13 @@ def test_stance_question_gets_a_yes_or_no_headline():
 def test_a_question_is_echoed_as_text_not_markdown():
     out = app_1._md_escape("weather ![x](https://example.com/p.png) <b>")
     assert "![x](" not in out and r"\!\[x\]\(" in out and r"\<b\>" in out
+
+
+def test_read_more_sentences_keep_versions_and_citations_whole():
+    assert app_1._sentences("Firefox v159.0.1 shipped [R1]. It fixes 5 CVEs [A2]. [C1] says ok.") == [
+        "Firefox v159.0.1 shipped [R1].", "It fixes 5 CVEs [A2].", "[C1] says ok."]
+
+
+def test_read_more_does_not_split_inside_a_quoted_title():
+    text = "Two apply: “CVE-1 — Bug in DOM. This was fixed” [A1]. Done [A2]."
+    assert app_1._sentences(text) == ["Two apply: “CVE-1 — Bug in DOM. This was fixed” [A1].", "Done [A2]."]
