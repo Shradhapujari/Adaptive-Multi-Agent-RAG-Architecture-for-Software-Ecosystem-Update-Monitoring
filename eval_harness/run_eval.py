@@ -666,9 +666,11 @@ def main(argv=None) -> int:
         return 3
     _sha, dirty = preflight.git_state(_ROOT)
     why = preflight.refusals(cfg.corpus, cfg.prediction, dirty)
-    if why and not cfg.diagnostic:
-        print("[harness] refusing to start:\n  " + "\n  ".join(why)
-              + "\npass --diagnostic to run anyway; a diagnostic run cannot be quoted",
+    fatal = any(w.startswith("record-into-replayed") for w in why)
+    if why and (fatal or not cfg.diagnostic):
+        tail = ("record into a fresh directory; --diagnostic does not override this" if fatal
+                else "pass --diagnostic to run anyway; a diagnostic run cannot be quoted")
+        print("[harness] refusing to start:\n  " + "\n  ".join(why) + "\n" + tail,
               file=sys.stderr)
         return 2
     run(cfg)

@@ -181,3 +181,20 @@ def test_test_split_runs_log_and_print_looks_per_dataset(tmp_path, monkeypatch, 
     assert len(lines) == 3
     ts, run_id, sha, dshash, pred = lines[0].split("\t")
     assert run_id == os.path.basename(d) and run_id.endswith(dshash)
+
+
+def test_record_into_replayed_dir_is_fatal_even_with_diagnostic(cli, tmp_path, capsys):
+    (tmp_path / ".replayed").write_text("")
+    for extra in (["--diagnostic"], []):
+        assert R.main(["--corpus", f"record:{tmp_path}", "--prediction", "p", *extra]) == 2
+        out = capsys.readouterr()
+        text = out.out + out.err
+        assert "record-into-replayed" in text and "pass --diagnostic" not in text
+        assert "fresh directory" in text
+    assert cli == []
+
+
+def test_diagnostic_record_into_unreplayed_dir_with_dirty_tree_runs(cli, tmp_path, monkeypatch):
+    monkeypatch.setattr(P, "git_state", lambda root: ("abc", True))
+    assert R.main(["--corpus", f"record:{tmp_path}", "--prediction", "p", "--diagnostic"]) == 0
+    assert len(cli) == 1
