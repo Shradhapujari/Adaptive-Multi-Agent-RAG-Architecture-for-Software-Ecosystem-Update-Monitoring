@@ -1888,7 +1888,36 @@ def _headline_release(results: dict, query: str) -> Optional[dict]:
         return None
     rows = [r for r in results.get("releases") or []
             if str(r.get("product") or "").strip().lower() in wanted]
-    return _latest_release(rows, query)
+    best = _latest_release(rows, query)
+    # The feed tags every Chromium build "patch", so its highest version is a
+    # beta/dev tag: v159.0.8147 was shown while stable was 157.0.8103.79
+    # (live, 2026-11-19). A question naming a version keeps that row.
+    if not _VERSION_IN_Q.search(query or ""):
+        for name in wanted & _STABLE_CHANNEL.keys():
+            stable = _stable_release(name, int(time.time() // 3600))
+            if stable:
+                return stable
+    return best
+
+
+# Vendors whose release feed mixes channels, mapped to an API that names stable.
+_STABLE_CHANNEL = {
+    "chrome": "https://versionhistory.googleapis.com/v1/chrome/platforms/win/"
+              "channels/stable/versions/all/releases?pageSize=1",
+}
+
+
+@lru_cache(maxsize=16)
+def _stable_release(name: str, _hour: int) -> Optional[dict]:
+    """Current stable release of `name`, or None if the API can't be read.
+    `_hour` keys the cache so the answer refreshes hourly."""
+    try:
+        r = requests.get(_STABLE_CHANNEL[name], timeout=5).json()["releases"][0]
+        return {"product": name.capitalize(), "version": r["version"], "channel": "stable",
+                "source": "stable channel (Google version history)",
+                "date": r["serving"]["startTime"][:10].replace("-", ""), "is_cve": False}
+    except Exception:
+        return None
 
 
 def _no_product_note(results: dict) -> str:
@@ -1968,7 +1997,8 @@ def _tab_short(results: dict, presented=None) -> None:
     if rel:
         d = monitor.parse_ymd(rel.get("date"))
         st.markdown(f"### {rel.get('product') or 'Latest'} v{rel.get('version')}")
-        st.write(f"Released {d.isoformat() if d else rel.get('date')} · source: release notes"
+        st.write(f"Released {d.isoformat() if d else rel.get('date')} · source: "
+                 f"{rel.get('source', 'release notes')}"
                  + (f" · [link]({rel['url']})" if rel.get("url") else ""))
         if dec and dec.get("verdict") not in (None, "safe", "insufficient_evidence"):
             icon, label = _VERDICT_BADGE.get(dec["verdict"], ("⚪", dec["verdict"]))

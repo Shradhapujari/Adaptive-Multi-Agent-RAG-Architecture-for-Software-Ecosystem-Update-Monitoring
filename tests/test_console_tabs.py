@@ -95,3 +95,26 @@ def test_sources_tab_shows_only_cited_rows(monkeypatch):
     app_1._tab_sources(results, PresentedAnswer(f"Shipped [{ev[0].label}].", "llm", evidence=ev))
     assert [r["Title"] for r in shown] == [rel["title"]]
     assert notes == ["1 cited · 1 more retrieved, not cited"]
+
+
+def test_chrome_headline_is_the_stable_channel_not_the_highest_feed_tag(monkeypatch):
+    from types import SimpleNamespace
+    feed = [{"product": "Chrome", "version": "159.0.8147", "date": "20261106", "is_cve": False,
+             "title": "Chrome v159.0.8147", "url": ""}]
+    results = {"grounding": SimpleNamespace(vendor_names=["chrome"]), "releases": feed}
+
+    class _Resp:
+        def json(self):
+            return {"releases": [{"version": "157.0.8103.79",
+                                  "serving": {"startTime": "2026-11-19T20:21:11Z"}}]}
+    app_1._stable_release.cache_clear()
+    monkeypatch.setattr(app_1.requests, "get", lambda *a, **k: _Resp())
+    assert app_1._headline_release(results, "Is it safe to update Chrome?")["version"] == "157.0.8103.79"
+    # A question naming a version keeps the feed row.
+    assert app_1._headline_release(results, "When was Chrome 159.0.8147 released?")["version"] == "159.0.8147"
+
+    # API down: fall back to the feed rather than show nothing.
+    app_1._stable_release.cache_clear()
+    monkeypatch.setattr(app_1.requests, "get", lambda *a, **k: (_ for _ in ()).throw(OSError()))
+    assert app_1._headline_release(results, "Latest Chrome version?")["version"] == "159.0.8147"
+    app_1._stable_release.cache_clear()
