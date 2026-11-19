@@ -248,15 +248,20 @@ def test_the_platforms_own_advisory_still_orders_a_patch():
     assert D.decide(pool, MQ, MV).verdict == "patch_urgently"
 
 
-def test_a_product_named_before_its_platform_is_still_its_own_advisory():
-    """"Firefox for iOS ..." is a Firefox advisory, not an iOS one."""
+def test_a_product_named_before_its_platform_is_its_own_advisory_for_that_platform_only():
+    """"Firefox for iOS ..." is a Firefox advisory, not an iOS one -- and not a
+    desktop Firefox one either. It counts for a question that names iOS, and
+    not for a bare "Firefox" question (reversed 2026-11-18: it used to drive
+    patch_urgently on the desktop question)."""
     row = ("Firefox for iOS directly interpolated the page's HTML language attribute "
            "into translation JavaScript, allowing attacker-controlled markup to "
            "execute code. This vulnerability was fixed in Firefox for iOS 157.1. "
            "CVE-2026-103418")
     ff = [_d(1, "nvd", "firefox v157.1.0 — Firefox for iOS", row)]
-    assert D.decide(ff, "Is it safe to update Firefox right now?",
+    assert D.decide(ff, "Is it safe to update Firefox on iOS?",
                     ["firefox"]).verdict == "patch_urgently"
+    assert D.decide(ff, "Is it safe to update Firefox right now?",
+                    ["firefox"]).verdict != "patch_urgently"
     assert D.decide(ff, "Any critical iOS vulnerabilities?",
                     ["Apple iOS"]).verdict != "patch_urgently"
 

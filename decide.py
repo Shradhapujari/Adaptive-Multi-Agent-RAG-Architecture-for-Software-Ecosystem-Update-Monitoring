@@ -350,6 +350,33 @@ def kev_owns(d: dict, vendors: Sequence[str], exclude: Sequence[str] = ()) -> bo
     return False
 
 
+# "Firefox for iOS" is the same vendor's different product: its advisories say
+# nothing about the desktop build a bare "Firefox" question is asking about.
+# `_owns` cuts the subject at "for", which makes it a Firefox advisory -- right
+# for the vendor, wrong for the platform. CVE-2026-103418 ("Firefox for iOS
+# directly interpolated the page's HTML language attribute ... fixed in
+# Firefox for iOS 157.1") therefore counted against "Is it safe to update
+# Firefox right now?". Only "<product> for <platform>" is read, never a
+# platform word elsewhere in the text, so a desktop advisory that mentions
+# another platform in passing is untouched.
+_PLATFORM_ALIAS = {"iphone": "ios", "ipad": "ios"}
+_PLATFORM_VARIANT = re.compile(
+    r"\b(?:{products})\s+for\s+(ios|iphone|ipad|android|windows|macos|linux)\b")
+
+
+def _platform_variant_mismatch(d: dict, vtoks: set, qtoks: set) -> bool:
+    """True when the advisory is about "<asked product> for <platform>" and the
+    question names no such platform."""
+    body = str(d.get("text") or d.get("detail") or "").lower()
+    if not vtoks or not body:
+        return False
+    rx = re.compile(_PLATFORM_VARIANT.pattern.replace(
+        "{products}", "|".join(re.escape(v) for v in sorted(vtoks))))
+    asked = {_PLATFORM_ALIAS.get(t, t) for t in vtoks | qtoks}
+    return any(_PLATFORM_ALIAS.get(m.group(1), m.group(1)) not in asked
+               for m in rx.finditer(body))
+
+
 def _about(d: dict, vtoks: set, qtoks: set, exclude: Sequence[str] = (),
            vendors: Sequence[str] = ()) -> bool:
     """Is the document about the asked product? With a known vendor, the vendor
@@ -367,6 +394,7 @@ def _about(d: dict, vtoks: set, qtoks: set, exclude: Sequence[str] = (),
             return False
         return (_subject_names_product(d, vtoks, exclude)
                 and not _foreign_vendor_first(d, vendors)
+                and not _platform_variant_mismatch(d, vtoks, qtoks)
                 if d.get("source") in ADVISORY else True)
     return len(toks & qtoks) >= 2
 
