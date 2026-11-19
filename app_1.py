@@ -2018,15 +2018,24 @@ def _md_escape(text: str) -> str:
     return re.sub(r"([\\`*_{}\[\]()<>#!|~$])", r"\\\1", text or "")
 
 
-def _off_topic_note(query: str) -> Optional[str]:
+def _off_topic_note(query: str, live: bool = False) -> Optional[str]:
     """Why the console declines `query` before fetching anything, or None.
 
     `Grounding.needs_clarification` -- no product and no confident software
     intent -- was already computed and only ever printed as a warning above an
     answer drawn from an unscoped search. The console stops there instead.
+
+    `live` (web search on): a question naming a package ecosystem ("npm",
+    "pip", "package") that has a live type passes -- the catalog doesn't list
+    PyPI/npm packages, so "Is requests 2.31.0 safe? (pip)" was declined. A
+    live type alone isn't enough: "How do I bake bread?" reads as a how-to.
     """
     if not ground(query).needs_clarification:
         return None
+    if live:
+        import live_sources
+        if live_sources.kind(query) and live_sources._PKG_CUE.search(query):
+            return None
     name = vendor.suggest(query)
     return ("This doesn't look like a question about a software update, so I "
             "haven't searched." + (f" Did you mean **{vendor.pretty(name)}**?" if name else
@@ -2624,7 +2633,9 @@ def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = Non
         with strip:
             _render_mermaid(_pipeline_mermaid(), height=150)
         return
-    note = _off_topic_note(q)
+    import websearch
+    note = _off_topic_note(q, live=bool((checks or {}).get("web_search"))
+                           or websearch.ENABLE_WEB_FALLBACK)
     if note:
         with strip:
             _render_mermaid(_pipeline_mermaid(), height=150)

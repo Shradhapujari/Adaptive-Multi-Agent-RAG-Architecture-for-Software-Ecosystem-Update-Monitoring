@@ -147,3 +147,14 @@ def test_live_answer_headline_is_the_answer_not_an_abstention(monkeypatch):
     assert shown[1] == "### Python 3.9 reached end of life on 2025-10-31."   # headlines drop [S1]
     assert any("End of life question → endoflife.date" in s for s in shown)
     assert not any("Not enough evidence" in s or "Which product" in s for s in shown)
+
+
+@pytest.mark.parametrize("q", ["Is requests 2.31.0 safe? (pip)", "How do I fix EACCES on npm install?"])
+def test_package_ecosystem_questions_pass_the_entry_gate_when_live(q):
+    """Live check 2026-11-19: both were declined as "Not a software update question"."""
+    assert app_1._off_topic_note(q, live=True) is None
+    assert app_1._off_topic_note(q) is not None          # web off: unchanged
+
+
+def test_off_topic_how_to_stays_declined_when_live():
+    assert app_1._off_topic_note("How do I bake bread?", live=True)
