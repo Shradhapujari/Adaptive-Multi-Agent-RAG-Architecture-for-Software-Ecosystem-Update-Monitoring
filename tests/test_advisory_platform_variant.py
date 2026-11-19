@@ -39,3 +39,9 @@ def test_a_question_that_names_the_platform_keeps_it():
 def test_a_platform_word_elsewhere_in_the_text_is_not_read():
     assert _about("Mitigation bypass in Firefox lets a page escape the sandbox, "
                   "also seen in builds for Android. Fixed in Firefox 157.0.1.")
+
+
+def test_mac_is_macos_on_the_question_side():
+    mac = "Firefox for macOS allowed code execution. Fixed in Firefox for macOS 157.1."
+    assert _about(mac, question="Is it safe to update Firefox on Mac?")
+    assert not _about(mac, question="Is it safe to update Firefox right now?")

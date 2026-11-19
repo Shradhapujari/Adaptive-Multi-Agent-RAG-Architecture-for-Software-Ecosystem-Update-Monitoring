@@ -359,7 +359,7 @@ def kev_owns(d: dict, vendors: Sequence[str], exclude: Sequence[str] = ()) -> bo
 # Firefox right now?". Only "<product> for <platform>" is read, never a
 # platform word elsewhere in the text, so a desktop advisory that mentions
 # another platform in passing is untouched.
-_PLATFORM_ALIAS = {"iphone": "ios", "ipad": "ios"}
+_PLATFORM_ALIAS = {"iphone": "ios", "ipad": "ios", "mac": "macos"}
 _PLATFORM_VARIANT = re.compile(
     r"\b(?:{products})\s+for\s+(ios|iphone|ipad|android|windows|macos|linux)\b")
 
