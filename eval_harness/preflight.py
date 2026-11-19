@@ -86,3 +86,31 @@ def refusals(corpus: str, prediction: str, git_dirty: bool) -> list[str]:
     if not (prediction or "").strip():
         out.append("no-prediction: state the prediction before the run")
     return out
+
+
+def merge_gate(prior: dict | None, cur: dict, has_rows: bool) -> dict:
+    """The gate record for a run dir: this invocation's `cur`, merged into the
+    run's original `prior` (its gate.json) when resuming.
+
+    A resume keeps the original prediction, git_sha and corpus spec, unions the
+    refusals, and adds `resumed-across-change` when sha or corpus moved, or when
+    rows exist with no gate record at all (a pre-gate run). Once diagnostic,
+    always diagnostic.
+    """
+    if prior is None:
+        g = dict(cur, preflight_refusals=list(cur["preflight_refusals"]))
+        if has_rows:
+            g["preflight_refusals"].append("resumed-across-change: no gate record for this run")
+    else:
+        g = dict(prior)
+        refs = list(prior.get("preflight_refusals") or [])
+        refs += [r for r in cur["preflight_refusals"] if r not in refs]
+        moved = [f"{k} {prior.get(k)!r} -> {cur[k]!r}" for k in ("git_sha", "corpus")
+                 if prior.get(k) != cur[k]]
+        if moved:
+            refs.append("resumed-across-change: " + "; ".join(moved))
+        g["preflight_refusals"] = refs
+        g["git_dirty"] = bool(prior.get("git_dirty")) or cur["git_dirty"]
+    g["diagnostic"] = (bool(g["preflight_refusals"]) or bool(cur["diagnostic"])
+                       or bool((prior or {}).get("diagnostic")))
+    return g
