@@ -124,3 +124,11 @@ def test_read_more_sentences_keep_versions_and_citations_whole():
 def test_read_more_does_not_split_inside_a_quoted_title():
     text = "Two apply: “CVE-1 — Bug in DOM. This was fixed” [A1]. Done [A2]."
     assert app_1._sentences(text) == ["Two apply: “CVE-1 — Bug in DOM. This was fixed” [A1].", "Done [A2]."]
+
+
+def test_doc_url_finds_release_notes_and_reddit_links():
+    assert app_1._doc_url({"notes": "https://www.mozilla.org/en-US/firefox/159.0/releasenotes/"}) \
+        == "https://www.mozilla.org/en-US/firefox/159.0/releasenotes/"
+    assert app_1._doc_url({"redditId": "1v2tcdf"}) == "https://www.reddit.com/comments/1v2tcdf"
+    assert app_1._doc_url({"url": "https://x", "redditId": "y"}) == "https://x"
+    assert app_1._doc_url({}) == ""
