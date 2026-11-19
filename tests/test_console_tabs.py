@@ -146,3 +146,26 @@ def test_firefox_and_edge_headlines_use_the_vendors_stable_channel(monkeypatch):
     ms = {"grounding": SimpleNamespace(vendor_names=["microsoft", "edge"]), "releases": []}
     assert app_1._headline_release(ms, "Latest Microsoft Edge version?")["version"] == "158.0.4370.33"
     app_1._stable_release.cache_clear()
+
+
+def test_chrome_release_rows_are_labelled_with_their_channel(monkeypatch):
+    lists = {"stable": ["158.0.8127.36", "157.0.8103.79"], "extended": [], "beta": ["158.0.8127.18"],
+             "dev": [], "canary": ["160.0.8170.0"]}
+
+    class _Resp:
+        def __init__(self, url): self.ch = url.split("/channels/")[1].split("/")[0]
+        def json(self): return {"versions": [{"version": v} for v in lists[self.ch]]}
+    monkeypatch.setattr(app_1.requests, "get", lambda url, **k: _Resp(url))
+    app_1._chrome_channels.cache_clear()
+    rows = [{"Release": f"Chrome v{v}", "Date": "20261118"} for v in ("160.0.8170", "158.0.8127", "159.0.8147")]
+    got = app_1._label_channels(rows)
+    assert [r["Channel"] for r in got] == ["canary", "stable", "not shipped"]
+    assert list(got[0]) == ["Release", "Channel", "Date"]
+    # No Chrome row: no lookup, rows unchanged.
+    ff = [{"Release": "Firefox v160.0.0", "Date": "20261110"}]
+    assert app_1._label_channels(ff) == ff
+    # API down: no Channel column rather than a wrong one.
+    app_1._chrome_channels.cache_clear()
+    monkeypatch.setattr(app_1.requests, "get", lambda *a, **k: (_ for _ in ()).throw(OSError()))
+    assert "Channel" not in app_1._label_channels(rows)[0]
+    app_1._chrome_channels.cache_clear()

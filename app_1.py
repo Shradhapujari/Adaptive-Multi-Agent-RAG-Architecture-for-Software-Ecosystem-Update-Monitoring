@@ -2188,8 +2188,50 @@ def _split_tables(tables: dict, verdict: set, answer: set, product: bool) -> Tup
     return used, other
 
 
+# Most-shipped first: a build on both stable and beta is a stable build.
+_CHROME_CHANNELS = ("stable", "extended", "beta", "dev", "canary")
+_CHROME_BUILD = re.compile(r"\bChrome v?(\d+\.\d+\.\d+)\b", re.I)
+
+
+@lru_cache(maxsize=4)
+def _chrome_channels(_hour: int) -> Dict[str, str]:
+    """Chrome build ("160.0.8170") -> the channel Google shipped it on, or {}
+    if the API can't be read. `_hour` keys the cache so it refreshes hourly."""
+    out: Dict[str, str] = {}
+    base = "https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels"
+    try:
+        for ch in _CHROME_CHANNELS:
+            for v in requests.get(f"{base}/{ch}/versions?pageSize=200", timeout=5).json()["versions"]:
+                out.setdefault(v["version"].rsplit(".", 1)[0], ch)
+    except Exception:
+        return {}
+    return out
+
+
+def _label_channels(rows: list) -> list:
+    """Add a Channel column to Chrome release rows. The feed tags every
+    Chromium build "patch", so 160.0.8170 (a Canary build) read as a release
+    (live, 2026-11-19). A build on no channel is a branch tag, never shipped."""
+    if not any(_CHROME_BUILD.search(r.get("Release", "")) for r in rows):
+        return rows
+    known = _chrome_channels(int(time.time() // 3600))
+    if not known:
+        return rows
+    out = []
+    for r in rows:
+        m = _CHROME_BUILD.search(r.get("Release", ""))
+        row = {}
+        for k, v in r.items():      # Channel goes right after Release
+            row[k] = v
+            if k == "Release":
+                row["Channel"] = known.get(m.group(1), "not shipped") if m else ""
+        out.append(row)
+    return out
+
+
 def _show_tables(tables: dict) -> None:
     link = {"Link": st.column_config.LinkColumn("Link", display_text="open")}
+    tables = {**tables, "patches": _label_channels(tables.get("patches") or [])}
     for key, title in _TABLE_TITLES:
         if tables.get(key):
             st.markdown(f"##### {title} ({len(tables[key])})")
