@@ -5,35 +5,7 @@ paper), connected by a retrieval-level feedback loop. Two further agents were
 added to the demo pipeline after the evaluation was complete, and are marked as
 such throughout — no reported number depends on them.
 
-```
-                       ┌──────────────────────┐
-                       │    User question     │
-                       └──────────┬───────────┘
-                                  ▼
-                       ┌──────────────────────┐
-                       │  Temporal Grounder   │  (post-evaluation)
-                       │  "today" → a date    │
-                       └──────────┬───────────┘
-                                  ▼
-                       ┌──────────────────────┐
-                       │    Manager Agent     │
-                       └──────────┬───────────┘
-                                  │
-        ┌─────────────────────────┼─────────────────────────┐
-        ▼                         ▼                         ▼
-┌────────────────┐      ┌──────────────────┐      ┌──────────────────┐
-│ Query Rewriter │─────▶│    Retriever     │─────▶│    Evaluator     │
-│  (Llama 3.1)   │      │ union fetch +    │      │  score 0.0–1.0   │
-└────────────────┘      │ vendor-aware     │      └────────┬─────────┘
-        ▲               └──────────────────┘               │
-        │        widen the fetch on a negative signal      │
-        └─────────────────────────────────────────────────-┘
-                                  ▼
-                       ┌──────────────────────┐
-                       │   Answer Presenter   │  (post-evaluation)
-                       │  prose + citations   │
-                       └──────────────────────┘
-```
+![System architecture](architecture.svg)
 
 ## The four evaluated agents
 

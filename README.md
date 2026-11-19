@@ -3,7 +3,7 @@
 > Multi-agent RAG system that answers software update questions — *"are there known Siri issues after iOS 26.4?"* — by integrating release notes, security advisories, and community discussions, with a self-improving retrieval memory that learns from its own outcomes. Runs locally on Llama 3.1 8B.
 
 - **Live demo** — <https://software-update-questions.streamlit.app/> (public, no key required)
-- **Paper** — *An Adaptive Multi-Agent RAG Architecture…*, AgenticSE '26 (ACM CAIS 2026), retargeted and submitted to **TOSEM**. [PDF](https://drive.google.com/file/d/1WssnrTSiUxtYd2wWdV5QUKbIcB2-iPLH/view?usp=sharing) · source in [`paper/`](paper/)
+- **Paper** — *An Adaptive Multi-Agent RAG Architecture…*, AgenticSE '26 (ACM CAIS 2026). [PDF](https://drive.google.com/file/d/1WssnrTSiUxtYd2wWdV5QUKbIcB2-iPLH/view?usp=sharing) · source in [`paper/`](paper/)
 - **Authors** — Shradha Devendra Pujari, Dr. Solomon Berhe, University of the Pacific
 
 ---
@@ -42,16 +42,9 @@ Everything long-form lives in [`docs/`](docs/) and renders on GitHub in place.
 
 ## Architecture in one picture
 
-Four specialized agents coordinated by an Orchestrator, with a retrieval-level feedback loop (plus a Temporal Grounder and an Answer Presenter added to the demo *after* the evaluation — see [Architecture](docs/Architecture.md)):
+Four specialized agents coordinated by an Orchestrator, with a retrieval-level feedback loop (plus the Temporal Grounder, the state machine, the decision gate, the Answer Presenter and the guardrails, all added *after* the evaluation — see [Architecture](docs/Architecture.md)):
 
-```
-        User Question ──▶ Orchestrator ──┬──▶ Query Rewriter ──▶ Retriever ──▶ Evaluator
-                                         │                                        │
-                                         └──── retry if score < θ = 0.30 ◀────────┘
-                                                        │
-                                                        ▼
-                                          Generated Answer (grounded + cited)
-```
+![System architecture](docs/architecture.svg)
 
 | Agent | Responsibility |
 |---|---|
@@ -130,7 +123,7 @@ Everything else — environment variables, the presenter model, the evaluation h
 | `results/legacy/` | Pre-re-scoring result files from the conference paper (`eval_50_results_v2.json`, `ablation_results.json`, the accuracy runs) |
 | `scripts/` | Reporting and phase scripts (`paper_figures.py`, `leak_report.py`, ablation phases) and `annotate.py`, a terminal helper for labelling the decision sheet |
 | `tests/` | Offline test suite |
-| `paper/` | TOSEM manuscript source and figures — read [`paper/README.md`](paper/README.md) before editing the bibliography |
+| `paper/` | Manuscript source and figures — read [`paper/README.md`](paper/README.md) before editing the bibliography |
 | `specs/`, `slides/`, `Poster/` | Specifications, talk slides, and the poster |
 
 `app.py` is an earlier demo kept for reference; `app_1.py` is the one that ships. `DemoMain3.py` (run by `run_all.sh`) is a legacy ReAct demo; its extra dependencies are in `requirements-demo.txt`.
