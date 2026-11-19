@@ -33,6 +33,7 @@
 # frontier judge agrees; say the first and not the second. openai:gpt-4o is
 # still available as the second argument and is the stronger claim.
 set -euo pipefail
+: "${PREDICTION:?set PREDICTION to the one-line prediction for this sweep}"
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 LIMIT="${1:-100}"
@@ -71,6 +72,7 @@ MARAG_RANK_TIERS=flat \
   --generators marag,marag:ollama:llama3.1,single_agent:ollama:llama3.1 \
   --judge "$JUDGE" \
   --corpus "strict:$SNAP" \
+  --prediction "$PREDICTION" \
   --top-k 4 \
   --limit "$LIMIT" --stratify category,ecosystem \
   2>&1 | tee "$ROOT/results/judge_${JUDGE//[:\/]/_}.log"
