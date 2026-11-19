@@ -64,18 +64,72 @@ def test_osv_unmapped_ecosystem_is_none():
     assert H.osv({"query": "q", "vendor": "Apple iOS", "ecosystem": "apple_ios"}) is None
 
 
-def test_osv_maps_hits(monkeypatch):
+def test_osv_passes_package_and_version(monkeypatch):
     seen = {}
     def fake(pkg, eco, version):
         seen.update(pkg=pkg, eco=eco, version=version)
         return [{"id": "GHSA-x"}]
+    monkeypatch.setattr(H, "OSV_PACKAGES", {("npm_node", "lodash"): "lodash"})
     monkeypatch.setattr(H, "_osv_query", fake)
-    assert H.osv({"query": "is lodash 4.17.20 safe", "vendor": "lodash", "ecosystem": "npm_node"}) == "hold"
+    assert H.osv({"query": "is lodash 4.17.20 safe", "vendor": "lodash", "ecosystem": "npm_node"}) == "act"
     assert seen == {"pkg": "lodash", "eco": "npm", "version": "4.17.20"}
-    monkeypatch.setattr(H, "_osv_query", lambda *a: [])
-    assert H.osv({"query": "q", "vendor": "lodash", "ecosystem": "npm_node"}) == "act"
 
 
 def test_false_green_ignores_unanswered_holds():
     s = H.score(["hold", "hold"], [None, None])
     assert s["false_green"] is None and s["n_hold"] == 0
+
+
+# --- final-review fixes -----------------------------------------------------
+
+def test_osv_needs_explicit_package(monkeypatch):
+    """C1: an ecosystem label is not a package; no mapping -> no answer, never act."""
+    monkeypatch.setattr(H, "_osv_query", lambda *a: [])
+    assert H.osv({"query": "q", "vendor": "npm / Node.js", "ecosystem": "npm_node"}) is None
+
+
+def test_osv_vuln_means_patch(monkeypatch):
+    """I6: a known vuln means 'apply the fix' (act), as decide's patch_urgently does."""
+    monkeypatch.setattr(H, "OSV_PACKAGES", {("npm_node", "lodash"): "lodash"})
+    monkeypatch.setattr(H, "_osv_query", lambda *a: [{"id": "GHSA-x"}])
+    assert H.osv({"query": "lodash 4.17.20", "vendor": "lodash", "ecosystem": "npm_node"}) == "act"
+    monkeypatch.setattr(H, "_osv_query", lambda *a: [])
+    assert H.osv({"query": "q", "vendor": "lodash", "ecosystem": "npm_node"}) == "insufficient_evidence"
+
+
+def test_ours_uses_grounded_vendors(monkeypatch):
+    """C2: the arm grounds vendors from the question, not the sheet's label."""
+    seen = {}
+    monkeypatch.setattr(H, "_grounded_vendors", lambda q: ["edge"])
+    real = H.decide
+    def spy(pool, q, vendors=()):
+        seen["v"] = list(vendors)
+        return real(pool, q, vendors=vendors)
+    monkeypatch.setattr(H, "decide", spy)
+    H.ours({"query": "q", "vendor": "Apple macOS", "evidence": []})
+    assert seen["v"] == ["edge"]
+
+
+def test_pooled_prompt_has_source_date_and_tiebreak():
+    row = {"query": "q?", "evidence": [{"doc_id": "d1", "source": "nvd", "date": "2026-01-02",
+                                        "title": "T1", "text": "b"}]}
+    p = H.prompt_for(row, pooled=True)
+    assert "nvd" in p and "2026-01-02" in p
+    assert "If you are torn" in p and "does not address the question" in p
+
+
+def test_parse_strips_markdown():
+    for t in ("**VERDICT: hold**", "VERDICT: **hold**", "_VERDICT: hold_", "## VERDICT: hold", "`VERDICT: hold`"):
+        assert H.parse_verdict(t) == "hold", t
+
+
+def test_llm_error_is_its_own_column(monkeypatch):
+    class Boom:
+        def available(self): return True
+        def generate(self, *a, **k): raise H.LLMError("429")
+    monkeypatch.setattr(H, "make_client", lambda spec: Boom())
+    monkeypatch.setattr(H, "load_dotenv", lambda: None)
+    assert H.llm_system("openai:x", pooled=False)({"query": "q"}) == H.ERROR
+    s = H.score(["hold", "act"], [H.ERROR, "act"])
+    assert s["errors"] == 1 and s["unparsed"] == 0 and s["false_green"] is None
+    assert s["accuracy"] == 0.5 and s["accuracy_answered"] == 1.0

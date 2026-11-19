@@ -26,8 +26,10 @@ from decide import COLLAPSE, decide  # noqa: E402
 from eval_harness.providers import LLMError, make_client  # noqa: E402
 
 LABELS = ("act", "hold", "insufficient_evidence")
+ERROR = "error"   # the call failed (rate limit, truncation): not the model's fault
 _VERDICT = re.compile(r"^\s*verdict:\s*(act|hold|insufficient_evidence)\b",
                       re.IGNORECASE | re.MULTILINE)
+_MARKDOWN = re.compile(r"[*#>`]|(?<!\w)_|_(?!\w)")  # keeps insufficient_evidence intact
 
 
 def load_gold(path: str) -> list[dict]:
@@ -47,16 +49,21 @@ def load_gold(path: str) -> list[dict]:
 
 def parse_verdict(text: str) -> str | None:
     """The label on a `VERDICT:` line; the last one wins. None if there is none."""
-    found = _VERDICT.findall(text or "")
+    found = _VERDICT.findall(_MARKDOWN.sub("", text or ""))
     return found[-1].lower() if found else None
 
 
 def score(gold: list[str], pred: list[str | None]) -> dict:
+    """accuracy counts every row (no answer = wrong); accuracy_answered and
+    false_green count only rows the system gave a label on."""
     n = len(gold)
-    holds = [p for g, p in zip(gold, pred) if g == "hold" and p is not None]  # answered only
+    answered = [(g, p) for g, p in zip(gold, pred) if p in LABELS]
+    holds = [p for g, p in answered if g == "hold"]
     return {
         "n": n,
         "accuracy": sum(g == p for g, p in zip(gold, pred)) / n if n else None,
+        "accuracy_answered": sum(g == p for g, p in answered) / len(answered) if answered else None,
+        "errors": sum(p == ERROR for p in pred),
         "n_hold": len(holds),
         "false_green": sum(p == "act" for p in holds) / len(holds) if holds else None,
         "abstain": sum(p == "insufficient_evidence" for p in pred) / n if n else None,
@@ -74,6 +81,9 @@ Answer with your reasoning, then a final line that is exactly one of:
 VERDICT: act                    (the evidence supports doing something now: install, stay, apply a fix, roll back)
 VERDICT: hold                   (the evidence speaks to the question but says wait: conflicting, outdated, or "not yet")
 VERDICT: insufficient_evidence  (nothing you know or were given answers this question)
+
+A source about the product that does not address the question is still insufficient.
+If you are torn, it is insufficient_evidence.
 """
 
 
@@ -82,14 +92,30 @@ def prompt_for(row: dict, pooled: bool) -> str:
     context = f"Context: {row['context']}\n" if row.get("context") else ""
     evidence = ""
     if pooled:
-        docs = "\n".join(f"- [{d.get('doc_id')}] {d.get('title', '')}: {d.get('text', '')}"
+        docs = "\n".join(f"- [{d.get('doc_id')}] ({d.get('source', '')}, {d.get('date', '')}) "
+                          f"{d.get('title', '')}: {d.get('text', '')}"
                           for d in row.get("evidence", []))
         evidence = f"Evidence (use only this):\n{docs or '(none)'}\n"
     return PROMPT.format(query=row["query"], context=context, evidence=evidence)
 
 
+_CATALOG = None
+
+
+def _grounded_vendors(query: str) -> list:
+    """The vendors the marag_decide arm would use (eval_harness/generators.py)."""
+    global _CATALOG
+    import grounding
+    import vendor
+    if _CATALOG is None:
+        _CATALOG = vendor.load_catalog(fetch=False)
+    return grounding.ground(query, catalog=_CATALOG).vendor_names
+
+
 def ours(row: dict) -> Optional[str]:
-    d = decide(row.get("evidence", []), row["query"], vendors=[row["vendor"]] if row.get("vendor") else [])
+    """decide() on the row's pool with the arm's grounded vendors. The pool is the
+    sheet's union of every arm's documents, the same one the annotators and LLMs see."""
+    d = decide(row.get("evidence", []), row["query"], vendors=_grounded_vendors(row["query"]))
     return COLLAPSE[d.verdict]
 
 
@@ -101,13 +127,20 @@ def llm_system(spec: str, pooled: bool) -> Optional[Callable[[dict], Optional[st
         return None
 
     def ask(row: dict) -> Optional[str]:
-        try:
-            return parse_verdict(client.generate(prompt_for(row, pooled)))
-        except LLMError:
-            return None
+        for _ in range(2):  # one retry: rate limits are transient
+            try:
+                # 4096: gemini-2.5 spends thinking tokens out of this budget
+                return parse_verdict(client.generate(prompt_for(row, pooled), max_tokens=4096))
+            except LLMError:
+                continue
+        return ERROR
     return ask
 
 
+# (sheet ecosystem, sheet vendor) -> OSV package name. Empty on purpose: the
+# decision sheet names ecosystems ("npm / Node.js"), never a package, so a
+# scanner has nothing to look up. Add rows only for questions that name one.
+OSV_PACKAGES: dict = {}
 # Sheet ecosystem -> OSV ecosystem. Everything else is outside what a scanner sees.
 OSV_ECOSYSTEMS = {"npm_node": "npm", "pip_python": "PyPI", "cargo_rust": "crates.io",
                   "debian": "Debian", "ubuntu": "Ubuntu", "android": "Android",
@@ -126,18 +159,19 @@ def _osv_query(package: str, ecosystem: str, version: Optional[str]) -> list:
 
 
 def osv(row: dict) -> Optional[str]:
-    """hold if OSV lists a vuln, act if none, None if unmapped or the lookup failed.
-    A failed scan must never read as a green light."""
+    """act if OSV lists a vuln (apply the fix, as decide's patch_urgently does),
+    insufficient_evidence if it lists none (a clean scan says nothing about
+    waiting), None when there is no package to scan or the lookup failed."""
     eco = OSV_ECOSYSTEMS.get(row.get("ecosystem", ""))
-    if not eco or not row.get("vendor"):
+    package = OSV_PACKAGES.get((row.get("ecosystem", ""), row.get("vendor", "")))
+    if not eco or not package:
         return None
-    # ponytail: vendor name stands in for the package name; a real scanner reads a manifest.
     m = _VERSION.search(row["query"])
     try:
-        vulns = _osv_query(row["vendor"].lower(), eco, m.group(0) if m else None)
+        vulns = _osv_query(package, eco, m.group(0) if m else None)
     except (OSError, ValueError):
         return None
-    return "hold" if vulns else "act"
+    return "act" if vulns else "insufficient_evidence"
 
 
 # --- run + report -----------------------------------------------------------
@@ -148,7 +182,7 @@ LLM_RUNS = [("ollama:llama3.1", False), ("openai:gpt-4o-mini", False), ("openai:
 
 def systems() -> tuple[dict, list]:
     """name -> fn for every runnable system, plus the names that were skipped."""
-    run, skipped = {"ours (marag_decide)": ours, "osv scanner": osv}, []
+    run, skipped = {"ours (decide, grounded vendors)": ours, "osv scanner": osv}, []
     for spec, pooled in LLM_RUNS:
         name = f"{spec} ({'pooled' if pooled else 'closed'})"
         fn = llm_system(spec, pooled)
@@ -170,16 +204,19 @@ def report(sheet: str, gold_rows: list, preds: dict, skipped: list, n_total: int
              f"Gold rows: {len(gold_rows)} of {n_total} (both annotators agree). "
              "Gold is labelled from each row's evidence pool, so *pooled* LLM runs are the "
              "like-for-like comparison; *closed* runs show what a user typing the question gets.", "",
-             "| system | answered | accuracy | false green (answered holds) | abstain | unparsed |",
-             "|---|---:|---:|---:|---:|---:|"]
+             "| system | answered | accuracy (all rows) | accuracy (answered) | false green (answered holds) | abstain | unparsed | errors |",
+             "|---|---:|---:|---:|---:|---:|---:|---:|"]
     for name, pred in preds.items():
         s = score(gold, pred)
-        answered = s["n"] - s["unparsed"]
-        lines.append(f"| {name} | {answered}/{s['n']} | {_pct(s['accuracy'])} | "
-                     f"{_pct(s['false_green'])} ({s['n_hold']}) | {_pct(s['abstain'])} | {s['unparsed']} |")
+        answered = s["n"] - s["unparsed"] - s["errors"]
+        lines.append(f"| {name} | {answered}/{s['n']} | {_pct(s['accuracy'])} | {_pct(s['accuracy_answered'])} | "
+                     f"{_pct(s['false_green'])} ({s['n_hold']}) | {_pct(s['abstain'])} | {s['unparsed']} | {s['errors']} |")
     lines += [""] + [f"- skipped: {n} (no key or backend unavailable)" for n in skipped]
-    lines += ["", "OSV `answered` is its coverage: ecosystems outside npm/PyPI/crates/Debian/"
-              "Ubuntu/Android/Linux are invisible to a scanner."]
+    lines += ["", "OSV `answered` is its coverage: it needs a package name, and these questions "
+              "name products and ecosystems, not packages.",
+              "`act` covers install, stay, apply a fix and roll back, so a false green is "
+              "\"said act when the evidence says wait\", not only \"told to update\".",
+              "`errors` are failed calls (rate limit, truncation), not model answers."]
     return "\n".join(lines) + "\n"
 
 

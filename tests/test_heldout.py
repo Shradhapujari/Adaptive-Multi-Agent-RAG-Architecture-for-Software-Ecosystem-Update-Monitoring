@@ -26,3 +26,17 @@ def test_output_dir_is_gitignored():
     out = subprocess.run(["git", "check-ignore", "data/heldout/decision_heldout.jsonl"],
                          cwd=root, capture_output=True, text=True)
     assert out.returncode == 0
+
+
+def test_public_set_is_repo_anchored(monkeypatch, tmp_path):
+    """I7: run from another directory, the public set must still be found."""
+    monkeypatch.chdir(tmp_path)
+    assert len(B.public_questions()) > 0
+    assert B.OUT.startswith(B.ROOT)
+
+
+def test_nested_heldout_dir_is_ignored():
+    import subprocess
+    out = subprocess.run(["git", "check-ignore", "scripts/data/heldout/x.jsonl"], cwd=B.ROOT,
+                         capture_output=True, text=True)
+    assert out.returncode == 0

@@ -16,10 +16,19 @@ import argparse
 import glob
 import json
 import os
+import sys
 
 from build_decision_benchmark import build, file_hash, load_pools
 
-OUT = "data/heldout/decision_heldout.jsonl"
+ROOT = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(ROOT, "data", "heldout", "decision_heldout.jsonl")
+
+
+def public_questions() -> list:
+    """Every question in a public benchmark file, found from the repo root."""
+    paths = [p for p in glob.glob(os.path.join(ROOT, "data", "benchmark_*.json"))
+             if not p.endswith(".manifest.json")]
+    return [q for p in paths for q in json.load(open(p))]
 
 
 def _norm(q: str) -> str:
@@ -43,8 +52,9 @@ def main() -> None:
     ap.add_argument("--after", required=True, help="freeze date, YYYY-MM-DD")
     ap.add_argument("--n", type=int, default=200)
     a = ap.parse_args()
-    public = [q for p in glob.glob("data/benchmark_*.json") if not p.endswith(".manifest.json")
-              for q in json.load(open(p))]
+    public = public_questions()
+    if not public:
+        sys.exit("no public benchmark found: refusing to build a split that excludes nothing")
     records = fresh(json.load(open(a.questions)), public, a.after)
     rows = build(records, load_pools(a.run_dir), n=a.n)
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
