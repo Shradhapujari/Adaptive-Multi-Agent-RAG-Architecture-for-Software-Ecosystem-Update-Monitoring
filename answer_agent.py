@@ -559,8 +559,8 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
         date = w.get("date", "")
         host = w.get("host") or _host(w.get("url", ""))
         ev.append(Evidence(
-            label=("Vendor page" if trusted else "Web") + (f" - {host}" if host else "")
-                  + (f", {date}" if date else ""),
+            label=w.get("label") or (("Vendor page" if trusted else "Web") + (f" - {host}" if host else "")
+                                     + (f", {date}" if date else "")),
             kind="web", title=_clean(w.get("title", ""), 160),
             detail=_clean(w.get("body") or w.get("text", ""), 400),
             url=w.get("url", ""), date=date,
@@ -862,6 +862,10 @@ def unresolved_products(query: str, results: Dict) -> List[str]:
     """
     g = results.get("grounding")
     if g is None or getattr(g, "vendors", None):
+        return []
+    # A live source that found the product by name (package registry,
+    # endoflife.date slug, status host) has resolved it; a web hit alone has not.
+    if (results.get("live") or {}).get("resolved"):
         return []
     if not vendor.catalog_is_full():
         return []

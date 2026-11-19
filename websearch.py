@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from typing import List, Optional, Tuple
 
 import guardrail
@@ -55,21 +56,46 @@ def available() -> bool:
             return False
 
 
-def _raw_search(query: str, limit: int) -> List[dict]:
-    """Raw hits from DuckDuckGo: [{title, body, href}]. Isolated so the
-    self-check can substitute it and run offline; returns [] if no backend."""
+_sleep = time.sleep
+
+
+def _ddg(query: str, limit: int, timelimit: Optional[str], news: bool) -> List[dict]:
+    """One DuckDuckGo call. Raises on a blocked or failed search. Isolated so
+    the self-check can substitute it and run offline."""
     try:
         from ddgs import DDGS  # type: ignore
     except Exception:  # noqa: BLE001
+        from duckduckgo_search import DDGS  # type: ignore
+    kw = {"max_results": limit} | ({"timelimit": timelimit} if timelimit else {})
+    with DDGS() as ddg:
+        return list((ddg.news if news else ddg.text)(query, **kw))
+
+
+def search(query: str, limit: int = MAX_RESULTS, timelimit: Optional[str] = None,
+           news: bool = False) -> Tuple[List[dict], Optional[str]]:
+    """(hits, error). DuckDuckGo throttles: the same query came back empty and
+    then with five hits (2026-11-19), so an exception or an empty list gets one
+    retry. `error` is None for a real miss, so the console can tell "search
+    blocked" from "the web has nothing"."""
+    if not available():
+        return [], "no backend"
+    err = None
+    for attempt in range(2):
         try:
-            from duckduckgo_search import DDGS  # type: ignore
-        except Exception:  # noqa: BLE001
-            return []
-    try:
-        with DDGS() as ddg:
-            return list(ddg.text(query, max_results=limit))
-    except Exception:  # noqa: BLE001 -- a dead search is a web miss, not a crash
-        return []
+            hits = _ddg(query, limit, timelimit, news)
+            err = None
+            if hits:
+                return hits, None
+        except Exception as e:  # noqa: BLE001 -- a dead search is reported, not raised
+            err = f"search failed: {type(e).__name__}"
+        if attempt == 0:
+            _sleep(2)
+    return [], err
+
+
+def _raw_search(query: str, limit: int) -> List[dict]:
+    """Raw hits from DuckDuckGo: [{title, body, href}], [] on a miss or failure."""
+    return search(query, limit)[0]
 
 
 def _to_doc(i: int, hit: dict) -> Optional[dict]:
@@ -104,8 +130,9 @@ def fallback(query: str, limit: int = MAX_RESULTS) -> Tuple[List[dict], dict]:
     """
     if not available():
         return [], {"backend": False, "n": 0, "used": False}
-    docs = [d for d in (_to_doc(i, h) for i, h in enumerate(_raw_search(query, limit))) if d]
-    return docs, {"backend": True, "n": len(docs), "used": True}
+    hits, err = search(query, limit)
+    docs = [d for d in (_to_doc(i, h) for i, h in enumerate(hits)) if d]
+    return docs, {"backend": True, "n": len(docs), "used": True, "error": err}
 
 
 # ─────────────────────────────────────────────── trusted vendor pages
@@ -190,9 +217,12 @@ def trusted(query: str, vendors, limit: int = MAX_RESULTS) -> Tuple[List[dict], 
         return [], {"backend": False, "n": 0, "used": False, "hosts": list(allowed)}
     month = _date.today().strftime("%B %Y")
     searches = ([f"{named[0]} security fixes {month} site:{own[0]}"] if own else []) + [query]
-    docs, seen = [], set()
+    docs, seen, errs = [], set(), []
     for q in searches:
-        for hit in _raw_search(q, limit * 2):
+        hits, err = search(q, limit * 2)
+        if err:
+            errs.append(err)
+        for hit in hits:
             url = str(hit.get("href") or hit.get("url") or "").strip()
             host = _host(url)
             if not _on(host, allowed) or url in seen:
@@ -206,7 +236,11 @@ def trusted(query: str, vendors, limit: int = MAX_RESULTS) -> Tuple[List[dict], 
                 docs.append(doc)
     docs.sort(key=lambda d: d["date"], reverse=True)
     docs = docs[:limit]
-    return docs, {"backend": True, "n": len(docs), "used": True, "hosts": list(allowed)}
+    # An error only when every search failed: one blocked search of two is
+    # still an answer from the other.
+    error = errs[0] if len(errs) == len(searches) else None
+    return docs, {"backend": True, "n": len(docs), "used": True, "hosts": list(allowed),
+                  "error": error}
 
 
 # ─────────────────────────────────────────────────────────── self-check
@@ -215,14 +249,15 @@ def _demo() -> None:
     import websearch as W
     # Offline: substitute the raw searcher so the module is exercised with no
     # network and no DDG backend installed.
-    W._raw_search = lambda q, limit: [  # type: ignore
+    W._sleep = lambda s: None  # type: ignore
+    W._ddg = lambda q, limit, timelimit, news: [  # type: ignore
         {"title": "Node.js 24.9.0 released", "body": "v24.9.0 ships 2026-10-01, fixes CVE-2026-5555.",
          "href": "https://nodejs.org/en/blog"},
         {"title": "", "body": "​zeroｗidth junk", "href": ""},   # screened/scrubbed
     ]
     W.available = lambda: True  # type: ignore
     docs, meta = W.fallback("latest node version", limit=5)
-    assert meta["used"] and meta["backend"] and meta["n"] == 2, meta
+    assert meta["used"] and meta["backend"] and meta["n"] == 2 and meta["error"] is None, meta
     assert docs[0]["source"] == "web" and docs[0]["kind"] == "community"
     assert docs[0]["text"].startswith("[untrusted:community]") and docs[0]["text"].endswith("[/untrusted]")
     assert "24.9.0" in docs[0]["versions"] and "CVE-2026-5555" in docs[0]["cves"]
@@ -232,7 +267,7 @@ def _demo() -> None:
     assert ev is graph.Evidence.SUFFICIENT and "24.9.0" in vals, (ev, vals)
     # Trusted: only the vendor's own host or an advisory authority survives,
     # the page date is read off the snippet, and newest comes first.
-    W._raw_search = lambda q, limit: [  # type: ignore
+    W._ddg = lambda q, limit, timelimit, news: [  # type: ignore
         {"title": "Stable Channel Update for Desktop", "href":
          "https://chromereleases.googleblog.com/2026/10/stable.html",
          "body": "Oct 1, 2026 · The Stable channel has been updated to 154.0.8037.97."},
@@ -244,7 +279,7 @@ def _demo() -> None:
     docs, meta = W.trusted("chrome bugs fixed", ["chrome"])
     assert [d["host"] for d in docs] == ["chromereleases.googleblog.com", "nvd.nist.gov"], docs
     assert docs[0]["date"] == "2026-10-01" and docs[0]["body"].startswith("The Stable")
-    assert docs[0]["source"] == "web_trusted" and meta["n"] == 2
+    assert docs[0]["source"] == "web_trusted" and meta["n"] == 2 and meta["error"] is None
     # No backend → no documents, so the ABSENT path abstains as before.
     W.available = lambda: False  # type: ignore
     assert W.fallback("anything") == ([], {"backend": False, "n": 0, "used": False})

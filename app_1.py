@@ -962,6 +962,12 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     temporal = g.temporal
     results["temporal"] = temporal
     results["grounding"] = g
+    # Outage, EOL, comparison, how-to and package questions get one fixed live
+    # source each (live_sources.py, console only). Behind the same toggle as
+    # the web search: off means no live read at all.
+    import live_sources
+    live_kind = live_sources.kind(query, g.vendor_names) if web_fallback else None
+    results["live"] = None
     # A "did you mean" for a question that named no known product; shown to
     # the reader, never substituted into retrieval.
     results["suggestion"] = None if g.vendors else vendor.suggest(query)
@@ -1257,6 +1263,20 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         results["cve"], grounded, survey_on=survey_on
     )
 
+    # Package safety is the one live type allowed near the verdict, and only
+    # through OSV advisories that have a fixed release and a CVE id
+    # (live_sources.package_safety); it has to land before the gate runs.
+    if live_kind == "package_safety":
+        t0 = time.time()
+        pkg = live_sources.package_safety(query)
+        results["decision_advisories"] = (results.get("decision_advisories") or []) + pkg["verdict_docs"]
+        results["web"] = (results.get("web") or []) + pkg["answer_docs"]
+        # No OSV verdict row: the feed pool is unscoped for a package the
+        # catalog doesn't know, so any verdict it reaches is noise -- and a
+        # "safe" from it would be a false green.
+        results["live"] = pkg["meta"] | {"answer_only": not pkg["verdict_docs"]}
+        results["timing"]["live"] = round(time.time() - t0, 2)
+
     # Step 6 — Decision Gate
     # The output the Phase 2 arm is scored on: not a paragraph over the top-k
     # but a verdict about the update, each verdict carrying the obligations it
@@ -1316,9 +1336,23 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         t0 = time.time()
         import websearch
         web_docs, meta = websearch.trusted(query, g.vendor_names, limit=limit)
-        results["web"] = web_docs
+        results["web"] = (results.get("web") or []) + web_docs
         results["web_search"] = meta
         results["timing"]["web_search"] = round(time.time() - t0, 2)
+    if live_kind and live_kind != "package_safety":
+        t0 = time.time()
+        live_docs, meta = live_sources.fetch(live_kind, query)
+        results["live"] = meta | {"answer_only": live_sources.answer_only(live_kind, query)}
+        # When the live answer is the answer, it goes first: the paragraph
+        # cites only the first few web docs. Otherwise it is extra context.
+        results["web"] = (live_docs + (results.get("web") or []) if results["live"]["answer_only"]
+                          else (results.get("web") or []) + live_docs)
+        results["timing"]["live"] = round(time.time() - t0, 2)
+    # No act/hold verdict when the live answer stands in for it: an outage,
+    # EOL, comparison or how-to question with no update in it ("Is GitHub
+    # down?" read "Patch now" off a feed advisory), or a package OSV cleared.
+    if (results.get("live") or {}).get("answer_only"):
+        results["decision"] = None
     # GR-2 fires only when the local lake was ABSENT on a *healthy* fetch: the
     # documents came back and none was about the asked product. A degraded
     # fetch is the rewrite-retry case, not a web-search case, and a verdict that
@@ -1994,15 +2028,24 @@ def _md_escape(text: str) -> str:
     return re.sub(r"([\\`*_{}\[\]()<>#!|~$])", r"\\\1", text or "")
 
 
-def _off_topic_note(query: str) -> Optional[str]:
+def _off_topic_note(query: str, live: bool = False) -> Optional[str]:
     """Why the console declines `query` before fetching anything, or None.
 
     `Grounding.needs_clarification` -- no product and no confident software
     intent -- was already computed and only ever printed as a warning above an
     answer drawn from an unscoped search. The console stops there instead.
+
+    `live` (web search on): a question naming a package ecosystem ("npm",
+    "pip", "package") that has a live type passes -- the catalog doesn't list
+    PyPI/npm packages, so "Is requests 2.31.0 safe? (pip)" was declined. A
+    live type alone isn't enough: "How do I bake bread?" reads as a how-to.
     """
     if not ground(query).needs_clarification:
         return None
+    if live:
+        import live_sources
+        if live_sources.kind(query) and live_sources._PKG_CUE.search(query):
+            return None
     name = vendor.suggest(query)
     return ("This doesn't look like a question about a software update, so I "
             "haven't searched." + (f" Did you mean **{vendor.pretty(name)}**?" if name else
@@ -2013,6 +2056,17 @@ def _tab_short(results: dict, presented=None) -> None:
     dec = results.get("decision")
     query = results.get("original_query", "")
     st.caption(f"**Q:** {_md_escape(query)}")
+    live = results.get("live")
+    if live and live.get("answer_only"):
+        # An outage, EOL, comparison or how-to question has no verdict
+        # (run_pipeline drops it), so the answer itself is the headline. The
+        # abstention and "Which product?" branches below are for the feeds.
+        import live_sources
+        line = _answer_line(results, presented.text) if presented is not None else ""
+        st.markdown(f"### {line or 'See the sources below'}")
+        st.caption(f"{live_sources.KIND_LABEL.get(live['kind'], live['kind'])} question → "
+                   f"{live['source']}" + (f" — {live['error']}" if live.get("error") else ""))
+        return
     asks_value = graph.asks(query) in ("version", "date")
     g = results.get("grounding")
     no_product = g is not None and not getattr(g, "vendors", None)
@@ -2378,6 +2432,11 @@ def _tab_loops(results: dict, query: str) -> None:
                     "set `MARAG_WEB_FALLBACK=1` to enable")
     if wf is not None:
         st.markdown(f"**GR-2 web fallback:** {'fired, ' + str(wf['n']) + ' docs' if wf['used'] else 'not available'}")
+    lv = results.get("live")
+    if lv:
+        import live_sources
+        st.markdown(f"**Live source:** {live_sources.KIND_LABEL.get(lv['kind'], lv['kind'])} question "
+                    f"→ {lv['source']}, {lv['n']} result(s)" + (f" — {lv['error']}" if lv.get("error") else ""))
     st.caption("The gate reads what the documents contain; ABSENT on a healthy "
                "fetch abstains, only a degraded fetch re-enters rewrite.")
 
@@ -2387,6 +2446,13 @@ def ask(q: str, limit: int = 5, source: str = "agent", checks: Optional[dict] = 
     tries `run_fast` and escalates to the full pipeline when it returns None;
     `results["route"]` says which path actually answered."""
     route = dict(zip(("mode", "why"), graph.route_query(q)))
+    import live_sources
+    import websearch
+    web_on = bool((checks or {}).get("web_search")) or websearch.ENABLE_WEB_FALLBACK
+    if route["mode"] == "fast" and web_on and live_sources.kind(q):
+        # "Is Python 3.9 still supported?" reads as a version lookup, and the
+        # fast path would answer it with the latest version.
+        route = {"mode": "full", "why": "live source question"}
     with st.spinner(f"{route['mode'].upper()} path — {route['why']}…"):
         results = run_fast(q, limit=limit, source=source) if route["mode"] == "fast" else None
         if results is not None:
@@ -2577,7 +2643,9 @@ def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = Non
         with strip:
             _render_mermaid(_pipeline_mermaid(), height=150)
         return
-    note = _off_topic_note(q)
+    import websearch
+    note = _off_topic_note(q, live=bool((checks or {}).get("web_search"))
+                           or websearch.ENABLE_WEB_FALLBACK)
     if note:
         with strip:
             _render_mermaid(_pipeline_mermaid(), height=150)
