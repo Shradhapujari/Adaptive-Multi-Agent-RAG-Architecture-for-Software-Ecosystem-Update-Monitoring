@@ -21,10 +21,21 @@ import json
 import math
 import os
 import statistics as st
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS = os.path.join(ROOT, "results")
+FIX_COMMITS = ("a1c717c", "46ad7d0")
+
+
+def descends(sha: str, ancestor: str) -> bool:
+    """True iff `ancestor` is in `sha`'s history; False on any git error."""
+    try:
+        return subprocess.run(["git", "merge-base", "--is-ancestor", ancestor, sha],
+                              cwd=ROOT, capture_output=True).returncode == 0
+    except OSError:
+        return False
 
 
 def load(run_dir: str) -> dict | None:
@@ -44,13 +55,24 @@ def admissibility(run: dict) -> list[tuple[bool, str]]:
     """evaluation-protocol.md §5, read off the artifact rather than remembered."""
     c = run["cfg"]
     corpus = c.get("corpus") or {}
-    return [
-        (corpus.get("mode") == "replay", f"corpus.mode == replay (is {corpus.get('mode')})"),
+    checks = [
+        (corpus.get("mode") in ("replay", "strict"),
+         f"corpus.mode is replay or strict (is {corpus.get('mode')})"),
         (bool(corpus.get("frozen")), f"corpus.frozen (corpus_misses={corpus.get('corpus_misses')})"),
         (not c.get("rerank_degraded"), f"reranker not degraded ({c.get('rerank_spec')})"),
         (bool(c.get("judge_active")), "judge active"),
         (bool(c.get("judge_pool")), "pool judged (pool_recall meaningful)"),
     ]
+    if "preflight_refusals" in c:  # post-gate run; older runs lack the key
+        refusals = c["preflight_refusals"]
+        sha = str(c.get("git_sha"))
+        checks += [
+            (refusals == [], f"no preflight refusals ({'; '.join(map(str, refusals)) or 'none'})"),
+            (corpus.get("mode") == "strict", f"corpus.mode == strict (is {corpus.get('mode')})"),
+            (all(descends(sha, f) for f in FIX_COMMITS),
+             f"git_sha {sha} descends from {', '.join(FIX_COMMITS)}"),
+        ]
+    return checks
 
 
 def mean_ci(xs: list[float]) -> tuple[float, float]:
@@ -86,6 +108,7 @@ def main(argv: list[str]) -> int:
             print(f"   [{'x' if passed else ' '}] {label}")
         if ok:
             admissible.append(r)
+    admissible_all = list(admissible)
 
     # ---- does the freeze actually hold? -------------------------------
     # Run over every run, not only admissible ones. This check is *most*
@@ -132,7 +155,7 @@ def main(argv: list[str]) -> int:
 
     print("\nReminder: an arm difference below the minimum detectable effect for this "
           "n is 'not detectable at this sample size', not a null result.")
-    return 0
+    return 0 if len(admissible_all) == len(runs) else 1
 
 
 if __name__ == "__main__":
