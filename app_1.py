@@ -1900,10 +1900,36 @@ def _headline_release(results: dict, query: str) -> Optional[dict]:
     return best
 
 
-# Vendors whose release feed mixes channels, mapped to an API that names stable.
+def _chrome_stable(j) -> Tuple[str, str]:
+    r = j["releases"][0]
+    return r["version"], r["serving"]["startTime"][:10]
+
+
+def _firefox_stable(j) -> Tuple[str, str]:
+    # "major" and "stability" are the release channel; esr and dev are not.
+    # The feed had 160.0.0 while 160.0.1 had shipped (live, 2026-11-19).
+    r = max((r for r in j["releases"].values() if r["category"] in ("major", "stability")),
+            key=lambda r: monitor.version_key(r["version"]))
+    return r["version"], r["date"]
+
+
+def _edge_stable(j) -> Tuple[str, str]:
+    # The feed has no Edge rows at all, so without this there is no headline.
+    p = next(p for p in j if p["Product"] == "Stable")
+    r = next(r for r in p["Releases"] if r["Platform"] == "Windows")
+    return r["ProductVersion"], r["PublishedTime"][:10]
+
+
+# Vendors whose release feed mixes channels or lags, mapped to the vendor's own
+# stable-channel API: (url, product, source label, parser -> (version, ISO date)).
 _STABLE_CHANNEL = {
-    "chrome": "https://versionhistory.googleapis.com/v1/chrome/platforms/win/"
-              "channels/stable/versions/all/releases?pageSize=1",
+    "chrome": ("https://versionhistory.googleapis.com/v1/chrome/platforms/win/"
+               "channels/stable/versions/all/releases?pageSize=1",
+               "Chrome", "stable channel (Google version history)", _chrome_stable),
+    "firefox": ("https://product-details.mozilla.org/1.0/firefox.json",
+                "Firefox", "release channel (Mozilla product-details)", _firefox_stable),
+    "edge": ("https://edgeupdates.microsoft.com/api/products",
+             "Edge", "stable channel (Microsoft Edge updates)", _edge_stable),
 }
 
 
@@ -1911,13 +1937,13 @@ _STABLE_CHANNEL = {
 def _stable_release(name: str, _hour: int) -> Optional[dict]:
     """Current stable release of `name`, or None if the API can't be read.
     `_hour` keys the cache so the answer refreshes hourly."""
+    url, product, source, parse = _STABLE_CHANNEL[name]
     try:
-        r = requests.get(_STABLE_CHANNEL[name], timeout=5).json()["releases"][0]
-        return {"product": name.capitalize(), "version": r["version"], "channel": "stable",
-                "source": "stable channel (Google version history)",
-                "date": r["serving"]["startTime"][:10].replace("-", ""), "is_cve": False}
+        version, day = parse(requests.get(url, timeout=5).json())
     except Exception:
         return None
+    return {"product": product, "version": version, "channel": "stable", "source": source,
+            "date": day.replace("-", ""), "is_cve": False}
 
 
 def _no_product_note(results: dict) -> str:
