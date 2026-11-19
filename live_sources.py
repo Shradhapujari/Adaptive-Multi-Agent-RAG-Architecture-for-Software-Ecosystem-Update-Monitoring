@@ -77,6 +77,11 @@ _BEFORE_CUE = re.compile(_NAME + r"\s+(?:package|library|module|npm|pip|pypi)\b"
 _IS_VERSIONED = re.compile(r"\bis\s+(?:the\s+)?" + _NAME + r"\s+v?\d+(?:\.\d+)+", _I)
 
 
+def has_package_cue(query: str) -> bool:
+    """Does the question name a package ecosystem ("npm", "pip", "package")?"""
+    return bool(_PKG_CUE.search(query or ""))
+
+
 def status_product(query: str) -> Optional[str]:
     """The STATUS_HOSTS key the question names, if any."""
     q = query.lower()
@@ -118,7 +123,7 @@ def answer_only(kind_: Optional[str], query: str) -> bool:
 def kind(query: str, vendors: Sequence[str] = ()) -> Optional[str]:
     """Which live type the question is, in KINDS precedence order, or None."""
     q = query or ""
-    if (not vendors and _PKG_CUE.search(q) and _SAFETY.search(q)
+    if (not vendors and has_package_cue(q) and _SAFETY.search(q)
             and package_ref(q) is not None):
         return "package_safety"
     if _DOWN.search(q) and status_product(q):
@@ -214,7 +219,10 @@ def _incident(query: str):
         return docs, _meta("incident", "DuckDuckGo news, last month", docs, None, False)
     hits, err2 = websearch.search(query, timelimit="m")
     docs = _web_docs(hits, news=False)
-    return docs, _meta("incident", "DuckDuckGo, last month", docs, err2 or err, False)
+    # An error only when nothing came back: a failed news search the text
+    # search made up for isn't worth a "search failed" beside the results.
+    return docs, _meta("incident", "DuckDuckGo, last month", docs,
+                       None if docs else (err2 or err), False)
 
 
 @lru_cache(maxsize=1)
@@ -278,6 +286,22 @@ def _eol(query: str):
     return docs, _meta("eol", "endoflife.date", docs, None, True)
 
 
+# "Postgres or MySQL", "Rust vs. Go", "Postgres better than MySQL": the two
+# names either side. "this or that" isn't a pair of products.
+_PAIR = re.compile(r"\b([A-Za-z][\w.+#-]*)\s+(?:or|vs\.?|versus|compared to|better than)"
+                   r"\s+([A-Za-z][\w.+#-]*)", re.I)
+_NOT_A_PRODUCT = {"this", "that", "it", "them", "one", "the", "a", "an", "not", "and"}
+
+
+def _compare_query(query: str) -> str:
+    """"A vs B" when the question names a pair, else the question itself:
+    "A vs B" pulls comparison articles, a full sentence pulls forum noise."""
+    m = _PAIR.search(query)
+    if m and not {m.group(1).lower(), m.group(2).lower()} & _NOT_A_PRODUCT:
+        return f"{m.group(1)} vs {m.group(2).rstrip('.?,')}"
+    return query
+
+
 def _plain(kind_: str, query: str, timelimit: Optional[str], source: str):
     hits, err = websearch.search(query, timelimit=timelimit)
     docs = _web_docs(hits, news=False)
@@ -295,6 +319,8 @@ def fetch(kind_: str, query: str) -> Tuple[List[dict], dict]:
         return _eol(query)
     if kind_ == "compat":
         return _plain(kind_, query, "y", "DuckDuckGo, last year")
+    if kind_ == "compare":
+        return _plain(kind_, _compare_query(query), None, "DuckDuckGo")
     return _plain(kind_, query, None, "DuckDuckGo")
 
 

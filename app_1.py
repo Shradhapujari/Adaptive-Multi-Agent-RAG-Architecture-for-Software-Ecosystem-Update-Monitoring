@@ -2044,7 +2044,7 @@ def _off_topic_note(query: str, live: bool = False) -> Optional[str]:
         return None
     if live:
         import live_sources
-        if live_sources.kind(query) and live_sources._PKG_CUE.search(query):
+        if live_sources.kind(query) and live_sources.has_package_cue(query):
             return None
     name = vendor.suggest(query)
     return ("This doesn't look like a question about a software update, so I "
