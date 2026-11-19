@@ -108,6 +108,13 @@ _UNSEARCHABLE = frozenset({
     "system", "tabs",
 })
 
+# Catalog entries that are real products but also everyday question words:
+# "Is it *safe* to update Firefox?", "any *known* issues?". Unlike
+# `_UNSEARCHABLE` they stay matchable, but only where the question marks them
+# as a product -- written in capitals ("SAFE") or followed by a version
+# ("safe 3.2"). See `_marked_as_product`.
+_CONTEXT_ONLY = frozenset({"safe", "known"})
+
 # Query words that name a product without being the catalog's spelling of it.
 # Small and hand-checked: an alias that maps to the wrong product is worse than
 # no alias, because it silently narrows retrieval to another vendor's rows.
@@ -195,6 +202,14 @@ def _searchable(name: str) -> bool:
     # A name has to contain a letter run long enough to be a word, which drops
     # "3mini" and "4G" while keeping "k9s" and "vlc".
     return bool(re.search(r"[a-z]{2,}", low))
+
+
+def _marked_as_product(query: str, name: str) -> bool:
+    """Whether `query` uses the common word `name` as a product name."""
+    for m in re.finditer(rf"(?<![\w.-]){re.escape(name)}(?![\w-])", query, re.I):
+        if m.group().isupper() or re.match(r"\s*v?\d", query[m.end():]):
+            return True
+    return False
 
 
 def load_catalog(path: Optional[str] = None, fetch: bool = True,
@@ -289,6 +304,8 @@ def detect_vendors(query: str, catalog: Optional[Sequence[str]] = None,
         if len(found) >= limit:
             break
         if overlaps(name):
+            continue
+        if name in _CONTEXT_ONLY and not _marked_as_product(query, name):
             continue
         if re.search(rf"(?<![\w.-]){re.escape(name)}(?![\w-])", low):
             found.append(VendorMatch(name=name, matched=name))
