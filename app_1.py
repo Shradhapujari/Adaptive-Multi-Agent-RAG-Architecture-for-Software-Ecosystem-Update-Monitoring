@@ -1113,7 +1113,21 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     t0 = time.time()
     if g.vendors and checks["vendor_check"]:
         scoped = vendor.filter_by_vendor(results["releases"], g.vendors)
-        results["releases"] = scoped
+        # The product tag is the feed's, and on an advisory it names whatever
+        # was searched for rather than what the record is about: /api/v/?q=teams
+        # returns 30 rows all tagged "teams", 24 of them CVEs for Scoold,
+        # UVdesk, vikunja and PraisonAI, which merely contain the word. One
+        # reached a demo answer cited as a verified vendor release note.
+        # filter_by_vendor cannot catch it -- the tag genuinely says "teams" --
+        # so the record is read instead. Counted, and unlike the older version
+        # of this screen it does not restore what it dropped: an empty pool is
+        # the finding here, as it is for the filter above.
+        on_subject = [r for r in scoped
+                      if vendor.classify_record(r) != "advisory"
+                      or any(vendor.advisory_names_vendor(r, v.name)
+                             for v in g.vendors)]
+        results["mislabelled_dropped"] = len(scoped) - len(on_subject)
+        results["releases"] = on_subject
         # No `or results["community"]` fallback: when the subject filter finds
         # nothing about this question in the feed, that is the finding. The
         # fallback used to restore the pool it had just rejected, which is how
@@ -1709,6 +1723,8 @@ def _agent_table(results=None, presented=None, view: str = "detailed") -> str:
     rel = results.get("releases") or []
     shipped = _n_shipped(rel)
     rel_extra = f" · {len(rel) - shipped} advisory" if len(rel) > shipped else ""
+    if results.get("mislabelled_dropped"):
+        rel_extra += f" · {results['mislabelled_dropped']} mislabelled advisory dropped"
     dropped = results.get("cve_dropped") or 0
 
     if presented is None:
