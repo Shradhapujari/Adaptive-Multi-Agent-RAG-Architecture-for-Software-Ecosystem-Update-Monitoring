@@ -74,3 +74,8 @@ def test_osv_maps_hits(monkeypatch):
     assert seen == {"pkg": "lodash", "eco": "npm", "version": "4.17.20"}
     monkeypatch.setattr(H, "_osv_query", lambda *a: [])
     assert H.osv({"query": "q", "vendor": "lodash", "ecosystem": "npm_node"}) == "act"
+
+
+def test_false_green_ignores_unanswered_holds():
+    s = H.score(["hold", "hold"], [None, None])
+    assert s["false_green"] is None and s["n_hold"] == 0

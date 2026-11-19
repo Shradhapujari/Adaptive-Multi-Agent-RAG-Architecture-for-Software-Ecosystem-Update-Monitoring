@@ -53,7 +53,7 @@ def parse_verdict(text: str) -> str | None:
 
 def score(gold: list[str], pred: list[str | None]) -> dict:
     n = len(gold)
-    holds = [p for g, p in zip(gold, pred) if g == "hold"]
+    holds = [p for g, p in zip(gold, pred) if g == "hold" and p is not None]  # answered only
     return {
         "n": n,
         "accuracy": sum(g == p for g, p in zip(gold, pred)) / n if n else None,
@@ -138,3 +138,71 @@ def osv(row: dict) -> Optional[str]:
     except (OSError, ValueError):
         return None
     return "hold" if vulns else "act"
+
+
+# --- run + report -----------------------------------------------------------
+
+LLM_RUNS = [("ollama:llama3.1", False), ("openai:gpt-4o-mini", False), ("openai:gpt-4o-mini", True),
+            ("gemini:gemini-2.5-flash", False), ("gemini:gemini-2.5-flash", True)]
+
+
+def systems() -> tuple[dict, list]:
+    """name -> fn for every runnable system, plus the names that were skipped."""
+    run, skipped = {"ours (marag_decide)": ours, "osv scanner": osv}, []
+    for spec, pooled in LLM_RUNS:
+        name = f"{spec} ({'pooled' if pooled else 'closed'})"
+        fn = llm_system(spec, pooled)
+        if fn:
+            run[name] = fn
+        else:
+            skipped.append(name)
+    return run, skipped
+
+
+def _pct(x) -> str:
+    return "n/a" if x is None else f"{x:.2f}"
+
+
+def report(sheet: str, gold_rows: list, preds: dict, skipped: list, n_total: int) -> str:
+    from build_decision_benchmark import file_hash
+    gold = [r["gold"] for r in gold_rows]
+    lines = [f"# Head-to-head on `{sheet}` (sha1 {file_hash(sheet)})", "",
+             f"Gold rows: {len(gold_rows)} of {n_total} (both annotators agree). "
+             "Gold is labelled from each row's evidence pool, so *pooled* LLM runs are the "
+             "like-for-like comparison; *closed* runs show what a user typing the question gets.", "",
+             "| system | answered | accuracy | false green (answered holds) | abstain | unparsed |",
+             "|---|---:|---:|---:|---:|---:|"]
+    for name, pred in preds.items():
+        s = score(gold, pred)
+        answered = s["n"] - s["unparsed"]
+        lines.append(f"| {name} | {answered}/{s['n']} | {_pct(s['accuracy'])} | "
+                     f"{_pct(s['false_green'])} ({s['n_hold']}) | {_pct(s['abstain'])} | {s['unparsed']} |")
+    lines += [""] + [f"- skipped: {n} (no key or backend unavailable)" for n in skipped]
+    lines += ["", "OSV `answered` is its coverage: ecosystems outside npm/PyPI/crates/Debian/"
+              "Ubuntu/Android/Linux are invisible to a scanner."]
+    return "\n".join(lines) + "\n"
+
+
+def main(argv: Optional[list] = None) -> None:
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("sheet")
+    ap.add_argument("--out", help="markdown report path; per-row predictions go beside it as .jsonl")
+    a = ap.parse_args(argv)
+    gold_rows = load_gold(a.sheet)
+    n_total = sum(1 for line in open(a.sheet) if line.strip())
+    run, skipped = systems()
+    preds = {name: [fn(r) for r in gold_rows] for name, fn in run.items()}
+    text = report(a.sheet, gold_rows, preds, skipped, n_total)
+    print(text)
+    if a.out:
+        os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
+        open(a.out, "w").write(text)
+        with open(os.path.splitext(a.out)[0] + ".jsonl", "w") as f:
+            for i, r in enumerate(gold_rows):
+                f.write(json.dumps({"id": r.get("id"), "gold": r["gold"],
+                                    **{n: p[i] for n, p in preds.items()}}) + "\n")
+
+
+if __name__ == "__main__":
+    main()
