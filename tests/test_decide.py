@@ -387,3 +387,27 @@ def test_component_named_like_a_vendor_does_not_disown_the_product():
     # Still blocked: the vendor right before the product is a foreign one.
     assert D._foreign_vendor_first(adv("Cisco IOS XE Software contains a flaw that allows ..."), ["ios"])
     assert D._foreign_vendor_first(adv("Zoom Windows client before 6.1 allows ..."), ["windows"])
+
+
+def test_edge_advisory_must_name_microsoft():
+    """"edge" is an ordinary word: the NVD search returned VAPIX Edge, Johnson
+    Controls iSTAR Edge and AMD Versal AI Edge, and the subject rule kept them
+    (live, 2026-11-19, "Is it safe to update Edge?")."""
+    def adv(text):
+        return {"doc_id": "x", "source": "nvd", "title": "", "text": text}
+    ms = adv("Use after free in Microsoft Edge (Chromium-based) allows an unauthorized attacker "
+             "to elevate privileges locally.")
+    vapix = adv("The VAPIX Edge storage API, enabling the escalation of user privileges by "
+                "circumventing access controls.")
+    versal = adv("The Versal AI Edge Series Gen 2 Peripheral Protection Unit (XPPU) allows ...")
+    vt = D._vendor_tokens(["edge"])
+    assert D._about(ms, vt, set(), (), ["edge"])
+    assert not D._about(vapix, vt, set(), (), ["edge"])
+    assert not D._about(versal, vt, set(), (), ["edge"])
+    # Judged per product the advisory names: a Chrome advisory is not held to
+    # Edge's requirement in an Edge-and-Chrome question.
+    chrome = adv("Use after free in Extensions in Google Chrome prior to 158.0.8127.36 allowed ...")
+    vt2 = D._vendor_tokens(["edge", "chrome"])
+    assert D._about(chrome, vt2, set(), (), ["edge", "chrome"])
+    # A product with no requirement is untouched.
+    assert D._about(chrome, D._vendor_tokens(["chrome"]), set(), (), ["chrome"])
