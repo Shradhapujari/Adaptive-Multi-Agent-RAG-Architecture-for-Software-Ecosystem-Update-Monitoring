@@ -871,3 +871,25 @@ def test_headline_from_a_stable_api_is_not_an_unsupported_version():
     ans = f"Chrome stable is 157.0.8103.79 [{ev[0].label}]."
     v = guardrail.check(ans, ev, "latest chrome version?", latest="157.0.8103.79")
     assert "unsupported_version" not in [x.code for x in v.violations], v.violations
+
+
+def test_version_answer_is_not_held_to_the_leads_advisory_count():
+    rows = _node_rows()
+    ev = collect_evidence({"releases": rows, "headline": rows[-1]}, per_kind=13)
+    ans = f"The latest Node.js version is v26.12.1 [{ev[0].label}]."
+    lead = "Patch now: 5 advisory document(s) with a CVE id name this product."
+    v = guardrail.check(ans, ev, "latest node.js version?", lead=lead, latest="26.12.1")
+    assert v.ok, v.violations
+    # Not a version question: the lead's count is still checked.
+    v = guardrail.check(ans, ev, "is node.js safe?", lead=lead)
+    assert "count_mismatch" in [x.code for x in v.violations], v.violations
+
+
+def test_refusing_when_the_feed_has_the_latest_version_is_rejected():
+    rows = _node_rows()
+    ev = collect_evidence({"releases": rows, "headline": rows[-1]}, per_kind=13)
+    refusal = "I cannot find that information in my source data."
+    v = guardrail.check(refusal, ev, "latest node.js version?", latest="26.12.1")
+    assert [x.code for x in v.violations] == ["missed_latest"], v.violations
+    # Without a headline, declining stays allowed.
+    assert guardrail.check(refusal, ev, "latest node.js version?").ok

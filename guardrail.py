@@ -523,6 +523,8 @@ def check(answer: str, evidence: Sequence, question: str = "", lead: str = "",
         bad.append(Violation("deflected",
                              "answer points at the sources instead of reporting them"))
 
+    latest = next(iter(extract_versions(latest or "", multipart_only=True)), "")
+
     _known: dict = {}
     for product, v in _named_versions(_ISO_RE.sub(" ", haystack) + " " + given):
         _known.setdefault(product, set()).add(v)
@@ -530,7 +532,12 @@ def check(answer: str, evidence: Sequence, question: str = "", lead: str = "",
     # A refusal counts nothing it has to cite.
     if not abstained:
         bad.extend(_count_violations(text, labels, _kinds(evidence), _known))
-        if lead:
+        # A version/date question (`latest` set) is answered by the version;
+        # the advisory count in the lead is a note beside it, listed in the
+        # Sources tab. Holding a one-line version answer to cite all of them
+        # threw away "The latest Node.js version is v27.0.0" twice for the
+        # rule-based paragraph (live, 2026-11-19).
+        if lead and not latest:
             bad.extend(Violation(v.code, "the verdict line above the answer says " + v.detail)
                        for v in _count_violations(lead, labels, _kinds(evidence), _known,
                                                   cited_in=text))
@@ -538,10 +545,17 @@ def check(answer: str, evidence: Sequence, question: str = "", lead: str = "",
     known_versions = set(extract_versions(_ISO_RE.sub(" ", haystack), multipart_only=True))
     known_versions |= set(extract_versions(given, multipart_only=True))
     named = extract_versions(_ISO_RE.sub(" ", text), multipart_only=True)
-    latest = next(iter(extract_versions(latest, multipart_only=True)), "")
     if latest:
         known_versions.add(latest)
-        if named and not abstained and latest not in named:
+        # The feed has the answer, so declining is not honest caution: qwen2.5
+        # wrote "I cannot find that information" with v27.0.0 as its first
+        # source, and a refusal skipped every check below (live, 2026-11-19).
+        if abstained:
+            bad.append(Violation(
+                "missed_latest",
+                f"the sources do give the newest release: {latest} — state it "
+                f"as the latest version, with its citation"))
+        elif named and latest not in named:
             bad.append(Violation(
                 "stale_version",
                 f"the newest release in the feed is {latest} — name {latest} as "
