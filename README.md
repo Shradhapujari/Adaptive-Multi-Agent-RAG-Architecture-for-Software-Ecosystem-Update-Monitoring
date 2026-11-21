@@ -59,6 +59,13 @@ Four specialized agents coordinated by an Orchestrator, with a retrieval-level f
 
 Recent safety work: advisories count only for the product that owns them (KEV/NVD vendor attribution, matched on what the advisory text names), the verdict line's source count must match what the answer cites, CVE ids in an answer must appear in a release note, advisory or vendor page, off-topic questions are declined before searching, and a bounded web fallback (GR-2, one search, off unless `MARAG_WEB_FALLBACK=1`) is the only path off the local corpus.
 
+**Since 19 Nov (PRs #145–#169):**
+
+- **Live question types** (`live_sources.py`, console only). Questions the release feeds cannot answer get one fixed live source each, named under the question box: *is it down* → the service's Statuspage; *incident* → dated news; *end of life* → endoflife.date; *comparison / compatibility / how-to* → web search; *package safety* ("is requests 2.31.0 safe? (pip)") → PyPI/npm + OSV. Web text never makes a green light: only OSV advisories with a fixed release and a CVE id reach the verdict. The paper's code never imports this module (enforced by `tests/test_live_sources.py`), so frozen replays stay reproducible.
+- **Vendor stable channels.** The "Latest release" headline for Chrome, Firefox and Edge is read from the vendor's own version API (Google version history, Mozilla product-details, Microsoft Edge updates), cached hourly, falling back to the feed when unreachable. Chrome rows in the release table carry a **Channel** column, and Canary/dev builds never reach the answer.
+- **Advisory attribution.** An advisory for "*product* for *platform*" is not about the bare product; the vendor nearest before the product owns it ("WebRTC in Google Chrome" is Chrome); a component inside a product ("WebRTC in Chrome") is searched on NVD as `chrome webrtc` instead of as a second product; Edge advisories must name Microsoft (`name_requires` in `data/vendor_kb.json`).
+- **Run and quote gates** for the evaluation: `run_eval` refuses to start a run that cannot carry a claim (live corpus, dirty tree, no `--prediction`, resume across a commit), takes a host-wide lock so only one eval runs per machine, and records the gate in `<run>/gate.json`. `--diagnostic` runs it anyway, marked unquotable. `scripts/check_runs.py` says whether a run is admissible; `scripts/check_claims.py` fails if any number in `paper/claims.tsv` does not re-derive from one.
+
 ---
 
 ## Quickstart
@@ -76,7 +83,8 @@ streamlit run app_1.py        # the demo, on http://localhost:8501
 
 ```bash
 python multiagent_rag_v3.py                # CLI, for execution traces
-python -m eval_harness.run_eval --help     # reproduce the evaluation
+python -m eval_harness.run_eval --help     # reproduce the evaluation (refuses unquotable runs; see --diagnostic)
+python scripts/check_runs.py               # is each recent run admissible?
 pytest -q                                  # 1,200+ offline tests, no network
 ```
 
@@ -109,6 +117,7 @@ Everything else — environment variables, the presenter model, the evaluation h
 | `guardrail.py`, `grounding.py`, `yesno.py` | Answer-side checks: invented versions, groundedness, yes/no verdicts |
 | `decide.py`, `graph.py`, `websearch.py` | Five-verdict decision gate, the state machine that walks it (network-free, replayable), and the opt-in web fallback |
 | `nvd.py` | Live NVD CVE 2.0 feed with retry, API-key header and newest-first fallback |
+| `live_sources.py` | Console-only live sources by question type: Statuspage, endoflife.date, news, web search, PyPI/npm + OSV |
 | `vendor.py`, `intent.py`, `keywords.py`, `store.py` | Vendor detection, intent classification, query terms, retrieval store |
 | `self_improving_agent.py` | Persistent term-weight memory |
 | `corpus_snapshot.py` | Record/replay of the live corpus, for frozen comparisons |
@@ -121,7 +130,7 @@ Everything else — environment variables, the presenter model, the evaluation h
 | `data/` | Evaluation question sets (`benchmark_300.json`, `benchmark_1000.json`, …) and supporting data |
 | `results/` | Run outputs; [`results/PROVENANCE.md`](results/PROVENANCE.md) maps every reported number to a run id |
 | `results/legacy/` | Pre-re-scoring result files from the conference paper (`eval_50_results_v2.json`, `ablation_results.json`, the accuracy runs) |
-| `scripts/` | Reporting and phase scripts (`paper_figures.py`, `leak_report.py`, ablation phases) and `annotate.py`, a terminal helper for labelling the decision sheet |
+| `scripts/` | Reporting and phase scripts (`paper_figures.py`, `leak_report.py`, ablation phases), `annotate.py` (a terminal helper for labelling the decision sheet), and the gates `check_runs.py` (is a run admissible?) and `check_claims.py` (does every quoted number re-derive?) |
 | `tests/` | Offline test suite |
 | `paper/` | Manuscript source and figures — read [`paper/README.md`](paper/README.md) before editing the bibliography |
 | `specs/`, `slides/`, `Poster/` | Specifications, talk slides, and the poster |
