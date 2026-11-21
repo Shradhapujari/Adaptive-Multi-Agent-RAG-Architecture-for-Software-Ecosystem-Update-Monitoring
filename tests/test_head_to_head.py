@@ -1,4 +1,5 @@
 """Head-to-head scoring: one label per system per question, false green first."""
+import json
 import os
 import sys
 
@@ -133,3 +134,25 @@ def test_llm_error_is_its_own_column(monkeypatch):
     s = H.score(["hold", "act"], [H.ERROR, "act"])
     assert s["errors"] == 1 and s["unparsed"] == 0 and s["false_green"] is None
     assert s["accuracy"] == 0.5 and s["accuracy_answered"] == 1.0
+
+
+def test_hedged_verdict_is_unparsed():
+    assert H.parse_verdict("VERDICT: act or hold") is None
+    assert H.parse_verdict("VERDICT: hold") == "hold"
+    assert H.parse_verdict("VERDICT: act\nVERDICT: hold") == "hold"   # last line still wins
+
+
+def test_a_crashing_system_is_an_error_and_rows_are_saved(tmp_path, monkeypatch):
+    sheet = tmp_path / "s.jsonl"
+    sheet.write_text("".join(json.dumps({"id": i, "query": "q", "a1": {"verdict": "hold"},
+                                         "a2": {"verdict": "hold"}}) + "\n" for i in (1, 2)))
+
+    def boom(row):
+        if row["id"] == 1:
+            raise RuntimeError("x")
+        return "hold"
+    monkeypatch.setattr(H, "systems", lambda: ({"s": boom}, []))
+    monkeypatch.setattr(H, "report", lambda *a, **k: "ok")
+    H.main([str(sheet), "--out", str(tmp_path / "r.md")])
+    rows = [json.loads(l) for l in (tmp_path / "r.jsonl").read_text().splitlines()]
+    assert [r["s"] for r in rows] == ["error", "hold"]
