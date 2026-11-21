@@ -2350,6 +2350,15 @@ def _show_tables(tables: dict) -> None:
                          column_config=link)
 
 
+def _unfocused_components(g) -> list:
+    """"WebRTC in Edge"-style asks whose vendor's advisories never name a
+    component (Microsoft's say "Microsoft Edge (Chromium-based)" and nothing
+    else), so the component cannot narrow them. Read from `components_unnamed`
+    in vendor_kb.json."""
+    return [f"{p} in {v.name}" for v in (getattr(g, "vendors", None) or ())
+            if decide.KB.get(v.name, {}).get("components_unnamed") for p in v.parts]
+
+
 def _detail_tables(presented, results: Optional[dict] = None) -> None:
     # The detail behind the paragraph, as the sources state it: every CVE with
     # what was wrong and the fixed-in version, the releases that ship the
@@ -2359,6 +2368,10 @@ def _detail_tables(presented, results: Optional[dict] = None) -> None:
         _show_tables(tables)
         return
     product = bool(getattr(results.get("grounding"), "vendors", None))
+    for what in _unfocused_components(results.get("grounding")):
+        st.caption(f"Advisories are not narrowed to “{what}”: the vendor's "
+                   "records don't name the component, so these are its newest "
+                   "advisories for the product, not only that component's.")
     used, other = _split_tables(tables, _verdict_keys(results),
                                 _answer_keys(results, presented), product)
     n_other = sum(len(v) for v in other.values())
