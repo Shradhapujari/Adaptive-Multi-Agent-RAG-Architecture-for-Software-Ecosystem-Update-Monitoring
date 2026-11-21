@@ -411,3 +411,25 @@ def test_edge_advisory_must_name_microsoft():
     assert D._about(chrome, vt2, set(), (), ["edge", "chrome"])
     # A product with no requirement is untouched.
     assert D._about(chrome, D._vendor_tokens(["chrome"]), set(), (), ["chrome"])
+
+
+# ---- stale advisories: a years-old KEV row is not today's patch order -------
+# 2026-11-12: a 2022 CISA KEV Firefox entry ordered "patch now" for a 2026 question.
+
+def test_a_years_old_advisory_does_not_order_a_patch():
+    pool = [_d(1, "cisa_kev", "[CISA KEV] Ubuntu kernel flaw", "CVE-2022-1234 exploited", date="2022-03-03"),
+            _d(2, "vendor_releases", "Ubuntu 26.04 LTS released", date="2026-04-25")]
+    assert D.decide(pool, Q, V).verdict != "patch_urgently"
+
+
+def test_a_recent_advisory_still_orders_a_patch():
+    pool = [_d(1, "cisa_kev", "[CISA KEV] Ubuntu kernel flaw", "CVE-2026-1234 exploited", date="2026-03-03"),
+            _d(2, "vendor_releases", "Ubuntu 26.04 LTS released", date="2026-04-25")]
+    assert D.decide(pool, Q, V).verdict == "patch_urgently"
+
+
+def test_an_old_advisory_naming_the_asked_version_still_counts():
+    pool = [_d(1, "nvd", "Ubuntu 20.04 kernel flaw", "Ubuntu 20.04 allows privilege escalation. CVE-2022-1234",
+               date="2022-03-03"),
+            _d(2, "vendor_releases", "Ubuntu 26.04 LTS released", date="2026-04-25")]
+    assert D.decide(pool, "Is Ubuntu 20.04 safe to keep?", V).verdict == "patch_urgently"
