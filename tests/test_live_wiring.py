@@ -238,3 +238,34 @@ def test_a_vendorless_question_gets_only_on_subject_reddit_cve_posts(empty_lake,
     assert "Edge CVE-2025-1234 exploited in the wild" not in titles
     assert "CrowdStrike CVE-2024-5678 outage fallout" in titles
     assert "KEV: Acme Widget RCE" in titles           # advisory records are not forum posts
+
+
+# Live answer-only questions (sweep 2026-11-21): the Long Answer cited the feeds
+# instead of the live source -- "Is GitHub down?" listed GitHub CVEs, "Postgres
+# or MySQL?" listed MySQL advisories. The feeds did not answer these questions;
+# the verdict over them is already dropped, so the paragraph drops them too.
+STATUS = {"title": "GitHub status", "url": "https://www.githubstatus.com", "source": "live",
+          "body": "[untrusted:community] GitHub status: All Systems Operational. [/untrusted]",
+          "label": "Status page - githubstatus.com", "date": "2026-11-21"}
+FEED = {"releases": [{"product": "github", "version": "3.23.0", "is_cve": True,
+                      "title": "CVE-2026-131800", "url": "https://nvd.example/1",
+                      "notes": "flaw in github", "date": "2026-11-18"}],
+        "cve": [{"title": "GitHub Actions CVE", "url": "https://reddit.example/2", "date": "2026-11-18"}],
+        "community": [{"title": "r/github thread", "url": "https://reddit.example/3"}]}
+
+
+def test_answer_only_evidence_is_the_live_source():
+    ev = answer_agent.collect_evidence(FEED | {"web": [STATUS], "live": {"answer_only": True}})
+    assert [e.label for e in ev] == ["Status page - githubstatus.com"]
+
+
+def test_feed_question_keeps_feed_evidence():
+    ev = answer_agent.collect_evidence(FEED | {"web": [STATUS], "live": {"answer_only": False}})
+    assert len(ev) > 1 and ev[-1].label == "Status page - githubstatus.com"
+
+
+def test_rule_based_answer_quotes_the_live_source():
+    ev = answer_agent.collect_evidence({"web": [STATUS], "live": {"answer_only": True}})
+    text = answer_agent.deterministic_paragraph("Is GitHub down?", ev)
+    assert "All Systems Operational" in text and "[Status page - githubstatus.com]" in text
+    assert "No release notes matched" not in text and "untrusted" not in text

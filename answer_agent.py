@@ -456,9 +456,16 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
     # The presenter was not wrong about its evidence, it was shown the wrong
     # evidence, and no amount of instructing it to agree with the verdict
     # fixes a paragraph that cannot see what the verdict stands on.
-    releases = results.get("releases") or []
-    held = results.get("decision_advisories") or []
-    posts = results.get("cve") or []
+    # A live answer-only question (outage, EOL, comparison, how-to, a package
+    # OSV cleared) is answered by its live source, and run_pipeline already
+    # dropped the verdict the feeds reached. Their rows stay out of the
+    # paragraph too: shown first, they were what got cited -- GitHub CVEs for
+    # "Is GitHub down?", MySQL advisories for "Postgres or MySQL?" (live,
+    # 2026-11-21).
+    feeds = {} if (results.get("live") or {}).get("answer_only") else results
+    releases = feeds.get("releases") or []
+    held = feeds.get("decision_advisories") or []
+    posts = feeds.get("cve") or []
     # The CVE pool is mostly Reddit, but a CISA KEV or CIRCL row in it is an
     # advisory -- decide counts it as one, so the paragraph must too, or the
     # verdict's "10 advisories" reads against "5 advisories and 4 posts".
@@ -545,7 +552,7 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
     # a press article or an advisory carries score 0 by construction, so
     # sorting on upvotes moved every non-Reddit source to the back and cut it
     # at `per_kind`. The ranked order is the order.
-    community = list(results.get("community") or [])
+    community = list(feeds.get("community") or [])
     for p in community[:per_kind]:
         date = _iso(p.get("date"))
         sub = vendor.attribution(p)
@@ -746,6 +753,17 @@ def deterministic_paragraph(query: str, evidence: List[Evidence],
     adv = [e for e in evidence if e.kind == "advisory"]
     cve = [e for e in evidence if e.kind == "cve"]
     com = [e for e in evidence if e.kind == "community"]
+    web = [e for e in evidence if e.kind == "web"]
+
+    # Only web pages: a live answer-only question, whose source is the answer.
+    # Quoted, not counted -- "No release notes matched" was the whole answer
+    # to "Is GitHub down?" over a status page that said what it was asked.
+    if web and len(web) == len(evidence):
+        bare = lambda t: re.sub(r"\[/?untrusted[^\]]*\]", "", t)  # noqa: E731
+        said = [f"{e.label.split(' - ')[0]} says “{_clean(bare(e.detail or e.title), 200)}” [{e.label}]."
+                for e in web[:3]]
+        return " ".join(said + ["Every statement above is drawn from the bracketed "
+                                "sources; nothing outside them was used."])
 
     scope = f" for {window_note}" if window_note else ""
     parts: List[str] = []
