@@ -48,6 +48,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from eval_harness.benchmarks import extract_versions
@@ -70,6 +71,15 @@ COMMUNITY = frozenset({"vendor_reddit", "reddit_live", "reddit_search",
 # One popular wrong post is the failure mode docs/Roadmap names; two is the
 # smallest number that is not one post.
 K_REPORTS = 2
+
+# An advisory filed more than this long before the newest document in the pool
+# is about a release the product has long since moved past: a 2022 KEV entry
+# ordered "patch now" for a 2026 Firefox question (2026-11-12). Measured on the
+# 200-question sheet: 14 of the 37 KEV rows behind patch verdicts were over a
+# year old, and dropping them moved 6 verdicts off patch_urgently, 5 of them
+# regression posts. The pool's own newest date stands in for "now", so a frozen
+# pool decides the same way on every replay.
+STALE_ADVISORY_DAYS = 365
 
 _CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
 _PROBLEM_RE = re.compile(
@@ -431,6 +441,22 @@ def _version_ok(d: dict, asked: Sequence[str]) -> bool:
                for f in found for a in asked)
 
 
+def _days(yyyymmdd: str) -> int:
+    return date(int(yyyymmdd[:4]), int(yyyymmdd[4:6]), int(yyyymmdd[6:])).toordinal()
+
+
+def _stale(d: dict, pool: Sequence[dict], asked: Sequence[str]) -> bool:
+    """True when the advisory is over STALE_ADVISORY_DAYS older than the newest
+    dated document in the pool. Undated advisories are kept (age unknown), and
+    so is an old one naming the version the question asked about: a user on
+    that old version is exactly who it applies to."""
+    when = _date(d)
+    newest = max(filter(None, (_date(x) for x in pool)), default=None)
+    if not when or not newest or _days(newest) - _days(when) <= STALE_ADVISORY_DAYS:
+        return False
+    return not (asked and _version_ok(d, asked))
+
+
 # ---------------------------------------------------------------------- rules
 
 def decide(pool: Sequence[dict], question: str, vendors: Iterable[str] = (),
@@ -462,6 +488,7 @@ def decide(pool: Sequence[dict], question: str, vendors: Iterable[str] = (),
     # exploitation. Whether the version was confirmed shows in `confidence`.
     advisories = [d for d in about if d.get("source") in ADVISORY
                   and _CVE_RE.search(_text(d) + " " + str(d.get("url", "")))]
+    advisories = [d for d in advisories if not _stale(d, pool, asked)]
     releases = [d for d in on_version if d.get("source") in RELEASE]
     reports = [d for d in on_version
                if d.get("source") in COMMUNITY and _PROBLEM_RE.search(_text(d))]
