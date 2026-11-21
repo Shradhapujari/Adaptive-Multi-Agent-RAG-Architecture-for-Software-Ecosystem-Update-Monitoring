@@ -184,3 +184,10 @@ def test_unshipped_chrome_builds_are_dropped_before_the_answer(monkeypatch):
     # API down: nothing dropped.
     monkeypatch.setattr(app_1, "_chrome_channels", lambda _h: {})
     assert app_1._drop_prerelease(rows) == rows
+
+
+def test_kev_rows_survive_the_cut():
+    import app_1
+    rows = [{"id": f"nvd{i}"} for i in range(5)] + [{"id": "kev", "kev_vendor": "Google"}]
+    top = app_1._kev_first(rows)[:5]
+    assert top[0]["id"] == "kev" and [r["id"] for r in top[1:]] == ["nvd0", "nvd1", "nvd2", "nvd3"]
