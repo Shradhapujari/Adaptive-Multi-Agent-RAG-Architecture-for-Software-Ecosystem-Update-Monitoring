@@ -1194,7 +1194,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
                          "degraded": bool(_reranker.degraded),
                          "reason": getattr(_reranker, "reason", "")}
 
-    def _safe_rank(docs):
+    def _safe_rank(docs, top_k=None):
         """Rank, but never let ranking take the run down.
 
         `EmbeddingReranker.rank()` does live HTTP and can raise *after*
@@ -1206,17 +1206,22 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         if not docs:
             return []
         try:
-            return _reranker.rank(query, docs, top_k=limit)
+            return _reranker.rank(query, docs, top_k=top_k or limit)
         except Exception as e:  # noqa: BLE001 -- a dead ranker is not a dead demo
             results["rerank"]["degraded"] = True
             results["rerank"]["reason"] = f"{type(e).__name__}: {e}"
             try:
-                return _rerank.BM25Reranker().rank(query, docs, top_k=limit)
+                return _rerank.BM25Reranker().rank(query, docs, top_k=top_k or limit)
             except Exception:  # noqa: BLE001
-                return list(docs)[:limit]
+                return list(docs)[:top_k or limit]
 
-    for _pool in ("community", "releases", "cve"):
+    for _pool in ("community", "releases"):
         results[_pool] = _safe_rank(results[_pool])
+    # CISA KEV rows (known-exploited) go first: relevance ranks by text, so
+    # newer NVD rows pushed them out of the cut. Stable, so order within each
+    # group stays the reranker's.
+    _cve = _safe_rank(results["cve"], top_k=len(results["cve"]) or 1)
+    results["cve"] = _kev_first(_cve)[:limit]
     results["timing"]["filter"] = round(time.time() - t0, 2)
 
     # Step 4b — Yes/No consensus
@@ -2290,6 +2295,11 @@ def _chrome_channels(_hour: int) -> Dict[str, str]:
 
 
 _SHIPPED_CHANNELS = {"stable", "extended", "beta"}
+
+
+def _kev_first(rows):
+    """CISA KEV rows (known-exploited) ahead of the rest; stable within each."""
+    return sorted(rows, key=lambda r: not r.get("kev_vendor"))
 
 
 def _drop_prerelease(rows: list) -> list:
