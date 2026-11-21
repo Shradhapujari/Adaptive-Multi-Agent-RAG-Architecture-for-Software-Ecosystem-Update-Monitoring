@@ -5,8 +5,8 @@ where things stand, then `specs/roadmap.md` for the phase definitions, then §14
 for the paper track's history. **Update this file at the end of a work session**, not
 just the code.
 
-Last updated: **2026-11-19** (§16 is the Week 13 update, 12–19 Nov -- start
-there; §15 is where things stood on 2026-09-29; §14 is the paper track, merged in from `HANDOFF.md`;
+Last updated: **2026-11-20** (§17 is the Week 14 update, 19–20 Nov -- start
+there; §16 is the Week 13 update, 12–19 Nov; §15 is where things stood on 2026-09-29; §14 is the paper track, merged in from `HANDOFF.md`;
 §13 is the Streamlit demo blocker and its retests; §12 is the rules-file ablation; §11 is the Week 3 update;
 §10 is the Week 2 update and the sections above it are the 2026-08-31 snapshot
 from the infra/eval-side session, all kept verbatim so the record of what was
@@ -1444,4 +1444,118 @@ withdrawn rather than swapped in, because the comparison was confounded.
 2. LLM retrieval judge on b500.
 3. Faster answers: a shorter presenter prompt or a smaller presenter model.
 4. Widen comparison detection ("is zoom better or teams?" misses it), with a test.
+5. Push to `main` by Friday noon.
+
+## 17. Week 14 update — 2026-11-20 (COMP 291 Week 14, 19–20 Nov so far)
+
+Everything below is on `main` through PRs #146–#183 (main @ `0b46f2e`;
+open: #175). **1426 tests pass** (`pytest -q tests` on `2e294f9`, 2026-11-20, before #172/#178/#181/#182/#183; 1170 on 2026-11-18). No `run_eval` process was running
+when this was written.
+
+### 17.1 What landed
+
+**Live question types** (PR #166, minors #170). `live_sources.py`, console
+only, gives each question type one fixed live source and names it under the
+question box: *is it down* → Statuspage (9 verified hosts); *incident* → dated
+news; *end of life* → endoflife.date; *comparison / compatibility / how-to* →
+web search ("A vs B" for a named pair); *package safety* → PyPI/npm + OSV. Web
+text never makes a green light: only OSV advisories with a fixed release and a
+CVE id reach the verdict. A test keeps the paper's modules from importing it,
+so frozen replays stay reproducible.
+
+**The latest version is the vendor's stable channel** (PRs #151, #152, #154,
+#157). Live on 2026-11-19 the feed's headline was Chrome v159.0.8147 (beta),
+Firefox 160.0.0, and no Edge headline; Google, Mozilla and Microsoft's own
+version APIs say 157.0.8103.79, 160.0.1 and 158.0.4370.33. The headline now
+reads those APIs (cached hourly, feed fallback). Chrome rows carry a Channel
+column, and Canary/dev builds never reach the answer.
+
+**Which product an advisory is about** (PRs #147, #149, #158, #160, #163,
+#164, #169, #171, #176), each from a live wrong answer:
+- the advisory's own text names the product (a Scoold CVE tagged `teams`
+  reached an answer as a verified release note) — #149;
+- "Firefox for iOS" counts only when the question names iOS — #147;
+- the vendor nearest before the product owns it ("WebRTC in Google Chrome") —
+  #160;
+- a component is not a second product, and NVD is searched `chrome webrtc`
+  (20 of 20 on topic, was 1 of 20) — #163, #164;
+- OpenClaw and chrome-devtools-mcp CVEs no longer answer Chrome — #158;
+- Edge advisories must name Microsoft (`name_requires` in `vendor_kb.json`) —
+  #169; Edge component questions say they can't be narrowed — #176;
+- CISA KEV rows rank ahead of NVD rows before the cut — #171;
+- an advisory more than 365 days older than the pool's newest document no
+  longer orders `patch_urgently` unless it names the asked version (a 2022
+  KEV Firefox entry did, for a 2026 question); on the unlabelled decision
+  sheet patch_urgently 22 → 16, hold 10 → 14 — #172;
+- "Edge WebRTC vulnerability" and "in Microsoft Edge" read WebRTC as a
+  component, not a second product (0 of 1,206 benchmark questions change) — #183;
+- product detection splits on punctuation and adds whole-word aliases (npm,
+  pip, php, postgres): benchmark_1000 questions with no product 345 → 309,
+  0 lost — #182. **This changes retrieval for 48 questions, so record a new
+  benchmark snapshot before the next frozen run.**
+
+**Answers that agree with themselves** (PRs #168, #174, #177).
+- Under "Patch now", unconditional advice against updating is dropped
+  ("It is not safe to update Firefox" above the release that fixes the CVEs).
+  This closes the last open defect from the 2026-10-22 demo — #177.
+- The Long Answer must name the release the Short Answer headlines — #168.
+- Community posts are filtered for vendorless questions too, with no fallback
+  to the 50-post global feed, which ignores `q` — #174; the Reddit CVE pool
+  is scoped the same way — #181.
+- `MARAG_NEWS=feeds|both` adds `news_feeds`, seven press sites whose posts
+  carry a body (Google News RSS is title-only); default unchanged — #178.
+
+**Evaluation gates** (PRs #165, #167). `run_eval` refuses a run that cannot
+carry a claim (live corpus, dirty tree, no `--prediction`, resume across a
+commit or a `MARAG_*` change), takes a host-wide lock, and records the gate in
+`<run>/gate.json`; `--diagnostic` runs it marked unquotable.
+`scripts/check_runs.py` reports admissibility; `scripts/check_claims.py`
+fails if a number in `paper/claims.tsv` does not re-derive from an admissible
+run.
+
+**Head-to-head harness** (PRs #155, #173). `scripts/head_to_head.py` scores
+our `decide()` against llama3.1, gpt-4o-mini, gemini-2.5-flash (closed and
+pooled) and the OSV scanner on the decision sheet; `build_heldout.py` builds a
+private test split (gitignored). **No numbers yet**: the gold set is empty
+until the sheet is labelled; the hosted models need keys; OSV answers 0 of 200
+(the sheet names products, not packages).
+
+**Console and housekeeping**: answer-first layout (#153); every source links
+somewhere (#156); template header is not the headline (#145); `run_all.sh`
+runs files that exist (#150); `annotate.py` labelling helper (#148);
+`NVD_API_KEY` header, `secrets.toml` gitignored (#161); architecture SVG,
+README refresh (#162, #180).
+
+### 17.2 Found and fixed this week
+
+With web search off (the console default), "Is GitHub down?" fell into the
+update pipeline and got `patch_urgently` from six unrelated GitHub Actions
+advisories (live, 2026-11-20). Outage, incident and end-of-life questions now
+decline before searching ("Needs a live source") when web search is off;
+comparisons and how-tos still go to the feeds. PR #179, checked in the live
+console.
+
+### 17.3 Against §16.4
+
+1. Annotation pilot and κ — **started**: `annotate.py` built (#148), two
+   200-row sheets made, **0 rows labelled**. Fourth week without κ.
+2. LLM retrieval judge on b500 — not run.
+3. Faster answers — not done; #177 changes the answer's content, not its speed.
+4. Comparison detection — **done**: a bare "A or B" is a comparison
+   (`0980a2d`, with a test).
+5. Push to `main` — done, all through PRs.
+
+### 17.4 Still open
+
+- PR #175 (the verdict reads the whole advisory, panels keep the
+  200-character cut).
+- `tests/test_websearch_search.py::test_empty_twice_is_a_real_miss` failed once
+  in a full-suite run on 2026-11-20 and passes alone: order-dependent.
+
+### 17.5 Next week (to 2026-11-26)
+
+1. Review and merge #175; record a fresh benchmark snapshot after #182.
+2. Annotation pilot, 30–50 rows, and κ — this unblocks the head-to-head numbers too.
+3. Faster answers: a shorter presenter prompt or a smaller presenter model.
+4. Fix the order-dependent websearch test.
 5. Push to `main` by Friday noon.
