@@ -312,7 +312,26 @@ def detect_vendors(query: str, catalog: Optional[Sequence[str]] = None,
             found.append(VendorMatch(name=name, matched=name))
             claimed.append(name)
 
-    return _drop_components(low, found)[:limit]
+    return _drop_makers(low, _drop_components(low, found))[:limit]
+
+
+def _drop_makers(low: str, found: List[VendorMatch]) -> List[VendorMatch]:
+    """"Microsoft Edge" is the product Edge, not Edge plus all of Microsoft: as
+    a second product `microsoft` pulled in SharePoint, Internet Explorer and a
+    WordPress plugin ahead of Edge's own advisories (live, 2026-11-20). A name
+    is dropped when it directly precedes a product whose owner on file
+    (vendor_kb.json) is that name."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data",
+                               "vendor_kb.json"), encoding="utf-8") as fh:
+            kb = json.load(fh)["products"]
+    except (OSError, ValueError, KeyError):
+        return found
+    def maker_of(a: VendorMatch) -> bool:
+        return any(b is not a and (kb.get(b.name) or {}).get("owner", "").lower() == a.name
+                   and re.search(rf"(?<![\w.-]){re.escape(a.matched)}\s+{re.escape(b.matched)}(?![\w-])", low)
+                   for b in found)
+    return [v for v in found if not maker_of(v)]
 
 
 def _drop_components(low: str, found: List[VendorMatch]) -> List[VendorMatch]:
