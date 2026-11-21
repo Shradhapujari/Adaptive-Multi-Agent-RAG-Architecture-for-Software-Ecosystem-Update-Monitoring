@@ -462,3 +462,12 @@ def test_has_package_cue(q, want):
 def test_catalog_vendors_never_reach_osv(pkg):
     """These resolve as catalog vendors, so the feeds answer them, not OSV."""
     assert L.kind(f"Is the {pkg} npm package safe?", vendors=[pkg]) != "package_safety"
+
+
+# ─────────────────────────────────────────────── typo suggestions
+
+def test_suggestion_only_names_resolve_typos_without_becoming_known():
+    import vendor
+    assert vendor.suggest("What happended to miscrosoft recently?") == "microsoft"
+    assert vendor.suggest("Is zom better or teems?") in ("zoom", "teams")
+    assert not {"microsoft", "zoom", "teams", "slack"} & set(vendor.known_products())
