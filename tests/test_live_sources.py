@@ -376,3 +376,49 @@ def test_eol_site_down_is_reported_not_called_missing(monkeypatch):
 def test_answer_only_needs_no_update_or_security_words(q, want):
     """Review #1: an update/CVE question that also reads as how-to keeps its verdict."""
     assert L.answer_only(L.kind(q), q) is want
+
+
+
+# ─────────────────────────────────────────────── deferred minors
+
+def test_incident_text_hits_clear_the_news_error(monkeypatch):
+    def fake(q, limit=5, timelimit=None, news=False):
+        return (([], "search failed: RuntimeError") if news
+                else ([{"title": "t", "body": "b", "href": "https://w.org/x"}], None))
+    monkeypatch.setattr(websearch, "search", fake)
+    docs, meta = L.fetch("incident", "Microsoft outage")
+    assert docs and meta["error"] is None
+
+
+def test_incident_reports_the_news_error_when_nothing_came_back(monkeypatch):
+    def fake(q, limit=5, timelimit=None, news=False):
+        return ([], "search failed: RuntimeError") if news else ([], None)
+    monkeypatch.setattr(websearch, "search", fake)
+    docs, meta = L.fetch("incident", "Microsoft outage")
+    assert docs == [] and meta["error"] == "search failed: RuntimeError"
+
+
+@pytest.mark.parametrize("q,want", [
+    ("Should I use Postgres or MySQL for a new project?", "Postgres vs MySQL"),
+    ("Which is better, Rust or Go?", "Rust vs Go"),
+    ("is Postgres better than MySQL", "Postgres vs MySQL"),
+    ("React vs. Vue in 2026?", "React vs Vue"),
+    ("Which one should I pick for a new project?", "Which one should I pick for a new project?"),
+])
+def test_compare_searches_a_vs_b(monkeypatch, q, want):
+    seen = []
+    _search_returns(monkeypatch, [], seen=seen)
+    L.fetch("compare", q)
+    assert seen[0]["q"] == want
+
+
+@pytest.mark.parametrize("q,want", [("npm install left-pad", True), ("Is the requests package safe?", True),
+                                    ("How do I bake bread?", False)])
+def test_has_package_cue(q, want):
+    assert L.has_package_cue(q) is want
+
+
+@pytest.mark.parametrize("pkg", ["lodash", "express", "django"])
+def test_catalog_vendors_never_reach_osv(pkg):
+    """These resolve as catalog vendors, so the feeds answer them, not OSV."""
+    assert L.kind(f"Is the {pkg} npm package safe?", vendors=[pkg]) != "package_safety"

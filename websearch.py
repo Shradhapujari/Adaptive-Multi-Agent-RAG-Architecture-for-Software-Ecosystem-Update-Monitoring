@@ -73,19 +73,18 @@ def _ddg(query: str, limit: int, timelimit: Optional[str], news: bool) -> List[d
 
 def search(query: str, limit: int = MAX_RESULTS, timelimit: Optional[str] = None,
            news: bool = False) -> Tuple[List[dict], Optional[str]]:
-    """(hits, error). DuckDuckGo throttles: the same query came back empty and
-    then with five hits (2026-11-19), so an exception or an empty list gets one
-    retry. `error` is None for a real miss, so the console can tell "search
-    blocked" from "the web has nothing"."""
+    """(hits, error). DuckDuckGo throttles by raising -- the "empty" searches
+    seen 2026-11-19 were exceptions the old code swallowed into [] -- so a
+    failure gets one retry after 2 s. An empty result is the web having
+    nothing and is returned at once: retrying it cost 2 s per genuine miss.
+    `error` is None for a real miss, so the console can tell "search blocked"
+    from "the web has nothing"."""
     if not available():
         return [], "no backend"
     err = None
     for attempt in range(2):
         try:
-            hits = _ddg(query, limit, timelimit, news)
-            err = None
-            if hits:
-                return hits, None
+            return _ddg(query, limit, timelimit, news), None
         except Exception as e:  # noqa: BLE001 -- a dead search is reported, not raised
             err = f"search failed: {type(e).__name__}"
         if attempt == 0:
@@ -104,10 +103,10 @@ def _to_doc(i: int, hit: dict) -> Optional[dict]:
     title = str(hit.get("title") or "").strip()
     body = str(hit.get("body") or hit.get("snippet") or "").strip()
     url = str(hit.get("href") or hit.get("url") or "").strip()
-    raw = f"{title}. {body}"
+    raw = guardrail.normalize(f"{title}. {body}")   # NFKC, zero-width and format chars gone
     if guardrail.screen({"title": title, "text": body}) is not None:  # tripped the injection screen
         return None
-    scrubbed, _ = guardrail.scrub(raw)   # NFKC + zero-width, same as a Reddit body
+    scrubbed, _ = guardrail.scrub(raw)   # secrets redacted
     return {
         "doc_id": f"web{i}",
         "title": title,

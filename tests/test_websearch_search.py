@@ -40,12 +40,14 @@ def test_two_failures_report_error_not_empty(monkeypatch):
     assert websearch.search("q") == ([], "search failed: RuntimeError")
 
 
-def test_empty_twice_is_a_real_miss(monkeypatch):
-    calls = []
+def test_an_empty_result_is_a_real_miss_and_not_retried(monkeypatch):
+    """Throttling raised (the old code swallowed it into []); a plain empty
+    result is the web having nothing, and retrying it cost 2 s per miss."""
+    calls, slept = [], []
     monkeypatch.setattr(websearch, "_ddg", lambda *a: calls.append(1) or [])
-    _no_sleep(monkeypatch)
+    monkeypatch.setattr(websearch, "_sleep", slept.append)
     assert websearch.search("q") == ([], None)
-    assert len(calls) == 2
+    assert len(calls) == 1 and slept == []
 
 
 def test_news_and_timelimit_are_passed_through(monkeypatch):
@@ -66,3 +68,10 @@ def test_fallback_meta_carries_the_error(monkeypatch):
     monkeypatch.setattr(websearch, "search", lambda q, limit=5, **k: ([], "search failed: RuntimeError"))
     docs, meta = websearch.fallback("q")
     assert docs == [] and meta["error"] == "search failed: RuntimeError"
+
+
+def test_web_doc_text_is_normalised():
+    """_to_doc claimed scrub() strips zero-width characters; it doesn't, so a
+    CVE id split by one was invisible to the regex."""
+    d = websearch._to_doc(0, {"title": "t", "body": "fixes CVE\u200b-2026-1234", "href": "https://x.org"})
+    assert "\u200b" not in d["text"] and d["cves"] == ["CVE-2026-1234"]
