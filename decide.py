@@ -64,7 +64,7 @@ COLLAPSE = {"patch_urgently": "act", "update_with_caveat": "act", "safe": "act",
 ADVISORY = frozenset({"cisa_kev", "circl_cve", "nvd", "cve"})
 RELEASE = frozenset({"vendor_releases", "releases", "llm_releases", "apple_rss"})
 COMMUNITY = frozenset({"vendor_reddit", "reddit_live", "reddit_search",
-                       "google_news", "github", "local"})
+                       "google_news", "news_feeds", "github", "local"})
 
 # How many independent community reports make a regression a reason to wait.
 # One popular wrong post is the failure mode docs/Roadmap names; two is the

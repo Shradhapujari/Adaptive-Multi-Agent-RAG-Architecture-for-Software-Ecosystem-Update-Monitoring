@@ -117,6 +117,9 @@ class RecordedFailure(Exception):
 CORPUS_HOST_HINTS = (
     "releasetrain.io", "reddit.com", "cisa.gov", "apple.com", "circl.lu",
     "news.google.com", "github.com", "nvd.nist.gov", "cve.org", "cveawg",
+    # multiagent_rag_v3.NEWS_FEEDS; test_news_feeds checks they stay in step.
+    "securityweek.com", "securityaffairs.com", "cyberscoop.com", "9to5mac.com",
+    "9to5google.com", "omgubuntu.co.uk", "docker.com",
 )
 
 
