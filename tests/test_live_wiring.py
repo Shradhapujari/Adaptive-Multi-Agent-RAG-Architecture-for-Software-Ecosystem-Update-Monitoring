@@ -218,3 +218,23 @@ def test_outage_and_eol_questions_decline_when_web_search_is_off(q):
                                "Latest Node.js version?"])
 def test_feed_questions_are_not_declined_for_a_live_source(q):
     assert app_1._needs_live_note(q, live=False) is None
+
+
+def test_a_vendorless_question_gets_only_on_subject_reddit_cve_posts(empty_lake, monkeypatch):
+    # /api/reddit/query/cve matches `q` loosely in post bodies; _scope_cve
+    # returned every row untouched when no catalog vendor was detected.
+    cve = [{"title": "Edge CVE-2025-1234 exploited in the wild", "subreddit": "MicrosoftEdge"},
+           {"title": "CrowdStrike CVE-2024-5678 outage fallout", "subreddit": "sysadmin"},
+           {"title": "KEV: Acme Widget RCE", "kev_vendor": "Acme", "url": "https://cisa.gov/x",
+            "source": "kev"}]
+    monkeypatch.setattr(app_1, "terminal_sources",
+                        lambda *a, **k: ({"community": [], "releases": [],
+                                          "cve": [dict(c) for c in cve]}, []))
+    q = "Any news on the CrowdStrike outage?"
+    import grounding
+    assert grounding.ground(q).vendors == []          # precondition: no catalog vendor
+    r = app_1.run_pipeline(q, show_steps=False, web_fallback=False)
+    titles = [c["title"] for c in r["cve"]]
+    assert "Edge CVE-2025-1234 exploited in the wild" not in titles
+    assert "CrowdStrike CVE-2024-5678 outage fallout" in titles
+    assert "KEV: Acme Widget RCE" in titles           # advisory records are not forum posts

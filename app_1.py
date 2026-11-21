@@ -754,7 +754,15 @@ def _scope_cve(rows: list, g) -> list:
     forum filter matched KEV rows by text, so it dropped Chrome's ("Chromium
     V8") and kept VMware's "SD-WAN Edge" for an Edge question."""
     if not g.vendors:
-        return rows
+        # /api/reddit/query/cve matches `q` anywhere in a post body (2026-11-20:
+        # q=requests returned "Resource Request" threads and an Apache RCE),
+        # so with no vendor the forum rows must share a word with the question
+        # in their title, as they must when a vendor is detected. KEV and NVD
+        # rows are advisory records, not forum posts, and stay as fetched.
+        forum = [r for r in rows if not r.get("kev_vendor") and r.get("source") != "nvd"]
+        on = {id(r) for r in vendor.filter_community(forum, [], terms=g.terms)}
+        forum_ids = {id(r) for r in forum}
+        return [r for r in rows if id(r) not in forum_ids or id(r) in on]
     kev = [r for r in rows if r.get("kev_vendor")]
     # NVD rows are free text: a keyword hit is not ownership (an "nvd" Chrome
     # search returns Hono and Nuxt CVEs), so the verdict's subject rule decides.
