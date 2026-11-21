@@ -50,6 +50,29 @@ def test_a_date_question_naming_a_version_gets_that_versions_row():
     assert best["version"] == "26.11.0"
 
 
+def test_a_named_version_missing_from_the_feed_is_no_headline():
+    # Live, 2026-11-21: "Did rust-lang rust v1.92.0 ship?" was answered
+    # "rust v1.100.0" because 1.92.0 was not among the rows fetched.
+    rows = [_rel("1.100.0", "20261120"), _rel("1.99.1", "20261111")]
+    assert app_1._latest_release(rows, "Did rust-lang rust v1.92.0 ship?",
+                                 today=date(2026, 11, 21)) is None
+    # A date-shaped version is a named version too: no Arch row, no headline.
+    assert app_1._latest_release(rows, "Should I upgrade to Arch v2026.01.01?",
+                                 today=date(2026, 11, 21)) is None
+
+
+def test_a_short_named_version_picks_the_newest_of_its_line():
+    rows = [_rel("26.11.0", "20261001"), _rel("26.11.2", "20261015"),
+            _rel("26.12.0", "20261020"), _rel("v26.10.1", "20260920")]
+    best = app_1._latest_release(rows, "Is 26.11 still supported?", today=date(2026, 10, 22))
+    assert best["version"] == "26.11.2"
+    # A leading "v" on the row's version still matches.
+    best = app_1._latest_release(rows, "When did 26.10.1 ship?", today=date(2026, 10, 22))
+    assert best["version"] == "v26.10.1"
+    # "26.1" is not a prefix of "26.11.x" or "26.12.0".
+    assert app_1._latest_release(rows, "When did 26.1 ship?", today=date(2026, 10, 22)) is None
+
+
 def test_no_shipped_release_means_no_short_answer_value():
     assert app_1._latest_release([_rel("26.99.0", "20261015", is_cve=True)], "latest node?",
                                  today=date(2026, 10, 22)) is None

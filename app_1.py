@@ -1912,17 +1912,26 @@ def _latest_release(rows: list, query: str, today=None) -> Optional[dict]:
     """The release row a version/date question is asking about, or None.
 
     A version named in the question picks that row ("When was 26.11.0
-    released?"); otherwise it is the highest shipped version -- the same
+    released?"), or the newest of its line for a shorter form ("26.11" ->
+    26.11.x); otherwise it is the highest shipped version -- the same
     (version, date) order as monitor.shipped, so a backfilled older build or a
     scheduled future row is never "the latest". Advisory rows are skipped:
     their version is an affected-version string.
+
+    A named version with no matching row is None, never the newest release:
+    "Did rust-lang rust v1.92.0 ship?" was answered "rust v1.100.0" (live,
+    2026-11-21) because 1.92.0 was not among the rows fetched. None sends the
+    fast path on to the full pipeline and leaves the Short Answer to the verdict.
     """
     today = today or datetime.now().date()
     shipped = [r for r in rows if not r.get("is_cve") and vendor.is_release_record(r)
                and (d := monitor.parse_ymd(r.get("date"))) and d <= today]
     named = set(_VERSION_IN_Q.findall(query or ""))
-    hit = [r for r in shipped if str(r.get("version")) in named]
-    pool = hit or shipped
+    if named:
+        ver = lambda r: str(r.get("version") or "").lstrip("vV")  # noqa: E731
+        shipped = [r for r in shipped
+                   if any(ver(r) == n or ver(r).startswith(n + ".") for n in named)]
+    pool = shipped
     if not pool:
         return None
     return max(pool, key=lambda r: (monitor.version_key(r.get("version")),
