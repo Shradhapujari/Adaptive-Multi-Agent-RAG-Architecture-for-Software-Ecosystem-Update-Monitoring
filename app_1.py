@@ -459,6 +459,9 @@ def fetch_release_notes(query: str, limit: int = 5) -> list:
             "version":   v.get("versionNumber", ""),
             "date":      v.get("versionReleaseDate", ""),
             "notes":     v.get("versionReleaseNotes", "")[:200],
+            # Uncut, for the verdict only: the cut above dropped the clause
+            # that names an advisory's owner (CVE-2026-115930, mongosh).
+            "notes_full": v.get("versionReleaseNotes", ""),
             "channel":   v.get("versionReleaseChannel", ""),
             "url":       v.get("versionUrl", ""),
             "security":  v.get("classification", {}).get("securityType", []),
@@ -737,7 +740,8 @@ def _decide_pool(results: dict) -> list:
                 "doc_id": doc_id(d),
                 "title": d.get("title", ""),
                 "text": " ".join(str(d.get(k) or "") for k in
-                                 ("body", "notes", "detail", "top_comment", "text")).strip(),
+                                 ("body", "notes_full" if d.get("notes_full") else "notes",
+                                  "detail", "top_comment", "text")).strip(),
                 "source": source,
                 "url": d.get("url", ""),
                 "date": d.get("date", ""),
