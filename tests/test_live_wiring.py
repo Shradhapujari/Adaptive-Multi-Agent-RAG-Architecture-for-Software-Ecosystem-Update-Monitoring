@@ -204,3 +204,17 @@ def test_a_vendorless_question_gets_only_on_subject_community_posts(empty_lake, 
     assert grounding.ground(q).vendors == []          # precondition: no catalog vendor
     r = app_1.run_pipeline(q, show_steps=False, web_fallback=False)
     assert [p["title"] for p in r["community"]] == ["CrowdStrike outage took down our fleet"]
+
+
+@pytest.mark.parametrize("q", ["Is GitHub down?", "Is Python 3.9 still supported?"])
+def test_outage_and_eol_questions_decline_when_web_search_is_off(q):
+    """Live check 2026-11-20: with web search off, "Is GitHub down?" got a
+    patch_urgently verdict from unrelated GitHub Actions advisories."""
+    assert "Web search" in app_1._needs_live_note(q, live=False)
+    assert app_1._needs_live_note(q, live=True) is None
+
+
+@pytest.mark.parametrize("q", ["Is it safe to update Firefox?", "Is zoom better or teams?",
+                               "Latest Node.js version?"])
+def test_feed_questions_are_not_declined_for_a_live_source(q):
+    assert app_1._needs_live_note(q, live=False) is None
