@@ -60,5 +60,8 @@ results/ui_feedback.jsonl
 QA_PREP_*.md
 docs/QA-Prep-*.md
 
+# private held-out test split: never pushed (see build_heldout.py)
+**/data/heldout/
+
 # Keys live here; never commit them.
 .streamlit/secrets.toml
