@@ -27,8 +27,8 @@ from eval_harness.providers import LLMError, make_client  # noqa: E402
 
 LABELS = ("act", "hold", "insufficient_evidence")
 ERROR = "error"   # the call failed (rate limit, truncation): not the model's fault
-_VERDICT = re.compile(r"^\s*verdict:\s*(act|hold|insufficient_evidence)\b",
-                      re.IGNORECASE | re.MULTILINE)
+_VERDICT = re.compile(r"^\s*verdict:(.*)$", re.IGNORECASE | re.MULTILINE)
+_LABEL = re.compile(r"\b(act|hold|insufficient_evidence)\b", re.IGNORECASE)
 _MARKDOWN = re.compile(r"[*#>`]|(?<!\w)_|_(?!\w)")  # keeps insufficient_evidence intact
 
 
@@ -48,9 +48,13 @@ def load_gold(path: str) -> list[dict]:
 
 
 def parse_verdict(text: str) -> str | None:
-    """The label on a `VERDICT:` line; the last one wins. None if there is none."""
-    found = _VERDICT.findall(_MARKDOWN.sub("", text or ""))
-    return found[-1].lower() if found else None
+    """The label on the last `VERDICT:` line. None if there is none, or if that
+    line names more than one label ("act or hold" is a hedge, not an answer)."""
+    lines = _VERDICT.findall(_MARKDOWN.sub("", text or ""))
+    if not lines:
+        return None
+    labels = {m.lower() for m in _LABEL.findall(lines[-1])}
+    return labels.pop() if len(labels) == 1 else None
 
 
 def score(gold: list[str], pred: list[str | None]) -> dict:
@@ -229,16 +233,28 @@ def main(argv: Optional[list] = None) -> None:
     gold_rows = load_gold(a.sheet)
     n_total = sum(1 for line in open(a.sheet) if line.strip())
     run, skipped = systems()
-    preds = {name: [fn(r) for r in gold_rows] for name, fn in run.items()}
+    rows_path = os.path.splitext(a.out)[0] + ".jsonl" if a.out else None
+    if rows_path:
+        os.makedirs(os.path.dirname(rows_path) or ".", exist_ok=True)
+    preds: dict = {name: [] for name in run}
+    # Row by row, each row appended and flushed as it finishes, so a crash keeps
+    # what was paid for. A system that raises counts as an error on that row.
+    with open(rows_path, "w") if rows_path else open(os.devnull, "w") as f:
+        for r in gold_rows:
+            row = {"id": r.get("id"), "gold": r["gold"]}
+            for name, fn in run.items():
+                try:
+                    row[name] = fn(r)
+                except Exception as e:  # noqa: BLE001 -- one bad row must not end the run
+                    print(f"{name} failed on row {r.get('id')}: {e!r}", file=sys.stderr)
+                    row[name] = ERROR
+                preds[name].append(row[name])
+            f.write(json.dumps(row) + "\n")
+            f.flush()
     text = report(a.sheet, gold_rows, preds, skipped, n_total)
     print(text)
     if a.out:
-        os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
         open(a.out, "w").write(text)
-        with open(os.path.splitext(a.out)[0] + ".jsonl", "w") as f:
-            for i, r in enumerate(gold_rows):
-                f.write(json.dumps({"id": r.get("id"), "gold": r["gold"],
-                                    **{n: p[i] for n, p in preds.items()}}) + "\n")
 
 
 if __name__ == "__main__":
