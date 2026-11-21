@@ -191,3 +191,11 @@ def test_kev_rows_survive_the_cut():
     rows = [{"id": f"nvd{i}"} for i in range(5)] + [{"id": "kev", "kev_vendor": "Google"}]
     top = app_1._kev_first(rows)[:5]
     assert top[0]["id"] == "kev" and [r["id"] for r in top[1:]] == ["nvd0", "nvd1", "nvd2", "nvd3"]
+
+
+def test_component_notice_only_where_the_vendor_names_no_component():
+    import app_1
+    from vendor import detect_vendors
+    g = lambda q: type("G", (), {"vendors": detect_vendors(q)})()
+    assert app_1._unfocused_components(g("WebRTC in Edge")) == ["webrtc in edge"]
+    assert app_1._unfocused_components(g("WebRTC in Chrome")) == []
