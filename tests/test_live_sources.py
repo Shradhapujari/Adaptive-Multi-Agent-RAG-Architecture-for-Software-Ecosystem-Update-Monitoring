@@ -30,6 +30,19 @@ import websearch  # noqa: E402
     ("How do I fix EACCES on npm install?", "howto"),
     ("What is the latest Linux version?", None),
     ("Any critical CVEs in Chrome?", None),
+    ("Is zoom better or teams?", "compare"),
+    ("What happened to Microsoft recently?", "news"),
+    ("Any news about Slack?", "news"),
+    ("What's going on with Blockify?", "news"),
+    ("What is Kubernetes?", "general"),
+    ("How does Upsert work?", "general"),
+    ("Why does Linux not need anti-virus software?", "general"),
+    ("What is the latest Chrome version?", None),          # release intent
+    ("What is CVE-2024-1234?", None),                      # update cue
+    ("Why is Chrome not updating?", None),                 # update cue
+    ("iOS 26.3 WiFi/RAM issues?", None),                   # update report, no general cue
+    ("Latest Node.js version?", None),                     # release intent
+    ("What happened during the GitHub outage?", "incident"),  # precedence
 ])
 def test_kind(q, want):
     assert L.kind(q) == want
@@ -184,6 +197,33 @@ def test_compat_searches_last_year(monkeypatch):
     _search_returns(monkeypatch, [], seen=seen)
     L.fetch("compat", "Does Django 5 support Python 3.13?")
     assert seen[0]["timelimit"] == "y"
+
+
+def test_news_searches_news_last_month(monkeypatch):
+    seen = []
+    _search_returns(monkeypatch, [{"title": "t", "body": "b", "href": "https://n.com/x",
+                                   "date": "2026-11-20", "source": "N"}], seen=seen)
+    docs, meta = L.fetch("news", "What happened to Microsoft recently?")
+    assert seen[0] == {"q": "What happened to Microsoft recently?", "timelimit": "m", "news": True}
+    assert meta["kind"] == "news" and docs[0]["label"].startswith("News - ")
+
+
+def test_news_error_reaches_meta(monkeypatch):
+    _search_returns(monkeypatch, [], err="search failed: RatelimitException")
+    _, meta = L.fetch("news", "Any news about Slack?")
+    assert meta["kind"] == "news" and meta["error"] == "search failed: RatelimitException"
+
+
+def test_general_is_a_plain_search(monkeypatch):
+    seen = []
+    _search_returns(monkeypatch, [], seen=seen)
+    _, meta = L.fetch("general", "What is Kubernetes?")
+    assert seen[0]["news"] is False and seen[0]["timelimit"] is None and meta["kind"] == "general"
+
+
+def test_news_and_general_replace_the_verdict():
+    assert L.answer_only("news", "What happened to Microsoft recently?")
+    assert L.answer_only("general", "What is Kubernetes?")
 
 
 # ─────────────────────────────────────────────── Task 4: package safety (OSV)
