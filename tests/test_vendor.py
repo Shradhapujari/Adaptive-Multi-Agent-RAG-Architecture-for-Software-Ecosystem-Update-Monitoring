@@ -216,9 +216,26 @@ def test_subject_narrowing_needs_terms_to_narrow_on():
     assert [r["subreddit"] for r in kept] == ["linuxquestions"]
 
 
-def test_community_falls_back_rather_than_returning_nothing():
-    # No vendor, and no content term matches: a loose pool beats an empty one.
-    assert filter_community(COMMUNITY, [], terms=["kubernetes"]) == COMMUNITY
+def test_no_vendor_and_no_term_match_is_an_empty_pool():
+    # /api/reddit/query/positive ignores `q`, so the fallback handed every
+    # vendor-less question ("Any news on the CrowdStrike outage?") the same 50
+    # global posts as its community evidence. A thin pool beats a false one.
+    assert filter_community(COMMUNITY, [], terms=["kubernetes"]) == []
+
+
+def test_a_term_must_start_a_word():
+    # "install" inside "reinstall" kept a Chrome post for an npm question.
+    rows = [{"title": "Can't reinstall chrome after update", "subreddit": "chrome"},
+            {"title": "npm install fails with EACCES", "subreddit": "node"}]
+    kept = filter_community(rows, [], terms=["fix", "EACCES", "npm", "install"])
+    assert [r["title"] for r in kept] == ["npm install fails with EACCES"]
+    assert filter_community(rows, [], terms=["install"]) == rows[1:]
+
+
+def test_a_term_still_matches_its_plural():
+    rows = [{"title": "Fedora updates broke grub", "subreddit": "Fedora"}]
+    assert filter_community(rows, [VendorMatch("fedora", "fedora")],
+                            terms=["update"]) == rows
 
 
 # ── How a row is named when cited ────────────────────────────────────────

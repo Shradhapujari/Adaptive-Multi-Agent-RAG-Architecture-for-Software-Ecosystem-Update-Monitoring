@@ -693,8 +693,7 @@ def filter_community(rows: Iterable[Dict], vendors: Sequence[VendorMatch],
 
     A post matches on its subreddit's product, or on a product name appearing
     in its title. With no vendor detected, `terms` (the question's content
-    words) are used instead, and if those match nothing the rows pass through
-    unfiltered -- an empty community pool is worse than a loose one.
+    words) are used instead, and if those match nothing the pool is empty.
 
     A subreddit match says the post is about the right *product*. It says
     nothing about whether it is about the right *subject*, and the two were
@@ -720,13 +719,21 @@ def filter_community(rows: Iterable[Dict], vendors: Sequence[VendorMatch],
     """
     wanted = {v.name for v in vendors}
     rows = list(rows)
+    # A term has to start a word: "install" inside "reinstall" kept a Chrome
+    # post for an npm question. Suffixes still match ("update" -> "updates").
+    # ponytail: one generic word ("outage", "safe") is enough to keep a post;
+    # require two terms if off-subject hits keep showing up.
+    low_terms = [t.lower() for t in terms if len(t) > 2]
+    pats = [re.compile(rf"(?<![\w-]){re.escape(t)}") for t in low_terms]
+
+    def on_subject(r: Dict) -> bool:
+        title = str(r.get("title", "")).lower()
+        return any(p.search(title) for p in pats)
+
     if not wanted:
-        if not terms:
-            return rows
-        low_terms = [t.lower() for t in terms if len(t) > 2]
-        hit = [r for r in rows
-               if any(t in str(r.get("title", "")).lower() for t in low_terms)]
-        return hit or rows
+        # No fallback to `rows`: the feed ignores `q`, so "everything" is the
+        # same 50 global posts for every question (2026-11-20).
+        return [r for r in rows if on_subject(r)] if pats else rows
 
     out = []
     for r in rows:
@@ -736,11 +743,7 @@ def filter_community(rows: Iterable[Dict], vendors: Sequence[VendorMatch],
                 re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])", title) for w in wanted):
             out.append(r)
 
-    low_terms = [t.lower() for t in terms if len(t) > 2]
-    if low_terms:
-        return [r for r in out
-                if any(t in str(r.get("title", "")).lower() for t in low_terms)]
-    return out
+    return [r for r in out if on_subject(r)] if pats else out
 
 
 def filter_by_vendor(rows: Iterable[Dict], vendors: Sequence[VendorMatch],
