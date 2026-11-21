@@ -56,7 +56,7 @@ from .metrics import retrieval_metrics  # noqa: E402
 from .providers import make_client, LLMError  # noqa: E402
 from .run_eval import qrels_key, _load_qrels_cache, _save_qrels_cache  # noqa: E402
 
-TIER2_SOURCES = {"vendor_reddit", "google_news", "reddit", "news"}
+TIER2_SOURCES = {"vendor_reddit", "google_news", "news_feeds", "reddit", "news"}
 KS = (1, 3, 5)
 RRF_K = 60
 LLM_TOP_N = 12
@@ -171,7 +171,7 @@ class Scorer:
         return g
 
 
-NEWS_SOURCES = {"google_news", "news"}
+NEWS_SOURCES = {"google_news", "news_feeds", "news"}
 
 
 def rank(mode: str, scorer: Scorer, query: str, pool: List[dict], top_k: int) -> List[dict]:

@@ -428,6 +428,88 @@ def fetch_google_news(query, limit=5):
     except Exception as e:
         return []
 
+
+# Press coverage that carries a body. Google News RSS publishes a headline and
+# an opaque redirect and nothing else -- 431 of 431 google_news documents in
+# run_1790126271 had no text, and judges disagreed on them 43% of the time
+# against 21% with a body. These sites run WordPress, whose search is itself
+# an RSS feed (`/?s=<term>&feed=rss2`) with an excerpt per post; the judge
+# reads 600 characters, so an excerpt is close to all it would use.
+# Probed 2026-11-20: each returned results that contained the search term.
+NEWS_FEEDS = {
+    "SecurityWeek":     "https://www.securityweek.com/",
+    "Security Affairs": "https://securityaffairs.com/",
+    "CyberScoop":       "https://cyberscoop.com/",
+    "9to5Mac":          "https://9to5mac.com/",
+    "9to5Google":       "https://9to5google.com/",
+    "OMG! Ubuntu":      "https://www.omgubuntu.co.uk/",
+    "Docker Blog":      "https://www.docker.com/blog/",
+}
+_XML_ENTITIES = {"amp", "lt", "gt", "quot", "apos"}
+
+
+def _xml_safe(raw: bytes) -> bytes:
+    """Rewrite HTML-only named entities (&nbsp; ...) as numeric ones, which XML accepts."""
+    import html.entities
+    def sub(m):
+        name = m.group(1).decode()
+        cp = html.entities.name2codepoint.get(name)
+        return m.group(0) if name in _XML_ENTITIES or cp is None else f"&#{cp};".encode()
+    return re.sub(rb"&([A-Za-z][A-Za-z0-9]*);", sub, raw)
+
+
+def _plain(fragment: str) -> str:
+    import html
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", fragment or ""))).strip()
+
+
+def fetch_news_feed(site, term, limit=2):
+    """Search one NEWS_FEEDS site for `term`; posts come back with an excerpt in `detail`."""
+    try:
+        import requests as req
+        r = req.get(NEWS_FEEDS[site], params={"s": term, "feed": "rss2"},
+                    headers={"User-Agent": "marag/1.0"}, timeout=15)
+        r.raise_for_status()
+        root = ET.fromstring(_xml_safe(r.content))
+        enc = "{http://purl.org/rss/1.0/modules/content/}encoded"
+        results = []
+        for item in root.findall(".//item"):
+            if len(results) >= limit:
+                break
+            title = _plain(item.findtext("title") or "")
+            body = _plain(item.findtext("description") or item.findtext(enc) or "")
+            # WordPress matches the term anywhere in the full article, so most
+            # hits only mention it in passing: measured 2026-11-20 over 15
+            # products, 5-35% of results named it in title or excerpt on every
+            # site but SecurityWeek (98%). Keep only the ones that do.
+            # Whole word: "rust" must not match "trust".
+            if not title or not re.search(rf"\b{re.escape(term)}\b", f"{title} {body}", re.I):
+                continue
+            results.append({
+                "title":      title,
+                "subreddit":  site,
+                "sentiment":  "Negative" if any(w in title.lower() for w in
+                              ["vulnerability", "breach", "hack", "exploit", "critical", "attack"]) else "Neutral",
+                "score":      0,
+                "divergence": 0.0,
+                "source":     "news_feeds",
+                "url":        item.findtext("link") or "",
+                "date":       (item.findtext("pubDate") or "")[:16],
+                "detail":     body[:1000],
+            })
+        return results
+    except Exception:
+        return []
+
+
+def news_mode() -> str:
+    """MARAG_NEWS: google (default; headline only), feeds (NEWS_FEEDS, with bodies), or both."""
+    m = os.environ.get("MARAG_NEWS", "google").strip().lower()
+    if m not in ("google", "feeds", "both"):
+        raise ValueError(f"MARAG_NEWS must be google|feeds|both, got {m!r}")
+    return m
+
+
 def fetch_github_releases(query, limit=4):
     """Fetch GitHub release info for software matching the query."""
     try:
@@ -483,7 +565,7 @@ def fetch_github_releases(query, limit=4):
 # Source trust tiers
 TIER1 = ["vendor_releases","releases","llm_releases","apple_rss","cisa_kev",
          "circl_cve","nvd","cve"]
-TIER2 = ["vendor_reddit","reddit_live","reddit_search","google_news","github"]
+TIER2 = ["vendor_reddit","reddit_live","reddit_search","google_news","news_feeds","github"]
 
 APPLE_RSS  = "https://developer.apple.com/news/releases/rss/releases.rss"
 CISA_KEV   = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
@@ -701,6 +783,7 @@ def get_source_label(source):
         "reddit_live":     ("🟡 COMMUNITY", "Reddit Community Posts (releasetrain.io)"),
         "reddit_search":   ("🟡 COMMUNITY", "Reddit Community Posts (direct search)"),
         "google_news":     ("🟡 COMMUNITY", "Google News Press Coverage"),
+        "news_feeds":      ("🟡 COMMUNITY", "Tech and Security Press (site search)"),
         "github":          ("🟡 COMMUNITY", "GitHub Release Notes"),
         "local":           ("⚠️ UNVERIFIED", "Local Dataset (may be outdated)"),
     }
@@ -1695,6 +1778,7 @@ def gather_sources(rewritten_query: str, original_query: str = "",
     _sinks = {"releases": gen_releases, "apple": gen_apple, "cisa": gen_cisa,
               "circl": gen_circl, "cve": gen_cve, "llm": gen_llm,
               "reddit": gen_reddit, "news": gen_news}
+    _news = news_mode()
     _calls = []   # (sink, thunk), in the order the sequential loop appended
     for qi, q in enumerate(search_queries):
         tag = "rewritten" if qi == 0 else "original"
@@ -1709,7 +1793,16 @@ def gather_sources(rewritten_query: str, original_query: str = "",
             _calls.append(("llm", lambda q=q: fetch_llm_releases(q, limit=3, gate=False)))
         if not vendor_reddit:
             _calls.append(("reddit", lambda q=q: fetch_live_reddit(q, limit=3)))
-        _calls.append(("news",  lambda q=q: fetch_google_news(q, limit=2)))
+        if _news in ("google", "both"):
+            _calls.append(("news",  lambda q=q: fetch_google_news(q, limit=2)))
+    # The feeds are searched on the product, which both phrasings share, so once
+    # per question. WordPress search ANDs every word, so a full question returns
+    # nothing; with no product found there is no term worth sending.
+    # ponytail: one product, one post per site; widen if pools come back thin.
+    if _news in ("feeds", "both"):
+        for v in list(vendors)[:1]:
+            for site in NEWS_FEEDS:
+                _calls.append(("news", lambda s=site, v=v: fetch_news_feed(s, v, limit=1)))
     for (sink, _), r in zip(_calls, _gather([c for _, c in _calls])):
         _sinks[sink] += r
 

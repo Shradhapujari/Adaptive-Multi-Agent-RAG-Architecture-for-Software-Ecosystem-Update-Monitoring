@@ -39,7 +39,7 @@ ATTRS = ("version", "date", "stance", "cve")
 TIER = {"vendor_releases": "tier1", "releases": "tier1", "llm_releases": "tier1",
         "apple_rss": "tier1", "cisa_kev": "tier1", "circl_cve": "tier1", "nvd": "tier1",
         "cve": "tier1", "vendor_reddit": "community", "reddit_live": "community",
-        "reddit_search": "community", "google_news": "news"}
+        "reddit_search": "community", "google_news": "news", "news_feeds": "news"}
 SCALE = {2: "answers the question directly", 1: "related: same product/area, not a direct answer",
          0: "irrelevant"}
 
