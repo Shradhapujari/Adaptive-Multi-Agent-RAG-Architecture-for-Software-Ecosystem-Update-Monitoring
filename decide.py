@@ -144,7 +144,7 @@ def _vendor_tokens(vendors: Iterable[str]) -> set:
 # "<product> is a ...", "<product> before <version> allows ...", or "In the
 # <product>, ..." -- which has no predicate here and so is left alone.
 _PREDICATE = re.compile(
-    r"\b(?:contains?|is|are|was|were|allows?|before|prior\s+to|suffers|fails|"
+    r"\b(?:contains?|is|are|was|were|allows?|before|prior\s+to|suffers|fails?|"
     r"does\s+not|has\s+an?|have\s+an?)\b", re.I)
 
 # "...was fixed in Firefox 157.0.1." The product named as the thing patched,
@@ -195,8 +195,8 @@ def _word_at(name: str, text: str) -> Optional[int]:
 def _foreign_vendor_first(d: dict, vendors: Sequence[str]) -> bool:
     """True when an advisory's subject names another vendor before every asked
     product it names -- "Cisco IOS XE ..." for iOS, "Zoom Windows client ..."
-    for Windows. Advisories are written vendor-first, so the first vendor
-    named is the artifact's owner.
+    for Windows. Advisories name the owner right before its product, so the
+    vendor nearest before the asked product is the artifact's owner.
 
     Only judged for products whose owner is on file (vendor_kb.json
     `kev_vendors`): without one, a vendor before the product may be its own
@@ -220,9 +220,13 @@ def _foreign_vendor_first(d: dict, vendors: Sequence[str]) -> bool:
         owners = {o.lower() for o in KB.get(str(v).lower(), {}).get("kev_vendors", ())}
         if not owners:
             return False
-        first = min((p for n in KNOWN_VENDORS - owners if (p := _word_at(n, head)) is not None),
-                    default=None)
-        if first is None or first >= pos:
+        # The vendor nearest before the product owns it, not the first one
+        # named: "Buffer overflow in WebRTC in Google Chrome" is Google's
+        # ("webrtc" is a KEV vendor too), "Cisco IOS XE" is Cisco's. Taking
+        # the first dropped two real Chrome WebRTC advisories (2026-11-19).
+        near = max(((p, n) for n in KNOWN_VENDORS | owners
+                    if (p := _word_at(n, head)) is not None and p < pos), default=None)
+        if near is None or near[1] in owners:
             return False
         blocked = True
     return blocked
@@ -377,6 +381,22 @@ def _platform_variant_mismatch(d: dict, vtoks: set, qtoks: set) -> bool:
                for m in rx.finditer(body))
 
 
+def _lacks_required_word(d: dict, vendors: Sequence[str]) -> bool:
+    """True when the advisory names an asked product that is also an ordinary
+    word, without the word that makes it that product (vendor_kb.json
+    `name_requires`). "The VAPIX Edge storage API ..." and "AMD Versal AI Edge
+    Series ..." named Edge, passed the subject rule, and were cited in an Edge
+    answer (live, 2026-11-19). Judged per product the advisory names, so a
+    Chrome advisory is not held to Edge's requirement in an Edge-and-Chrome
+    question."""
+    body = _text(d).lower()
+    named = [str(v).lower() for v in vendors if _word_at(str(v).lower(), body) is not None]
+    if not named:
+        return False
+    need = {v: KB.get(v, {}).get("name_requires") for v in named}
+    return all(need[v] and not any(w in body for w in need[v]) for v in named)
+
+
 def _about(d: dict, vtoks: set, qtoks: set, exclude: Sequence[str] = (),
            vendors: Sequence[str] = ()) -> bool:
     """Is the document about the asked product? With a known vendor, the vendor
@@ -389,6 +409,8 @@ def _about(d: dict, vtoks: set, qtoks: set, exclude: Sequence[str] = (),
     toks = _tokens(_text(d))
     if vtoks and d.get("source") in ADVISORY and d.get("kev_vendor"):
         return kev_owns(d, vendors, exclude)
+    if vtoks and d.get("source") in ADVISORY and _lacks_required_word(d, vendors):
+        return False
     if vtoks:
         if not toks & vtoks:
             return False

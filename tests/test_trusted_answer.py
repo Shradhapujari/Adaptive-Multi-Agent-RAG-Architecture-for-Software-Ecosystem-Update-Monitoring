@@ -19,6 +19,8 @@ import websearch  # noqa: E402
 def test_websearch_self_check(monkeypatch):
     # _demo patches these in place; monkeypatch puts the real ones back after.
     monkeypatch.setattr(websearch, "_raw_search", websearch._raw_search)
+    monkeypatch.setattr(websearch, "_ddg", websearch._ddg)
+    monkeypatch.setattr(websearch, "_sleep", websearch._sleep)
     monkeypatch.setattr(websearch, "available", websearch.available)
     websearch._demo()
 

@@ -4,7 +4,7 @@
 #
 #   scripts/phase_ablation.sh <dataset.json> <snapshot-dir>
 #
-# Pass 0 populates the snapshot; passes 1-3 replay it, so the three arms differ
+# Pass 0 populates the snapshot; passes 1-3 replay it strictly, so the three arms differ
 # only in MARAG_RERANK. Pass 0 reports frozen=false by construction -- it is a
 # population pass, not an arm, and carries no claim.
 #
@@ -19,6 +19,7 @@
 # whole script is in memory before the first pass starts and a later edit cannot
 # reach it.
 set -euo pipefail
+: "${PREDICTION:?set PREDICTION to the one-line prediction for this sweep}"
 
 main() {
   cd "$(dirname "$0")/.."
@@ -35,11 +36,11 @@ main() {
     echo "NOTE: $SNAP exists -- reusing it. For a clean ablation use a new directory."
   fi
   echo "##### RECORD pass | $(date +%H:%M:%S)"
-  MARAG_RERANK=embed $PY -m eval_harness.run_eval $COMMON --corpus "record:$SNAP"
+  MARAG_RERANK=embed $PY -m eval_harness.run_eval $COMMON --corpus "record:$SNAP" --diagnostic --prediction "$PREDICTION"
 
   for arm in none bm25 embed; do
     echo "##### ARM $arm | $(date +%H:%M:%S)"
-    MARAG_RERANK=$arm $PY -m eval_harness.run_eval $COMMON --corpus "replay:$SNAP"
+    MARAG_RERANK=$arm $PY -m eval_harness.run_eval $COMMON --corpus "strict:$SNAP" --prediction "$PREDICTION"
   done
   echo "##### DONE | $(date +%H:%M:%S) — now run: scripts/check_runs.py"
 }

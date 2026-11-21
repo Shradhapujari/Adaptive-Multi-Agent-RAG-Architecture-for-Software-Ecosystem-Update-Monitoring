@@ -51,3 +51,37 @@ def test_vendor_filter_may_empty_the_release_pool(monkeypatch):
     monkeypatch.setattr(nvd, "fetch", lambda *a, **k: [])
     r = app_1.run_pipeline("What is the latest version of Zig?", show_steps=False)
     assert r["releases"] == []
+
+
+def test_a_component_in_the_question_is_searched_with_its_product(monkeypatch):
+    """"Any WebRTC vulnerabilities in Chrome?" searches NVD for "chrome webrtc"
+    first; the newest-N "chrome" search held 1 WebRTC CVE in 20 (2026-11-19)."""
+    asked = []
+    monkeypatch.setattr(app_1, "union_fetch", lambda *a, **k: [])
+    monkeypatch.setattr(app_1, "terminal_sources",
+                        lambda *a, **k: ({"community": [], "releases": [], "cve": []}, []))
+    monkeypatch.setattr(app_1, "rewrite_query", lambda q: Rewrite(q, "rule-based"))
+    monkeypatch.setattr(app_1, "get_store", lambda: None)
+    monkeypatch.setattr(nvd, "fetch", lambda kw, *a, **k: asked.append(kw) or [])
+    app_1.run_pipeline("Any WebRTC vulnerabilities in Chrome?", show_steps=False)
+    assert asked == ["chrome webrtc", "chrome"]
+    asked.clear()
+    app_1.run_pipeline("Is it safe to update Chrome?", show_steps=False)
+    assert asked == ["chrome"]
+
+
+def test_a_name_that_is_also_a_word_is_searched_with_its_owner_word(monkeypatch):
+    """"edge" alone returned other products' advisories (2026-11-19); the
+    search is "microsoft edge", from vendor_kb.json `name_requires`."""
+    asked = []
+    monkeypatch.setattr(app_1, "union_fetch", lambda *a, **k: [])
+    monkeypatch.setattr(app_1, "terminal_sources",
+                        lambda *a, **k: ({"community": [], "releases": [], "cve": []}, []))
+    monkeypatch.setattr(app_1, "rewrite_query", lambda q: Rewrite(q, "rule-based"))
+    monkeypatch.setattr(app_1, "get_store", lambda: None)
+    monkeypatch.setattr(nvd, "fetch", lambda kw, *a, **k: asked.append(kw) or [])
+    app_1.run_pipeline("Is it safe to update Edge?", show_steps=False)
+    assert asked == ["microsoft edge"]
+    asked.clear()
+    app_1.run_pipeline("Is it safe to update Chrome?", show_steps=False)
+    assert asked == ["chrome"]

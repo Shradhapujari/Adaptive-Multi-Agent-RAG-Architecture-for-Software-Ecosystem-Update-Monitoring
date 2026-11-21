@@ -16,6 +16,10 @@ Usage:
     python -m eval_harness.run_eval --resume run_1788132228_7cdc5685d75a \
         --dataset data/benchmark_300.json
     python -m eval_harness.run_eval --judge ollama:minimax-m2.7:cloud
+    # frozen corpus: record once into a fresh dir, then replay it strictly
+    python -m eval_harness.run_eval --corpus record:<dir> --diagnostic --prediction "..."
+    python -m eval_harness.run_eval --corpus strict:<dir> --prediction "..."
+    # --corpus forms: record:<dir> | strict:<dir> | replay:<dir> (replay is refused)
 
 Outputs a timestamped folder under results/<run_id>/ containing:
     config.json, manifest.json, per_query.jsonl, aggregate.csv,
@@ -58,6 +62,8 @@ import multiagent_rag_v3 as marag
 from .judge import Judge, cache_tag
 from .metrics import retrieval_metrics, mean_ci
 from . import report as report_mod
+from . import preflight
+from datetime import datetime, timezone
 
 
 QRELS_CACHE = "qrels_cache.json"
@@ -231,6 +237,33 @@ def _compact(run_dir: str, rows: List[dict]) -> None:
             f.write(json.dumps(row) + "\n")
 
 
+def _resume_dir(cfg: EvalConfig) -> str:
+    d = (cfg.resume if os.path.isabs(cfg.resume)
+         else os.path.join(cfg.results_dir, cfg.resume))
+    return d.rstrip(os.sep)
+
+
+GATE = "gate.json"
+
+
+def _gate(cfg: EvalConfig, run_dir: str) -> dict:
+    """This invocation's gate merged with the run dir's gate.json (see preflight.merge_gate)."""
+    prior = None
+    gp = os.path.join(run_dir, GATE) if run_dir else ""
+    if gp and os.path.exists(gp):
+        with open(gp) as f:
+            prior = json.load(f)
+    # A resume keeps the original prediction, so judge it, not a re-typed one.
+    pred = prior.get("prediction", "") if prior is not None else cfg.prediction
+    sha, dirty = preflight.git_state(_ROOT)
+    cur = {"git_sha": sha, "git_dirty": dirty, "corpus": cfg.corpus, "prediction": pred,
+           "marag_env": preflight.marag_env(),
+           "preflight_refusals": preflight.refusals(cfg.corpus, pred, dirty),
+           "diagnostic": cfg.diagnostic}
+    has_rows = bool(run_dir) and os.path.exists(os.path.join(run_dir, PER_QUERY))
+    return preflight.merge_gate(prior, cur, has_rows)
+
+
 def run(cfg: EvalConfig) -> str:
     random.seed(cfg.seed)
     os.makedirs(cfg.results_dir, exist_ok=True)
@@ -284,9 +317,7 @@ def run(cfg: EvalConfig) -> str:
               f"records inside each cell).")
     ds_hash = dataset_hash(records)
     if cfg.resume:
-        run_dir = (cfg.resume if os.path.isabs(cfg.resume)
-                   else os.path.join(cfg.results_dir, cfg.resume))
-        run_dir = run_dir.rstrip(os.sep)
+        run_dir = _resume_dir(cfg)
         run_id = os.path.basename(run_dir)
         if not os.path.isdir(run_dir):
             raise SystemExit(f"--resume: no such run dir: {run_dir}")
@@ -301,6 +332,27 @@ def run(cfg: EvalConfig) -> str:
         run_id = "run_" + str(int(time.time())) + "_" + ds_hash
         run_dir = os.path.join(cfg.results_dir, run_id)
     os.makedirs(run_dir, exist_ok=True)
+    # The run gate, taken once, before the loop: the loop itself writes
+    # results/, and a resume must not rewrite what the run was started under.
+    # run() never exits on a refusal (main() does); it records it.
+    gate = _gate(cfg, run_dir)
+    # ponytail: rewritten on every resume, but merge_gate keeps the original
+    # sha/corpus/prediction and only ever adds refusals, so nothing is lost.
+    with open(os.path.join(run_dir, GATE), "w") as f:
+        json.dump(gate, f, indent=2)
+    _split = preflight.split_of(cfg.dataset if os.path.isabs(cfg.dataset)
+                                else os.path.join(_ROOT, cfg.dataset))
+    if _split == "test" and not cfg.resume:  # a resume is not a new look
+        log = os.path.join(cfg.results_dir, "test_split_looks.log")
+        with open(log, "a") as f:
+            f.write("\t".join([datetime.now(timezone.utc).isoformat(), run_id,
+                              gate["git_sha"], ds_hash,
+                              gate["prediction"].replace("\n", " ")]) + "\n")
+    if _split == "test":
+        with open(os.path.join(cfg.results_dir, "test_split_looks.log")) as f:
+            rows = [l.split("\t") for l in f.read().splitlines()]
+        looks = len({r[1] for r in rows if len(r) > 4 and r[3] == ds_hash})
+        print(f"[harness] test split: look {looks} at this set")
     print(f"\n[harness] dataset={cfg.dataset} questions={len(records)} hash={ds_hash}")
     print(f"[harness] run dir: {run_dir}")
 
@@ -518,6 +570,11 @@ def run(cfg: EvalConfig) -> str:
         print(f"[harness] judge answer-score parse failures: {_jf}/{_jc} "
               f"({100.0 * _jf / _jc:.1f}%) -- scored as None, excluded from the means")
     cfg_dict["dataset_hash"] = ds_hash
+    # The gate fields come from the record taken before the loop (gate.json).
+    cfg_dict.update({k: gate[k] for k in ("git_sha", "git_dirty", "prediction",
+                                          "preflight_refusals", "diagnostic",
+                                          "marag_env")},
+                    split=_split)
     cfg_dict["n_questions"] = len(records)
     # Which arm this run actually is. Reading it back off the environment at
     # write time would be a guess; ask the reranker the harness really used.
@@ -580,7 +637,7 @@ def run(cfg: EvalConfig) -> str:
     return run_dir
 
 
-def _parse_args() -> EvalConfig:
+def _parse_args(argv=None) -> EvalConfig:
     cfg = EvalConfig()
     p = argparse.ArgumentParser(description="Multi-Agent RAG System Tier-1 evaluation harness")
     p.add_argument("--dataset", default=cfg.dataset)
@@ -611,9 +668,14 @@ def _parse_args() -> EvalConfig:
                    help="write pools.jsonl: every candidate with its text, so "
                         "rerankers can be re-scored offline on the same pools")
     p.add_argument("--corpus", default=cfg.corpus,
-                   help="record:<dir> | replay:<dir> — freeze the live sources "
-                        "so arms of an ablation see identical documents")
-    a = p.parse_args()
+                   help="record:<dir> | strict:<dir> | replay:<dir> — freeze the live "
+                        "sources so arms of an ablation see identical documents; "
+                        "claim runs use strict:<dir> (replay:<dir> is refused)")
+    p.add_argument("--prediction", default=cfg.prediction,
+                   help="one line: what you expect this run to show, stated before it runs")
+    p.add_argument("--diagnostic", action="store_true",
+                   help="run even though preflight refuses it; the run cannot be quoted")
+    a = p.parse_args(argv)
     cfg.dataset = a.dataset
     cfg.stratify = a.stratify
     cfg.limit = a.limit
@@ -627,8 +689,35 @@ def _parse_args() -> EvalConfig:
     cfg.resume = a.resume
     cfg.exclude_own_post = a.exclude_own_post
     cfg.dump_pools = a.dump_pools
+    cfg.prediction = a.prediction
+    cfg.diagnostic = a.diagnostic
     return cfg
 
 
+def main(argv=None) -> int:
+    cfg = _parse_args(argv)
+    try:
+        _lock = preflight.hold_lock(preflight.LOCK_PATH)  # held until exit
+    except preflight.Busy as e:
+        print(f"[harness] refusing to start: an eval is already running (pid {e.pid})",
+              file=sys.stderr)
+        return 3
+    why = _gate(cfg, _resume_dir(cfg) if cfg.resume else "")["preflight_refusals"]
+    # Fatal = what THIS invocation would do to the corpus, not refusals a
+    # resumed run carries in its gate.json.
+    fixes = {"record-into-replayed": "record into a fresh directory",
+             "lenient-replay": "replay with strict:<dir>"}
+    fatal = [f"{fixes[t]} ({t}); --diagnostic does not override this"
+             for t in fixes if any(w.startswith(t) for w in
+                                   preflight.refusals(cfg.corpus, "p", False))]
+    if why and (fatal or not cfg.diagnostic):
+        tail = fatal or ["pass --diagnostic to run anyway; a diagnostic run cannot be quoted"]
+        print("[harness] refusing to start:\n  " + "\n  ".join(why) + "\n" + "\n".join(tail),
+              file=sys.stderr)
+        return 2
+    run(cfg)
+    return 0
+
+
 if __name__ == "__main__":
-    run(_parse_args())
+    sys.exit(main())

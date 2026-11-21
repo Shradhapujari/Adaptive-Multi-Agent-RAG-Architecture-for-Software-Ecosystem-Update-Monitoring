@@ -95,3 +95,92 @@ def test_sources_tab_shows_only_cited_rows(monkeypatch):
     app_1._tab_sources(results, PresentedAnswer(f"Shipped [{ev[0].label}].", "llm", evidence=ev))
     assert [r["Title"] for r in shown] == [rel["title"]]
     assert notes == ["1 cited · 1 more retrieved, not cited"]
+
+
+def test_chrome_headline_is_the_stable_channel_not_the_highest_feed_tag(monkeypatch):
+    from types import SimpleNamespace
+    feed = [{"product": "Chrome", "version": "159.0.8147", "date": "20261106", "is_cve": False,
+             "title": "Chrome v159.0.8147", "url": ""}]
+    results = {"grounding": SimpleNamespace(vendor_names=["chrome"]), "releases": feed}
+
+    class _Resp:
+        def json(self):
+            return {"releases": [{"version": "157.0.8103.79",
+                                  "serving": {"startTime": "2026-11-19T20:21:11Z"}}]}
+    app_1._stable_release.cache_clear()
+    monkeypatch.setattr(app_1.requests, "get", lambda *a, **k: _Resp())
+    assert app_1._headline_release(results, "Is it safe to update Chrome?")["version"] == "157.0.8103.79"
+    # A question naming a version keeps the feed row.
+    assert app_1._headline_release(results, "When was Chrome 159.0.8147 released?")["version"] == "159.0.8147"
+
+    # API down: fall back to the feed rather than show nothing.
+    app_1._stable_release.cache_clear()
+    monkeypatch.setattr(app_1.requests, "get", lambda *a, **k: (_ for _ in ()).throw(OSError()))
+    assert app_1._headline_release(results, "Latest Chrome version?")["version"] == "159.0.8147"
+    app_1._stable_release.cache_clear()
+
+
+def test_firefox_and_edge_headlines_use_the_vendors_stable_channel(monkeypatch):
+    from types import SimpleNamespace
+    firefox = {"releases": {
+        "firefox-160.0": {"version": "160.0", "date": "2026-11-10", "category": "major"},
+        "firefox-160.0.1": {"version": "160.0.1", "date": "2026-11-17", "category": "stability"},
+        "firefox-161.0b5": {"version": "161.0b5", "date": "2026-11-18", "category": "dev"},
+        "firefox-153.7.0esr": {"version": "153.7.0esr", "date": "2026-11-18", "category": "esr"}}}
+    edge = [{"Product": "Beta", "Releases": [{"Platform": "Windows", "ProductVersion": "159.0.1",
+                                               "PublishedTime": "2026-11-18T00:00:00"}]},
+            {"Product": "Stable", "Releases": [{"Platform": "Windows", "ProductVersion": "158.0.4370.33",
+                                                 "PublishedTime": "2026-11-19T21:17:00"}]}]
+
+    class _Resp:
+        def __init__(self, j): self.j = j
+        def json(self): return self.j
+    monkeypatch.setattr(app_1.requests, "get",
+                        lambda url, **k: _Resp(firefox if "mozilla" in url else edge))
+    app_1._stable_release.cache_clear()
+    ff = {"grounding": SimpleNamespace(vendor_names=["firefox"]),
+          "releases": [{"product": "Firefox", "version": "160.0.0", "date": "20261110", "is_cve": False}]}
+    rel = app_1._headline_release(ff, "Is it safe to update Firefox?")
+    assert (rel["version"], rel["date"]) == ("160.0.1", "20261117")
+    # Edge has no feed rows; the stable API alone gives the headline.
+    ms = {"grounding": SimpleNamespace(vendor_names=["microsoft", "edge"]), "releases": []}
+    assert app_1._headline_release(ms, "Latest Microsoft Edge version?")["version"] == "158.0.4370.33"
+    app_1._stable_release.cache_clear()
+
+
+def test_chrome_release_rows_are_labelled_with_their_channel(monkeypatch):
+    lists = {"stable": ["158.0.8127.36", "157.0.8103.79"], "extended": [], "beta": ["158.0.8127.18"],
+             "dev": [], "canary": ["160.0.8170.0"]}
+
+    class _Resp:
+        def __init__(self, url): self.ch = url.split("/channels/")[1].split("/")[0]
+        def json(self): return {"versions": [{"version": v} for v in lists[self.ch]]}
+    monkeypatch.setattr(app_1.requests, "get", lambda url, **k: _Resp(url))
+    app_1._chrome_channels.cache_clear()
+    rows = [{"Release": f"Chrome v{v}", "Date": "20261118"} for v in ("160.0.8170", "158.0.8127", "159.0.8147")]
+    got = app_1._label_channels(rows)
+    assert [r["Channel"] for r in got] == ["canary", "stable", "not shipped"]
+    assert list(got[0]) == ["Release", "Channel", "Date"]
+    # No Chrome row: no lookup, rows unchanged.
+    ff = [{"Release": "Firefox v160.0.0", "Date": "20261110"}]
+    assert app_1._label_channels(ff) == ff
+    # API down: no Channel column rather than a wrong one.
+    app_1._chrome_channels.cache_clear()
+    monkeypatch.setattr(app_1.requests, "get", lambda *a, **k: (_ for _ in ()).throw(OSError()))
+    assert "Channel" not in app_1._label_channels(rows)[0]
+    app_1._chrome_channels.cache_clear()
+
+
+def test_unshipped_chrome_builds_are_dropped_before_the_answer(monkeypatch):
+    monkeypatch.setattr(app_1, "_chrome_channels", lambda _h: {
+        "157.0.8103": "stable", "159.0.8154": "beta", "160.0.8157": "dev", "160.0.8170": "canary"})
+    rows = [{"product": "Chrome", "version": v, "is_cve": False}
+            for v in ("157.0.8103", "159.0.8154", "160.0.8157", "160.0.8170", "159.0.8147")]
+    adv = {"product": "chrome", "version": "160.0.8170", "is_cve": True}    # advisory: kept
+    ff = {"product": "Firefox", "version": "160.0.0", "is_cve": False}       # not Chrome: kept
+    kept = app_1._drop_prerelease(rows + [adv, ff])
+    assert [r["version"] for r in kept] == ["157.0.8103", "159.0.8154", "160.0.8170", "160.0.0"]
+    assert adv in kept and ff in kept
+    # API down: nothing dropped.
+    monkeypatch.setattr(app_1, "_chrome_channels", lambda _h: {})
+    assert app_1._drop_prerelease(rows) == rows

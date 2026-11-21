@@ -434,3 +434,27 @@ def test_activate_accepts_strict_and_rejects_nonsense(tmp_path):
         corpus_snapshot.activate("replayy:/tmp/x")
     with pytest.raises(ValueError):
         corpus_snapshot.activate("no-colon")
+
+
+# ── replayed stamp ───────────────────────────────────────────────────────
+
+def _recorded_dir(tmp_path):
+    d = tmp_path / "snap"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def test_replay_and_strict_stamp_the_directory_as_replayed(tmp_path):
+    for mode in ("replay", "strict"):
+        d = _recorded_dir(tmp_path / mode)
+        assert not os.path.exists(os.path.join(d, corpus_snapshot.REPLAYED))
+        snap = corpus_snapshot.Snapshot(mode, str(d)).start()
+        snap.stop()
+        assert os.path.exists(os.path.join(d, corpus_snapshot.REPLAYED))
+
+
+def test_record_does_not_stamp_replayed(tmp_path):
+    d = _recorded_dir(tmp_path)
+    snap = corpus_snapshot.Snapshot("record", str(d)).start()
+    snap.stop()
+    assert not os.path.exists(os.path.join(d, corpus_snapshot.REPLAYED))

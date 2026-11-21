@@ -57,6 +57,10 @@ class EvalConfig:
     # runs incomparable and so must never be used for an ablation.
     corpus: str = os.environ.get("MARAG_CORPUS", "")
     # Where to write the run.
+    # The one-line prediction stated before the run, and whether the run is
+    # diagnostic (preflight refused it but --diagnostic let it go ahead).
+    prediction: str = ""
+    diagnostic: bool = False
     # Continue an interrupted run: the run dir to reuse (name or path). Its
     # questions already scored for every system are skipped, not re-generated.
     resume: str = ""

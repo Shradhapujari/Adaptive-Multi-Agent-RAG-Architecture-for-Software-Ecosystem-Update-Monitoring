@@ -332,7 +332,7 @@ number of responses actually stored and the directory they went to. Commit
 | 4 Independent judge | **still blocked** | needs `OPENAI_API_KEY`; unchanged |
 | 6 Headline at n=300 | **done** | §10.1 |
 | 7 Artifact packaging | not started | the corpus snapshots still need a DOI archive |
-| 8 Paper | submitted | TOSEM, 2026-09-01 |
+| 8 Paper | drafted, not submitted | the TOSEM manuscript was never submitted |
 
 ### 10.4 Deployment, re-verified 2026-09-03
 

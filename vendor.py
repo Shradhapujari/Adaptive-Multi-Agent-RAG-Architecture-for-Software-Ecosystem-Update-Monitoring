@@ -42,8 +42,8 @@ import difflib
 import json
 import os
 import re
-from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence
+from dataclasses import dataclass, replace
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 __all__ = [
     "advisory_names_vendor",
@@ -107,6 +107,13 @@ _UNSEARCHABLE = frozenset({
     "return", "script", "search", "section", "server", "settings", "start",
     "system", "tabs",
 })
+
+# Catalog entries that are real products but also everyday question words:
+# "Is it *safe* to update Firefox?", "any *known* issues?". Unlike
+# `_UNSEARCHABLE` they stay matchable, but only where the question marks them
+# as a product -- written in capitals ("SAFE") or followed by a version
+# ("safe 3.2"). See `_marked_as_product`.
+_CONTEXT_ONLY = frozenset({"safe", "known"})
 
 # Query words that name a product without being the catalog's spelling of it.
 # Small and hand-checked: an alias that maps to the wrong product is worse than
@@ -176,6 +183,7 @@ class VendorMatch:
     name: str            # the catalog spelling, lowercased
     matched: str         # the substring of the query that matched
     via_alias: bool = False
+    parts: Tuple[str, ...] = ()   # components named in it: "WebRTC ... in Chrome"
 
     @property
     def display(self) -> str:
@@ -195,6 +203,14 @@ def _searchable(name: str) -> bool:
     # A name has to contain a letter run long enough to be a word, which drops
     # "3mini" and "4G" while keeping "k9s" and "vlc".
     return bool(re.search(r"[a-z]{2,}", low))
+
+
+def _marked_as_product(query: str, name: str) -> bool:
+    """Whether `query` uses the common word `name` as a product name."""
+    for m in re.finditer(rf"(?<![\w.-]){re.escape(name)}(?![\w-])", query, re.I):
+        if m.group().isupper() or re.match(r"\s*v?\d", query[m.end():]):
+            return True
+    return False
 
 
 def load_catalog(path: Optional[str] = None, fetch: bool = True,
@@ -290,11 +306,45 @@ def detect_vendors(query: str, catalog: Optional[Sequence[str]] = None,
             break
         if overlaps(name):
             continue
+        if name in _CONTEXT_ONLY and not _marked_as_product(query, name):
+            continue
         if re.search(rf"(?<![\w.-]){re.escape(name)}(?![\w-])", low):
             found.append(VendorMatch(name=name, matched=name))
             claimed.append(name)
 
-    return found[:limit]
+    return _drop_components(low, found)[:limit]
+
+
+def _drop_components(low: str, found: List[VendorMatch]) -> List[VendorMatch]:
+    """"Any WebRTC vulnerabilities in Chrome?": WebRTC is a catalogue name, but
+    here it is a part of Chrome, and as a second asked product it let a Mozilla
+    WebRTC advisory answer a Chrome question (live, 2026-11-19). A name is
+    dropped when it reads "<name> [one word] in <other>", the other is a
+    product this system knows (`known_products`) and it is not -- so "Node.js
+    in Ubuntu" still asks about both.
+
+    ponytail: word-gap heuristic. Three words let "NVIDIA drivers not
+    available in Debian" drop NVIDIA; one word changes 1 of 1014 benchmark
+    questions ("AI agent have in Kubernetes"). Upgrade path is a component
+    list per product in vendor_kb.json."""
+    if len(found) < 2:
+        return found
+    known = set(known_products())
+    def owner(a: VendorMatch) -> Optional[VendorMatch]:
+        if a.name in known:
+            return None
+        return next((b for b in found if b is not a
+                     and b.name.split()[-1] in known and re.search(   # "google chrome" too
+                         rf"(?<![\w.-]){re.escape(a.matched)}(?:\s+\S+)?\s+in\s+(?:the\s+)?"
+                         rf"{re.escape(b.matched)}(?![\w-])", low)), None)
+    # The dropped name is kept on its owner as a part: retrieval searches
+    # "chrome webrtc", which finds Chrome's WebRTC advisories and not Mozilla's.
+    parts = {}
+    for a in found:
+        if (b := owner(a)) is not None:
+            parts.setdefault(b.name, []).append(a.name)
+    return [replace(v, parts=tuple(parts.get(v.name, ()))) for v in found
+            if owner(v) is None]
 
 
 _SUGGEST_WORD = re.compile(r"[a-z][a-z0-9.+#-]*[a-z0-9+#]")

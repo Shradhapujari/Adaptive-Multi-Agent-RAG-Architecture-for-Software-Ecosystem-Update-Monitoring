@@ -353,3 +353,61 @@ def test_an_unread_community_feed_blocks_a_caveat_but_an_unread_cve_feed_does_no
 def test_positive_evidence_still_decides_when_a_feed_is_down():
     pool = [_d(1, "nvd", "CVE-2026-1234 Ubuntu", "Ubuntu before 24.04.2 allows RCE")]
     assert D.decide(pool, Q, V, unchecked={"cve", "community"}).verdict == "patch_urgently"
+
+
+def test_chrome_question_drops_advisories_about_other_products():
+    """Live, 2026-11-19: "Latest Chrome version?" cited OpenClaw (which only
+    names a `googlemeet.chrome` command) and chrome-devtools-mcp (a separate
+    package; "prior to 1.5.0" is its version, not Chrome's)."""
+    vt = D._vendor_tokens(["chrome"])
+    ex = D.KB["chrome"]["not_this_product"]
+    def adv(text):
+        return {"doc_id": "x", "source": "nvd", "title": "chrome v1 — " + text[:60], "text": text}
+    openclaw = adv("OpenClaw versions 2026.5.1 through 2026.7.0 fail to apply the configured exec "
+                   "approval path to Google Meet node commands. The googlemeet.chrome command accepts "
+                   "caller-supplied audio command arrays")
+    mcp = adv("Insufficient policy enforcement in chrome-devtools-mcp in Google Chrome on Linux prior "
+              "to 1.5.0 allowed a local attacker to perform arbitrary read/write via a malicious file.")
+    real = adv("Use after free in XML in Google Chrome prior to 157.0.8103.50 allowed a remote attacker "
+               "to exploit heap corruption via a crafted HTML page.")
+    assert not D._about(openclaw, vt, set(), ex, ["chrome"])
+    assert not D._about(mcp, vt, set(), ex, ["chrome"])
+    assert D._about(real, vt, set(), ex, ["chrome"])
+
+
+def test_component_named_like_a_vendor_does_not_disown_the_product():
+    """"Buffer overflow in WebRTC in Google Chrome": WebRTC is a KEV vendor,
+    but the vendor right before Chrome is Google. Taking the first vendor named
+    dropped two real Chrome advisories (2026-11-19)."""
+    def adv(text):
+        return {"doc_id": "x", "source": "nvd", "title": "", "text": text}
+    webrtc = adv("Buffer overflow in WebRTC in Google Chrome prior to 154.0.8037.97 allowed a "
+                 "remote attacker to execute arbitrary code inside the sandbox.")
+    assert not D._foreign_vendor_first(webrtc, ["chrome"])
+    # Still blocked: the vendor right before the product is a foreign one.
+    assert D._foreign_vendor_first(adv("Cisco IOS XE Software contains a flaw that allows ..."), ["ios"])
+    assert D._foreign_vendor_first(adv("Zoom Windows client before 6.1 allows ..."), ["windows"])
+
+
+def test_edge_advisory_must_name_microsoft():
+    """"edge" is an ordinary word: the NVD search returned VAPIX Edge, Johnson
+    Controls iSTAR Edge and AMD Versal AI Edge, and the subject rule kept them
+    (live, 2026-11-19, "Is it safe to update Edge?")."""
+    def adv(text):
+        return {"doc_id": "x", "source": "nvd", "title": "", "text": text}
+    ms = adv("Use after free in Microsoft Edge (Chromium-based) allows an unauthorized attacker "
+             "to elevate privileges locally.")
+    vapix = adv("The VAPIX Edge storage API, enabling the escalation of user privileges by "
+                "circumventing access controls.")
+    versal = adv("The Versal AI Edge Series Gen 2 Peripheral Protection Unit (XPPU) allows ...")
+    vt = D._vendor_tokens(["edge"])
+    assert D._about(ms, vt, set(), (), ["edge"])
+    assert not D._about(vapix, vt, set(), (), ["edge"])
+    assert not D._about(versal, vt, set(), (), ["edge"])
+    # Judged per product the advisory names: a Chrome advisory is not held to
+    # Edge's requirement in an Edge-and-Chrome question.
+    chrome = adv("Use after free in Extensions in Google Chrome prior to 158.0.8127.36 allowed ...")
+    vt2 = D._vendor_tokens(["edge", "chrome"])
+    assert D._about(chrome, vt2, set(), (), ["edge", "chrome"])
+    # A product with no requirement is untouched.
+    assert D._about(chrome, D._vendor_tokens(["chrome"]), set(), (), ["chrome"])

@@ -23,6 +23,7 @@
 # mid-sweep shifts the offsets under the running shell. A function body is
 # parsed to its closing brace before any of it runs.
 set -euo pipefail
+: "${PREDICTION:?set PREDICTION to the one-line prediction for this sweep}"
 
 main() {
   cd "$(dirname "$0")/.."
@@ -58,12 +59,12 @@ main() {
   # The record passes carry no claim; they report frozen=false by construction.
   for arm in off on; do
     echo "##### RECORD pass, rules $arm | $(date +%H:%M:%S)"
-    MARAG_RULES=$arm $PY -m eval_harness.run_eval $COMMON --corpus "record:$SNAP"
+    MARAG_RULES=$arm $PY -m eval_harness.run_eval $COMMON --corpus "record:$SNAP" --diagnostic --prediction "$PREDICTION"
   done
 
   for arm in off on; do
     echo "##### RULES $arm | $(date +%H:%M:%S)"
-    MARAG_RULES=$arm $PY -m eval_harness.run_eval $COMMON --corpus "replay:$SNAP"
+    MARAG_RULES=$arm $PY -m eval_harness.run_eval $COMMON --corpus "strict:$SNAP" --prediction "$PREDICTION"
   done
 
   echo "##### DONE | $(date +%H:%M:%S)"

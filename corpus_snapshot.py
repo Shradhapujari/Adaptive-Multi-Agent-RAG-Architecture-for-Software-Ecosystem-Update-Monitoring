@@ -79,6 +79,7 @@ import urllib.request
 from typing import Dict, Optional
 
 ENV_VAR = "MARAG_CORPUS"
+REPLAYED = ".replayed"  # stamped when a snapshot is replayed; recording into it is refused
 
 
 class CorpusMiss(BaseException):
@@ -452,6 +453,11 @@ class Snapshot:
         requests.get = self._get
         urllib.request.urlopen = self._urlopen
         self._pin_clock()
+        if self.mode in ("replay", "strict"):
+            try:
+                open(os.path.join(self.dir, REPLAYED), "a").close()
+            except OSError:
+                pass
         self._active = True
         return self
 

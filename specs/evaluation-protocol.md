@@ -128,7 +128,12 @@ from `756b889` until `8a51eb8`, and no published number was produced with them.
 A run may carry a claim only if all of the following hold. Check them from
 `config.json`, not from memory.
 
-- [ ] `corpus.mode == "replay"` and `corpus.frozen == true` (zero corpus-host misses).
+- [ ] `corpus.mode == "strict"` (`replay` for runs made before 2026-11-19) and
+      `corpus.frozen == true` (zero corpus-host misses).
+- [ ] `preflight_refusals == []`.
+- [ ] `prediction` is non-empty.
+- [ ] The run's `git_sha` descends from the two fix commits (checked by
+      `scripts/check_runs.py`).
 - [ ] `rerank_spec` matches the intended arm, and `rerank_degraded == false` unless
       degradation is the thing being reported.
 - [ ] `judge_active == true`.
@@ -136,6 +141,8 @@ A run may carry a claim only if all of the following hold. Check them from
 - [ ] `n_questions` matches the power analysis in §6.
 - [ ] Every arm in a comparison replayed the **same** snapshot directory.
 - [ ] The run postdates the fetch fix (`a1c717c`) and the qrels-key fix (`46ad7d0`).
+
+`scripts/check_runs.py` exits 1 on a run that fails this list.
 
 Runs failing any line are diagnostic material, not evidence. The three-arm sweep of
 2026-08-30 15:17–15:36 fails the last two and must not be quoted.
@@ -191,23 +198,29 @@ Reporting rules:
 # 0. record the corpus once (use the arm that makes the most calls)
 MARAG_RERANK=embed ./venv311/bin/python -m eval_harness.run_eval \
   --dataset data/benchmark_300.json --generators marag,single_agent \
-  --judge ollama:llama3.1 --judge-pool --corpus record:data/corpus_snapshot_b300
+  --judge ollama:llama3.1 --judge-pool --corpus record:data/corpus_snapshot_b300 \
+  --diagnostic --prediction "<one line>"
 
 # 1. ranking ablation, every arm on the identical frozen corpus
 for arm in none bm25 embed; do
   MARAG_RERANK=$arm ./venv311/bin/python -m eval_harness.run_eval \
     --dataset data/benchmark_300.json --generators marag,single_agent \
-    --judge ollama:llama3.1 --judge-pool --corpus replay:data/corpus_snapshot_b300
+    --judge ollama:llama3.1 --judge-pool --corpus strict:data/corpus_snapshot_b300 \
+    --prediction "<one line>"
 done
 
 # 2. answer-format confound removed, synthesis model held constant
 MARAG_RERANK=embed ./venv311/bin/python -m eval_harness.run_eval \
   --dataset data/benchmark_300.json \
   --generators marag,marag:ollama:llama3.1,single_agent:ollama:llama3.1 \
-  --judge ollama:llama3.1 --corpus replay:data/corpus_snapshot_b300
+  --judge ollama:llama3.1 --corpus strict:data/corpus_snapshot_b300 \
+  --prediction "<one line>"
 
 # 3. the fetch-time diagnosis behind C1
 ./venv311/bin/python -m eval_harness.diagnose_rewriter
+
+# 4. before quoting a number
+./venv311/bin/python scripts/check_claims.py
 ```
 
 ## 8. Threats to validity

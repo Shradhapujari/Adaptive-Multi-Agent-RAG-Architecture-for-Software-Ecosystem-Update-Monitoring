@@ -78,7 +78,7 @@ def test_patch_now_headline_is_composed_from_the_advisories(monkeypatch):
     app_1._tab_short({"decision": PATCH, "releases": [],
                       "original_query": "Any critical Linux kernel vulnerabilities right now?"},
                      PresentedAnswer(f"{lead} {hedge}", "llm", evidence=ev))
-    answer = [s for s in shown if s.startswith("**Answer:**")]
+    answer = shown[2:]  # Q, headline, then the one-line answer
     assert answer and "Recent Linux updates fixed 1 security bug(s)" in answer[0], shown
     assert not any("unpatched" in s for s in shown)
 

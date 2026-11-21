@@ -26,6 +26,7 @@
 # parsed to its closing brace before any of it runs, so a later edit cannot
 # reach a sweep already in flight.
 set -euo pipefail
+: "${PREDICTION:?set PREDICTION to the one-line prediction for this sweep}"
 
 main() {
 cd "$(dirname "$0")/.."
@@ -79,7 +80,8 @@ for K in "${KS[@]}"; do
     --generators marag,single_agent \
     --judge ollama:llama3.1 \
     --judge-pool \
-    --corpus "replay:$SNAP" \
+    --corpus "strict:$SNAP" \
+    --prediction "$PREDICTION" \
     --top-k "$K" >> "$LOG" 2>&1
   rc=$?
   set -e

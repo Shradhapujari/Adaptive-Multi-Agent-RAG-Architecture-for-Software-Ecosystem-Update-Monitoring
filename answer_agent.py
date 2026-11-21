@@ -481,6 +481,15 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
         if verdict_adv or verdict_kev:
             rows = [r for r in releases[:per_kind] if not is_adv(r)] + verdict_adv
             kevs = verdict_kev
+    # The release the Short Answer headlines (app_1._headline_release) leads
+    # the paragraph's evidence too. Ranked out of the top `per_kind`, or read
+    # from a vendor stable-channel API and in no feed row at all, it was
+    # invisible to the model, which then called an older row "the latest":
+    # v26.12.0 under a v26.12.1 headline (live, 2026-10-22).
+    head = results.get("headline")
+    if head:
+        rows = [head] + [r for r in rows if str(r.get("version")) != str(head.get("version"))
+                         or r.get("product") != head.get("product")]
     for r in rows:
         # An advisory row is named by its CVE id, not by its versionNumber:
         # that field holds the *affected* version, and citing
@@ -559,8 +568,8 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
         date = w.get("date", "")
         host = w.get("host") or _host(w.get("url", ""))
         ev.append(Evidence(
-            label=("Vendor page" if trusted else "Web") + (f" - {host}" if host else "")
-                  + (f", {date}" if date else ""),
+            label=w.get("label") or (("Vendor page" if trusted else "Web") + (f" - {host}" if host else "")
+                                     + (f", {date}" if date else "")),
             kind="web", title=_clean(w.get("title", ""), 160),
             detail=_clean(w.get("body") or w.get("text", ""), 400),
             url=w.get("url", ""), date=date,
@@ -863,6 +872,10 @@ def unresolved_products(query: str, results: Dict) -> List[str]:
     g = results.get("grounding")
     if g is None or getattr(g, "vendors", None):
         return []
+    # A live source that found the product by name (package registry,
+    # endoflife.date slug, status host) has resolved it; a web hit alone has not.
+    if (results.get("live") or {}).get("resolved"):
+        return []
     if not vendor.catalog_is_full():
         return []
     from fetch_union import _KNOWN_PRODUCTS, product_terms
@@ -971,8 +984,9 @@ def _present(query: str, results: Dict, model_spec: Optional[str] = None,
                     # over one bad span.
                     # The lead is checked too: it is printed above this text,
                     # so its count has to match what the text cites.
-                    verdict = guardrail.check(text, evidence, query,
-                                              lead=verdict_lead(results.get("decision")))
+                    verdict = guardrail.check(
+                        text, evidence, query, lead=verdict_lead(results.get("decision")),
+                        latest=str((results.get("headline") or {}).get("version") or ""))
                     if verdict.ok:
                         return PresentedAnswer(text, "llm", client.spec,
                                                evidence=evidence)
