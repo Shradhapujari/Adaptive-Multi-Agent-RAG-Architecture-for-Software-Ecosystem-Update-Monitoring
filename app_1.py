@@ -1108,6 +1108,16 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
                         retry=checks["nist_retry"], newest_first=checks["nist_sort"])
                 except Exception as e:  # noqa: BLE001 -- recorded, not swallowed
                     _record_fetch_error("NVD", e)
+            # The KEV search is by query word, so "WebRTC" outranked "Edge" and
+            # Google's Chromium WebRTC rows took both slots, then failed the
+            # ownership check; Edge's own rows only appeared for other wordings
+            # ("advisories in Microsoft Edge"). A product none of whose KEV rows
+            # arrived is asked for by name; one that has some is left alone.
+            import multiagent_rag_v3 as _marag
+            for v in g.vendors[:2]:
+                if not any(r.get("kev_vendor") and decide.kev_owns(r, [v.name])
+                           for r in results["cve"] + shared["cve"]):
+                    shared["cve"] = shared["cve"] + _marag.fetch_cisa_kev(kw(v), limit=2)
         # Already fetched and screened in step 2. The app's own CVE feed is
         # Reddit; these are the advisory catalogues (CISA KEV, CIRCL) the
         # terminal reads and this app had no fetcher for. Deduped on url as
