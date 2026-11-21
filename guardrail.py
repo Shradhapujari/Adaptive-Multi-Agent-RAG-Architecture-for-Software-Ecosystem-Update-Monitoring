@@ -408,7 +408,9 @@ def _count_violations(text: str, labels: set, kinds: dict, known: dict,
             if n not in got:
                 bad.append(Violation(
                     "count_mismatch",
-                    f"“{span}” but {min(got)} such source(s) cited — "
+                    # max: the lead's own sentence cites nothing, so min
+                    # told llama3.1 "0 cited" over an answer citing 7 of 8.
+                    f"“{span}” but {max(got)} such source(s) cited — "
                     f"cite every source you count, or state the number you cite"))
 
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]

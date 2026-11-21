@@ -95,3 +95,26 @@ def test_summary_names_the_product_when_a_kev_row_sorts_first():
     assert line.startswith("Recent Linux updates fixed 2 security bug(s)"), line
     only_kev = answer_agent.summary_line(answer_agent.collect_evidence({"cve": [kev]}))
     assert only_kev.startswith("Recent updates fixed 1 security bug(s)"), only_kev
+
+
+def test_patch_now_drops_unconditional_advice_against_updating():
+    # Live, llama3.1, 2026-11-20: under "Patch now", over a list whose first
+    # item says Firefox 160.0.0 fixes the CVEs.
+    body = ("It is not safe to update Firefox.\n\n"
+            "1. Firefox 160.0.0 fixes CVE-2026-130020 [A1].\n\n"
+            "Note: the advisories make it not safe to update.")
+    # Leading newlines are kept on purpose: they separate the list from the lead.
+    assert drop_verdict_denials(body, "patch_urgently") == \
+        "\n\n1. Firefox 160.0.0 fixes CVE-2026-130020 [A1]."
+    for s in ("Do not update Firefox yet.", "Avoid upgrading for now.",
+              "It is unsafe to install this update."):
+        assert drop_verdict_denials(s, "patch_urgently") == "", s
+
+
+def test_patch_now_keeps_conditional_advice_and_hold_keeps_it_all():
+    for s in ("Do not update until 160.0.1 ships.",
+              "Wait to install it until the vendor posts the fix."):
+        assert drop_verdict_denials(s, "patch_urgently") == s
+    # Under "hold", advice against updating agrees with the verdict.
+    assert drop_verdict_denials("It is not safe to update Firefox.", "hold") \
+        == "It is not safe to update Firefox."

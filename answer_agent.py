@@ -624,7 +624,19 @@ _DENIES_VULNS = re.compile(
     r"\b(?:no|none of the)\s+(?:\w+\s+){0,4}?"
     r"(?:vulnerabilit\w*|cves?|advisor\w*|exploits?|flaws?|security (?:issues?|bugs?|holes?))\b"
     r"|\bnot (?:\w+\s+){0,2}(?:vulnerable|affected)\b", re.I)
-_DENIALS = {"patch_urgently": (_DENIES_SAFE, _DENIES_VULNS), "hold": (_DENIES_SAFE,)}
+# "Patch now" means install the fix, so advice against updating denies it
+# too. Under "hold" the same words agree with the verdict, which is why
+# `_DENIES_SAFE` skips "not safe to update" and this is patch_urgently only:
+# "It is not safe to update Firefox." over "Firefox 160.0.0 fixes several
+# vulnerabilities" (live, llama3.1, 2026-11-20). Conditional advice stays:
+# "not safe to update Firefox until 159.0.2" says to patch once the fix ships.
+_DENIES_PATCH = re.compile(
+    r"(?:\b(?:not|n't|un)\s*safe to (?:update|upgrade|install)\b"
+    r"|\b(?:do not|don't|avoid|hold off(?: on)?|wait (?:before|to)|refrain from)\s+"
+    r"(?:\w+\s+)?(?:updat|upgrad|install|patch)\w*)"
+    r"(?![^.!?]*\b(?:until|unless|once|when|after)\b)", re.I)
+_DENIALS = {"patch_urgently": (_DENIES_SAFE, _DENIES_VULNS, _DENIES_PATCH),
+            "hold": (_DENIES_SAFE,)}
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 _NUMBERED = re.compile(r"^\s*\d+[.)]\s+")
 
