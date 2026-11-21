@@ -85,3 +85,34 @@ def test_a_name_that_is_also_a_word_is_searched_with_its_owner_word(monkeypatch)
     asked.clear()
     app_1.run_pipeline("Is it safe to update Chrome?", show_steps=False)
     assert asked == ["chrome"]
+
+
+def test_a_product_with_no_kev_rows_is_asked_for_by_name(monkeypatch):
+    """The KEV search is by query word: "WebRTC" took both slots with Google's
+    Chromium WebRTC rows and Edge's own never arrived (2026-11-20). Only a
+    product none of whose KEV rows arrived is asked for."""
+    import multiagent_rag_v3 as marag
+    monkeypatch.setenv("MARAG_RERANK", "bm25")   # no Ollama round trips
+    edge = {"title": "[CISA KEV] Microsoft Internet Explorer and Edge Information Disclosure "
+                     "Vulnerability \u2014 Internet Explorer and Edge",
+            "subreddit": "CISA US-CERT", "source": "cisa_kev", "score": 0, "tier": 1,
+            "verified": True, "url": "https://nvd.nist.gov/vuln/detail/CVE-2016-3351",
+            "date": "2022-05-24", "cve_id": "CVE-2016-3351", "kev_vendor": "Microsoft",
+            "kev_product": "Internet Explorer and Edge",
+            "detail": "An information disclosure vulnerability exists in Internet Explorer and Edge."}
+    asked = []
+    monkeypatch.setattr(marag, "fetch_cisa_kev", lambda q, **k: asked.append(q) or [edge])
+    monkeypatch.setattr(app_1, "union_fetch", lambda *a, **k: [])
+    monkeypatch.setattr(app_1, "rewrite_query", lambda q: Rewrite(q, "rule-based"))
+    monkeypatch.setattr(app_1, "get_store", lambda: None)
+    monkeypatch.setattr(nvd, "fetch", lambda *a, **k: [])
+    monkeypatch.setattr(app_1, "terminal_sources",
+                        lambda *a, **k: ({"community": [], "releases": [], "cve": []}, []))
+    r = app_1.run_pipeline("Edge WebRTC vulnerability", show_steps=False)
+    assert asked == ["microsoft edge"]
+    assert [d["cve_id"] for d in r["cve"]] == ["CVE-2016-3351"]
+    asked.clear()      # already has an Edge row: no second ask
+    monkeypatch.setattr(app_1, "terminal_sources",
+                        lambda *a, **k: ({"community": [], "releases": [], "cve": [edge]}, []))
+    app_1.run_pipeline("Edge WebRTC vulnerability", show_steps=False)
+    assert asked == []
