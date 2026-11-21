@@ -358,3 +358,10 @@ def test_bare_adjacency_is_not_a_component():
     # Docker image, Linux Mint.
     assert [v.name for v in detect_vendors("Debian installer has drives labeled wrong?")] == ["installer", "debian"]
     assert "mint" in [v.name for v in detect_vendors("How to dual boot Windows w/ Linux Mint?")]
+
+
+def test_maker_before_its_product_is_not_a_second_product():
+    for q in ("WebRTC advisories in Microsoft Edge", "Is Microsoft Edge safe to update?"):
+        assert "microsoft" not in [v.name for v in detect_vendors(q)], q
+    # still asked about when it stands alone
+    assert "microsoft" in [v.name for v in detect_vendors("Microsoft security updates this week")]
