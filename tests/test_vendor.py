@@ -343,3 +343,18 @@ def test_a_dropped_component_is_kept_as_a_part_of_its_product():
     assert [(v.name, v.parts) for v in got] == [("chrome", ("webrtc",))]
     got = detect_vendors("Is Node.js in Ubuntu 24.04 outdated?", catalog=cat)
     assert all(v.parts == () for v in got)
+
+
+def test_component_after_the_product_or_behind_its_maker():
+    for q in ("Edge WebRTC vulnerability", "WebRTC advisories in Microsoft Edge",
+              "Chrome WebRTC vulnerability"):
+        names = [v.name for v in detect_vendors(q)]
+        assert "webrtc" not in names, q
+        assert any(v.parts == ("webrtc",) for v in detect_vendors(q)), q
+
+
+def test_bare_adjacency_is_not_a_component():
+    # Without a security word these stay two products: Debian installer,
+    # Docker image, Linux Mint.
+    assert [v.name for v in detect_vendors("Debian installer has drives labeled wrong?")] == ["installer", "debian"]
+    assert "mint" in [v.name for v in detect_vendors("How to dual boot Windows w/ Linux Mint?")]
