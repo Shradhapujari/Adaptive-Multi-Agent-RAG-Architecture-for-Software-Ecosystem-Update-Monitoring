@@ -319,6 +319,49 @@ QUESTION_RE = re.compile(
     r"\?|^(?:how|what|why|when|where|which|who|can|is|are|does|do|did|should|"
     r"would|could|any|anyone|has|have|will|need|help)\b", re.I)
 
+# ── --on-topic: what a software-update monitor is asked ─────────────────────
+# Measured on benchmark_1000 (2026-11-20): 343 of 860 mined titles named no
+# product, and most of `general` and `community` was chatter ("Which smart
+# speaker gets used the most in your house?"). A title is on topic when it names
+# a product (extract_vendor, the retriever's own detector) AND shows an update
+# signal. BUG_RE alone is not one -- "error" and "fail" fire on programming
+# questions -- so a bug counts only when tied to a version or to "after/since".
+# Hand-read sample of what passes: ~25 of 30 on topic.
+UPDATE_RE = re.compile(r"\bupdat|\bupgrad|\bpatch|\bdowngrad|\brollback|\broll back", re.I)
+LIFECYCLE_RE = re.compile(
+    r"deprecat|end[- ]of[- ]life|\beol\b|discontinu|\bsunset|officially dead|"
+    r"no longer (?:supported|maintained)", re.I)
+_VERSION_RE = re.compile(r"\bv?\d+\.\d+(?:\.\d+)?\b|\bversion\b", re.I)
+_SINCE_RE = re.compile(r"\b(?:after|since)\b", re.I)
+
+
+def update_signal(title: str) -> bool:
+    return bool(RELEASE_RE.search(title) or UPDATE_RE.search(title)
+                or SECURITY_RE.search(title) or LIFECYCLE_RE.search(title)
+                or (BUG_RE.search(title)
+                    and (_VERSION_RE.search(title) or _SINCE_RE.search(title))))
+
+
+def product_detector(api: "Api"):
+    """extract_vendor, fed the cached catalogue instead of its own live fetch.
+
+    Left alone it would GET /api/c/names itself, outside this script's cache,
+    and a rebuild would stop being byte-identical whenever the catalogue moved.
+    """
+    import contextlib, io
+    import multiagent_rag_v3 as mrag
+    names = api.get("/api/c/names") or []
+    subs = (api.get("/api/reddit/meta/subreddits") or {}).get("data", [])
+    mrag._VENDOR_NAMES = [n.lower() for n in names if isinstance(n, str)]
+    mrag._SUBREDDIT_NAMES = [x.lower() for x in subs if isinstance(x, str)]
+    mrag._VENDORS_LOADED = bool(mrag._VENDOR_NAMES)
+
+    def names_product(title: str) -> bool:
+        with contextlib.redirect_stdout(io.StringIO()):   # it narrates
+            return bool(mrag.extract_vendor(title))
+    return names_product
+
+
 # Titles that are noise for a retrieval benchmark.
 NOISE_RE = re.compile(r"^(?:\[?removed\]?|\[?deleted\]?|test|hi|hello)$", re.I)
 
@@ -840,8 +883,10 @@ def version_candidate(v: dict, eco_key: str, vendor: str,
 # ─────────────────────────────────────────────────────────────────────────────
 # Build
 # ─────────────────────────────────────────────────────────────────────────────
-def build(api: Api, total: int = TOTAL, seed: int = SEED) -> Tuple[List[dict], dict]:
+def build(api: Api, total: int = TOTAL, seed: int = SEED,
+          on_topic: bool = False) -> Tuple[List[dict], dict]:
     rng = random.Random(seed)
+    names_product = product_detector(api) if on_topic else None
     eco_order = [e["key"] for e in ECOSYSTEMS]
     eco_by_key = {e["key"]: e for e in ECOSYSTEMS}
 
@@ -860,10 +905,16 @@ def build(api: Api, total: int = TOTAL, seed: int = SEED) -> Tuple[List[dict], d
         k: {c: {s: [] for s in SRC_ORDER} for c in CATEGORIES}
         for k in eco_order}
     seen_ids: set = set()
-    stats = {"reddit_posts_seen": 0, "version_records_seen": 0}
+    stats = {"reddit_posts_seen": 0, "version_records_seen": 0, "off_topic_dropped": 0}
 
     def add(cand: Optional[dict]) -> None:
         if not cand:
+            return
+        # Release-record rows are phrased over a real version record and name
+        # its product by construction; only mined titles need the check.
+        if (names_product and cand["source"] == "mined_reddit_title"
+                and not (update_signal(cand["query"]) and names_product(cand["query"]))):
+            stats["off_topic_dropped"] += 1
             return
         sid = cand["source_id"]
         if sid in seen_ids:
@@ -1004,7 +1055,9 @@ def build(api: Api, total: int = TOTAL, seed: int = SEED) -> Tuple[List[dict], d
 
     # ── Explicit, logged backfill for cells with no live record ─────────────
     backfill_records: List[dict] = []
-    for key, cat in backfilled:
+    # An on-topic benchmark is real questions only: an empty cell stays empty
+    # (still logged in coverage_gap_cells) rather than getting a template.
+    for key, cat in ([] if on_topic else backfilled):
         eco = eco_by_key[key]
         query = BACKFILL_TEMPLATES[cat].format(vendor=eco["vendor"])
         nq = norm_query(query)
@@ -1209,6 +1262,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="ignore the response cache and re-mine the live APIs")
     ap.add_argument("--offline", action="store_true",
                     help="use only the response cache, never the network")
+    ap.add_argument("--on-topic", action="store_true",
+                    help="keep a mined title only if it names a product and shows an update signal")
     args = ap.parse_args(argv)
 
     if args.refresh and args.offline:
@@ -1236,7 +1291,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if missing:
             print(f"  Tracked subs not in catalogue: {', '.join(missing)}")
 
-    records, stats = build(api, total=args.total, seed=args.seed)
+    records, stats = build(api, total=args.total, seed=args.seed, on_topic=args.on_topic)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w") as f:
@@ -1269,6 +1324,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         "reddit_posts_seen": stats["reddit_posts_seen"],
         "version_records_seen": stats["version_records_seen"],
         "pool_sizes": stats["pool_sizes"],
+        "on_topic_filter": args.on_topic,
+        "off_topic_dropped": stats["off_topic_dropped"],
     }
     manifest_path = os.path.splitext(args.out)[0] + ".manifest.json"
     with open(manifest_path, "w") as f:
