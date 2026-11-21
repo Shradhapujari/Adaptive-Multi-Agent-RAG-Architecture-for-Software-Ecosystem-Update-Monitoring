@@ -333,10 +333,20 @@ def _drop_components(low: str, found: List[VendorMatch]) -> List[VendorMatch]:
     def owner(a: VendorMatch) -> Optional[VendorMatch]:
         if a.name in known:
             return None
+        am = rf"(?<![\w.-]){re.escape(a.matched)}(?![\w-])"
+        def part_of(b):
+            bm = rf"(?<![\w.-]){re.escape(b.matched)}(?![\w-])"
+            # "Microsoft Edge": the maker's name may sit between "in" and the product
+            maker = "|".join(re.escape(o.matched) for o in found if o is not a and o is not b)
+            lead = rf"(?:(?:{maker})\s+)?" if maker else ""
+            return (re.search(rf"{am}(?:\s+\S+)?\s+in\s+(?:the\s+)?{lead}{bm}", low)
+                    # "Edge WebRTC vulnerability": the component right after the
+                    # product, and only with a security word after it. Bare
+                    # adjacency also took "Debian installer", "Docker image"
+                    # and "Linux Mint" (11 of 1206 benchmark questions).
+                    or re.search(rf"{bm}\s+{am}\s+(?:vulnerabilit|advisor|cve|exploit|flaw|security)", low))
         return next((b for b in found if b is not a
-                     and b.name.split()[-1] in known and re.search(   # "google chrome" too
-                         rf"(?<![\w.-]){re.escape(a.matched)}(?:\s+\S+)?\s+in\s+(?:the\s+)?"
-                         rf"{re.escape(b.matched)}(?![\w-])", low)), None)
+                     and b.name.split()[-1] in known and part_of(b)), None)
     # The dropped name is kept on its owner as a part: retrieval searches
     # "chrome webrtc", which finds Chrome's WebRTC advisories and not Mozilla's.
     parts = {}
