@@ -423,7 +423,8 @@ def _count_violations(text: str, labels: set, kinds: dict, known: dict,
     return bad
 
 
-def check(answer: str, evidence: Sequence, question: str = "", lead: str = "") -> Verdict:
+def check(answer: str, evidence: Sequence, question: str = "", lead: str = "",
+          latest: str = "") -> Verdict:
     """Check a presented answer against the evidence it was built from.
 
     `question` is the user's own wording, and versions and dates in it are
@@ -438,6 +439,12 @@ def check(answer: str, evidence: Sequence, question: str = "", lead: str = "") -
     advisory document(s)..."). Its counts are checked against the answer's
     citations: the model cited 5 of the 7 under it, live Firefox 2026-11-17,
     and nothing caught it because the lead was prefixed after this check.
+
+    `latest` is the version the Short Answer headlines for a "latest version"
+    question. An answer that names versions but not this one contradicts the
+    headline above it, even when every version it does name is in a source:
+    "v26.12.0" passed under a "v26.12.1" headline (live, 2026-10-22) because
+    v26.12.0 was a real, older row.
     """
     text = (answer or "").strip()
     haystack, labels = _lines(evidence)
@@ -516,6 +523,8 @@ def check(answer: str, evidence: Sequence, question: str = "", lead: str = "") -
         bad.append(Violation("deflected",
                              "answer points at the sources instead of reporting them"))
 
+    latest = next(iter(extract_versions(latest or "", multipart_only=True)), "")
+
     _known: dict = {}
     for product, v in _named_versions(_ISO_RE.sub(" ", haystack) + " " + given):
         _known.setdefault(product, set()).add(v)
@@ -523,14 +532,35 @@ def check(answer: str, evidence: Sequence, question: str = "", lead: str = "") -
     # A refusal counts nothing it has to cite.
     if not abstained:
         bad.extend(_count_violations(text, labels, _kinds(evidence), _known))
-        if lead:
+        # A version/date question (`latest` set) is answered by the version;
+        # the advisory count in the lead is a note beside it, listed in the
+        # Sources tab. Holding a one-line version answer to cite all of them
+        # threw away "The latest Node.js version is v27.0.0" twice for the
+        # rule-based paragraph (live, 2026-11-19).
+        if lead and not latest:
             bad.extend(Violation(v.code, "the verdict line above the answer says " + v.detail)
                        for v in _count_violations(lead, labels, _kinds(evidence), _known,
                                                   cited_in=text))
 
     known_versions = set(extract_versions(_ISO_RE.sub(" ", haystack), multipart_only=True))
     known_versions |= set(extract_versions(given, multipart_only=True))
-    for v in extract_versions(_ISO_RE.sub(" ", text), multipart_only=True):
+    named = extract_versions(_ISO_RE.sub(" ", text), multipart_only=True)
+    if latest:
+        known_versions.add(latest)
+        # The feed has the answer, so declining is not honest caution: qwen2.5
+        # wrote "I cannot find that information" with v27.0.0 as its first
+        # source, and a refusal skipped every check below (live, 2026-11-19).
+        if abstained:
+            bad.append(Violation(
+                "missed_latest",
+                f"the sources do give the newest release: {latest} — state it "
+                f"as the latest version, with its citation"))
+        elif named and latest not in named:
+            bad.append(Violation(
+                "stale_version",
+                f"the newest release in the feed is {latest} — name {latest} as "
+                f"the latest version, not {', '.join(dict.fromkeys(named))}"))
+    for v in named:
         if v not in known_versions:
             bad.append(Violation("unsupported_version", f"{v!r} is in no source"))
 

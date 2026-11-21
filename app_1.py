@@ -1918,6 +1918,17 @@ def _latest_release(rows: list, query: str, today=None) -> Optional[dict]:
 _ASKS_WHAT = re.compile(r"^\s*(?:what|which|list|show|tell me|how many|summari[sz]e)\b", re.I)
 
 
+def _present_answer(query: str, results: dict, **kw):
+    """`present_answer`, with the Short Answer's headline release attached first,
+    so the Long Answer is shown it and checked against it (guardrail `latest`)."""
+    # A live answer-only question (outage, EOL, how-to) is answered from its
+    # live source, not the release feed, so no feed version is held over it.
+    if (graph.asks(query) in ("version", "date")
+            and not (results.get("live") or {}).get("answer_only")):
+        results["headline"] = _headline_release(results, query)
+    return present_answer(query, results, **kw)
+
+
 def _headline_release(results: dict, query: str) -> Optional[dict]:
     """The release a version/date question is answered with: the newest one of
     the *asked* product, or None.
@@ -2088,7 +2099,8 @@ def _tab_short(results: dict, presented=None) -> None:
                    "No product was recognised in the question.")
     # A version/date question is answered by the feed value, not the verdict;
     # the verdict stays underneath as a note, since an advisory is still news.
-    rel = _headline_release(results, query) if asks_value else None
+    rel = (results["headline"] if "headline" in results
+           else _headline_release(results, query) if asks_value else None)
     if rel:
         d = monitor.parse_ymd(rel.get("date"))
         st.markdown(f"### {rel.get('product') or 'Latest'} v{rel.get('version')}")
@@ -2464,7 +2476,7 @@ def ask(q: str, limit: int = 5, source: str = "agent", checks: Optional[dict] = 
         results = run_fast(q, limit=limit, source=source) if route["mode"] == "fast" else None
         if results is not None:
             t0 = time.time()
-            presented = present_answer(q, results, model_spec="rule-based")
+            presented = _present_answer(q, results, model_spec="rule-based")
             results.setdefault("timing", {})["answer"] = round(time.time() - t0, 2)
             presented.note = "fast path — feed value, no model call"
             return results, presented
@@ -2476,7 +2488,7 @@ def ask(q: str, limit: int = 5, source: str = "agent", checks: Optional[dict] = 
             route = {"mode": "full", "why": "fast path could not answer — escalated"}
         results["route"] = route
         t0 = time.time()
-        presented = present_answer(results["original_query"], results)
+        presented = _present_answer(results["original_query"], results)
         results.setdefault("timing", {})["answer"] = round(time.time() - t0, 2)
         return results, presented
 
@@ -3345,7 +3357,7 @@ elif run_btn and query and compare_mode:
                                    yesno_on=yesno_on, unclear_as_no=unclear_as_no,
                                    survey_on=survey_on, source=source,
                                    reddit_id=reddit_id, checks=checks)
-            presented = present_answer(results["original_query"], results,
+            presented = _present_answer(results["original_query"], results,
                                        model_spec=presenter_spec(),
                                        per_kind=result_limit)
         tc = results.get("top_comment")
@@ -3446,7 +3458,7 @@ elif run_btn and query:
 
     with st.spinner("Answer Presenter Agent — writing a cited paragraph..."):
         t0 = time.time()
-        presented = present_answer(
+        presented = _present_answer(
             results["original_query"], results,
             model_spec=presenter_spec(), window_note=window_note,
             per_kind=result_limit,
