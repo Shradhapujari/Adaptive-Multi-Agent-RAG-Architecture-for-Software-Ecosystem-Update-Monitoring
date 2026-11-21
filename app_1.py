@@ -1145,6 +1145,10 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
                              for v in g.vendors)]
         results["mislabelled_dropped"] = len(scoped) - len(on_subject)
         results["releases"] = on_subject
+    # Outside the vendor block: the feed ignores `q`, so a question with no
+    # catalog vendor ("Any news on the CrowdStrike outage?") otherwise got the
+    # whole global feed as its community evidence.
+    if checks["vendor_check"]:
         # No `or results["community"]` fallback: when the subject filter finds
         # nothing about this question in the feed, that is the finding. The
         # fallback used to restore the pool it had just rejected, which is how

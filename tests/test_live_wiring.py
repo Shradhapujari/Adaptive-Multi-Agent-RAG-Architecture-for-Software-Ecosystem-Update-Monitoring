@@ -189,3 +189,18 @@ def test_clean_package_result_carries_no_verdict(empty_lake, monkeypatch):
         "verdict_docs": [], "answer_docs": [dict(ANSWER_DOC)], "meta": dict(PKG_META)})
     r = app_1.run_pipeline("Is the requests package safe to use?", show_steps=False, web_fallback=True)
     assert r["decision"] is None and r["live"]["answer_only"]
+
+
+def test_a_vendorless_question_gets_only_on_subject_community_posts(empty_lake, monkeypatch):
+    # The community feed ignores `q`; the subject filter only ran when a
+    # catalog vendor was detected, so this question got the whole global feed.
+    posts = [{"title": "Edge hijacked by organization", "subreddit": "MicrosoftEdge"},
+             {"title": "CrowdStrike outage took down our fleet", "subreddit": "sysadmin"}]
+    monkeypatch.setattr(app_1, "terminal_sources",
+                        lambda *a, **k: ({"community": [dict(p) for p in posts],
+                                          "releases": [], "cve": []}, []))
+    q = "Any news on the CrowdStrike outage?"
+    import grounding
+    assert grounding.ground(q).vendors == []          # precondition: no catalog vendor
+    r = app_1.run_pipeline(q, show_steps=False, web_fallback=False)
+    assert [p["title"] for p in r["community"]] == ["CrowdStrike outage took down our fleet"]
