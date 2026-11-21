@@ -1089,8 +1089,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         # needs a product name (NVD ANDs every word), so no product, no call.
         if source != "store":
             import nvd
-            days = ((_clock().date() - temporal.window[0]).days + 1
-                    if temporal.window else 90)
+            days = _nvd_days(query, temporal)
             # A component named in the product ("WebRTC ... in Chrome") is
             # searched as "chrome webrtc" first: NVD ANDs the words, so that
             # finds Chrome's WebRTC CVEs, which the newest-N "chrome" search
@@ -1933,6 +1932,27 @@ def _latest_release(rows: list, query: str, today=None) -> Optional[dict]:
 # is answered with the fact. Leading with the verdict answered "What bugs were
 # fixed in Chrome recently?" with "🔴 Patch urgently" and named no bug.
 _ASKS_WHAT = re.compile(r"^\s*(?:what|which|list|show|tell me|how many|summari[sz]e)\b", re.I)
+
+
+def _nvd_days(query: str, temporal) -> int:
+    """How many days back the live NVD search reaches for this question.
+
+    A window narrows it: "Any critical Linux updates today?" wants today's
+    advisories. "Right now" does not: "Is it safe to update Firefox
+    right now?" resolved to a one-day window, so NVD was asked for 1 day, the
+    10-17 Nov Firefox CVEs were never fetched, and the verdict came back
+    `safe` while "Is it safe to update Firefox?" said `patch_urgently`
+    (sweep, 2026-11-21). An advisory filed last week is still open now.
+    So the present-tense words ("right now", "currently", "at the moment")
+    leave the default lookback alone; "today" is a date and still narrows it.
+    """
+    if not temporal.window or all(_PRESENT_TENSE.search(t) for t, _ in temporal.terms):
+        return 90
+    return (_clock().date() - temporal.window[0]).days + 1
+
+
+_PRESENT_TENSE = re.compile(
+    r"\b(?:right\s+now|as\s+of\s+now|at\s+the\s+moment|currently|nowadays|at\s+present)\b", re.I)
 
 
 def _present_answer(query: str, results: dict, **kw):
