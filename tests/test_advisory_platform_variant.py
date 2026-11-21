@@ -41,6 +41,27 @@ def test_a_platform_word_elsewhere_in_the_text_is_not_read():
                   "also seen in builds for Android. Fixed in Firefox 157.0.1.")
 
 
+# CVE-2026-130020, NVD text verbatim. Mozilla names the platform on the
+# component, not the product, and the fix version is the shared "Firefox 160.0.1".
+ANDROID = ("Privilege escalation due to incorrect boundary conditions in the Graphics: "
+           "CanvasWebGL component on Android. This vulnerability was fixed in Firefox 160.0.1.")
+
+
+def test_a_component_on_android_is_not_about_desktop_firefox():
+    assert not _about(ANDROID)
+
+
+def test_a_component_on_android_counts_when_android_is_asked():
+    assert _about(ANDROID, question="Is it safe to update Firefox on Android?")
+
+
+def test_a_desktop_component_on_a_platform_still_counts():
+    # A Windows-only desktop bug is still about the desktop build a bare
+    # "Firefox" question asks about; only the mobile platforms are split off.
+    assert _about("Use-after-free in the Audio component on Windows. "
+                  "This vulnerability was fixed in Firefox 160.0.1.")
+
+
 def test_mac_is_macos_on_the_question_side():
     mac = "Firefox for macOS allowed code execution. Fixed in Firefox for macOS 157.1."
     assert _about(mac, question="Is it safe to update Firefox on Mac?")

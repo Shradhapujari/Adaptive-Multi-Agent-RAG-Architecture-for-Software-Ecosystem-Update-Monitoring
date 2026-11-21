@@ -376,6 +376,11 @@ def kev_owns(d: dict, vendors: Sequence[str], exclude: Sequence[str] = ()) -> bo
 _PLATFORM_ALIAS = {"iphone": "ios", "ipad": "ios", "mac": "macos"}
 _PLATFORM_VARIANT = re.compile(
     r"\b(?:{products})\s+for\s+(ios|iphone|ipad|android|windows|macos|linux)\b")
+# Mozilla also names the platform on the component, not the product:
+# CVE-2026-130020 "... in the Graphics: CanvasWebGL component on Android. This
+# vulnerability was fixed in Firefox 160.0.1." (live, 2026-11-20). Mobile only:
+# a "component on Windows" bug is still about the desktop build a bare question asks about.
+_COMPONENT_ON_MOBILE = re.compile(r"\bcomponent\s+on\s+(android|ios|iphone|ipad)\b")
 
 
 def _platform_variant_mismatch(d: dict, vtoks: set, qtoks: set) -> bool:
@@ -387,8 +392,9 @@ def _platform_variant_mismatch(d: dict, vtoks: set, qtoks: set) -> bool:
     rx = re.compile(_PLATFORM_VARIANT.pattern.replace(
         "{products}", "|".join(re.escape(v) for v in sorted(vtoks))))
     asked = {_PLATFORM_ALIAS.get(t, t) for t in vtoks | qtoks}
-    return any(_PLATFORM_ALIAS.get(m.group(1), m.group(1)) not in asked
-               for m in rx.finditer(body))
+    found = [m.group(1) for m in rx.finditer(body)]
+    found += [m.group(1) for m in _COMPONENT_ON_MOBILE.finditer(body)]
+    return any(_PLATFORM_ALIAS.get(p, p) not in asked for p in found)
 
 
 def _lacks_required_word(d: dict, vendors: Sequence[str]) -> bool:
