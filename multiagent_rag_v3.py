@@ -931,6 +931,19 @@ VENDOR_ALIASES = {
     "microsoftedge": "MicrosoftEdge",
 }
 
+# Whole-word aliases, matched alongside the catalog words (step 2) rather than
+# as substrings before them (VENDOR_ALIASES): "eks" would fire on "weeks", and
+# a hit up there ends the search, so "PostgreSQL inside Kubernetes" would lose
+# kubernetes. Each was named in a benchmark_1000 question that resolved to
+# nothing (2026-11-20). php/npm/pip are here because the len > 3 rule keeps the
+# catalog's 3-letter names out, and those are mostly not products (alt, com,
+# csv, dns, lan, cli).
+WORD_ALIASES = {
+    "php": "php", "npm": "npm", "pip": "pip", "eks": "kubernetes",
+    "postgres": "postgresql", "samsung": "android", "gnome": "linux",
+    "plasma": "linux", "elementor": "wordpress", "esphome": "homeassistant",
+}
+
 VENDOR_STOP_WORDS = {
     "version","text","firmware","updater","arrow","maybe","server",
     "desktop","downloads","core","config","plugins","software","update",
@@ -1083,15 +1096,22 @@ def extract_vendor(query: str, _subreddit_hint: str = "") -> list:
     # despite the corpus itself replaying with zero misses on both. Sorting
     # fixes the ORDER, not which vendors are considered, so match semantics are
     # unchanged; only which tied candidate wins is now deterministic.
+    # Words, not whitespace chunks: split on whitespace with only ?/! removed,
+    # "MySQL:" never equalled "mysql". Dots and hyphens stay inside a word
+    # ("node.js", "rust-lang" read as before); a dotted word that is not itself
+    # a name falls back to its head, so "mysql.connector" names mysql.
+    words = sorted(set(w.rstrip(".") for w in re.findall(r"[a-z0-9][a-z0-9+#.-]*", q_lower)))
+    words += sorted({w.split(".")[0] for w in words if "." in w and w not in _VENDOR_NAMES} - set(words))
     if not found:
-        words = sorted(set(q_lower.replace("?","").replace("!","").split()))
         for word in words:
-            if len(word) > 3 and word in _VENDOR_NAMES:
+            if word in WORD_ALIASES:
+                found.append(WORD_ALIASES[word])
+            elif len(word) > 3 and word in _VENDOR_NAMES:
                 found.append(word)
+        found = list(dict.fromkeys(found))
 
     # 3. Check subreddit names (they're curated and clean)
     if not found:
-        words = sorted(set(q_lower.replace("?","").replace("!","").split()))
         for word in words:
             if len(word) > 3 and word in _SUBREDDIT_NAMES:
                 found.append(word)
