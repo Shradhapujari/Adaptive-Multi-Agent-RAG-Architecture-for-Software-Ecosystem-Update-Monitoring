@@ -222,3 +222,12 @@ def test_component_notice_only_where_the_vendor_names_no_component():
     g = lambda q: type("G", (), {"vendors": detect_vendors(q)})()
     assert app_1._unfocused_components(g("WebRTC in Edge")) == ["webrtc in edge"]
     assert app_1._unfocused_components(g("WebRTC in Chrome")) == []
+
+
+def test_a_safety_question_keeps_the_full_advisory_lookback():
+    """'right now' is a one-day window; a safety verdict still needs last week's CVEs."""
+    from temporal import resolve_temporal
+    q = "Is it safe to update Firefox right now?"
+    assert app_1._nvd_days(q, resolve_temporal(q)) == 90
+    q = "Any critical Linux updates today?"
+    assert app_1._nvd_days(q, resolve_temporal(q)) == 1
