@@ -2079,6 +2079,27 @@ def _off_topic_note(query: str, live: bool = False) -> Optional[str]:
             " Name a product, e.g. “Is it safe to update Firefox?”"))
 
 
+_NEEDS_LIVE = {"down_now": "whether a service is down", "incident": "what an outage was about",
+               "eol": "whether a version is still supported"}
+
+
+def _needs_live_note(query: str, live: bool) -> Optional[str]:
+    """Why the console declines an outage or end-of-life question when web
+    search is off, or None. The feeds can't answer one, and without this the
+    update pipeline gave "Is GitHub down?" a patch_urgently verdict from
+    unrelated advisories. Comparisons and how-tos still go to the feeds."""
+    if live:
+        return None
+    import live_sources
+    k = live_sources.kind(query, ground(query).vendor_names)
+    if k not in _NEEDS_LIVE or not live_sources.answer_only(k, query):
+        return None
+    return (f"This asks {_NEEDS_LIVE[k]}, which the release and advisory feeds "
+            "can't answer, so I haven't searched. Turn on "
+            "**Web search for questions the feeds can't answer** in Settings to check "
+            "a live source.")
+
+
 def _tab_short(results: dict, presented=None) -> None:
     dec = results.get("decision")
     query = results.get("original_query", "")
@@ -2690,14 +2711,16 @@ def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = Non
             _render_mermaid(_pipeline_mermaid(), height=150)
         return
     import websearch
-    note = _off_topic_note(q, live=bool((checks or {}).get("web_search"))
-                           or websearch.ENABLE_WEB_FALLBACK)
+    live_on = bool((checks or {}).get("web_search")) or websearch.ENABLE_WEB_FALLBACK
+    note, heading = _needs_live_note(q, live_on), "⚪ Needs a live source"
+    if not note:
+        note, heading = _off_topic_note(q, live=live_on), "⚪ Not a software update question"
     if note:
         with strip:
             _render_mermaid(_pipeline_mermaid(), height=150)
         with st.container(border=True):
             st.caption(f"**Q:** {_md_escape(q)}")
-            st.markdown("### ⚪ Not a software update question")
+            st.markdown(f"### {heading}")
             st.markdown(note)
         return
     results, presented = ask(q, limit=result_limit, source=source, checks=checks)
