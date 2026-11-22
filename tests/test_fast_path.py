@@ -70,6 +70,17 @@ def test_an_advisory_in_the_same_response_still_reaches_the_verdict(fast, monkey
     assert all(not r["is_cve"] for r in results["releases"])
 
 
+def test_an_advisory_about_another_package_does_not_reach_the_verdict(fast, monkeypatch):
+    """The feed tags a CVE with the name searched for: probe-image-size is not Node.js."""
+    _, rows = fast
+    rows.append(_row("7.5.0", "20261001", cve=True,
+                     notes="probe-image-size before 7.5.0 contains a denial of service. CVE-2026-134164"))
+    monkeypatch.setattr(app_1, "run_pipeline", _never)
+    results, _ = app_1.ask(Q, source="lake")
+    assert results["decision"]["verdict"] != "patch_urgently"
+    assert results["decision_advisories"] == []
+
+
 def test_no_shipped_release_escalates_to_the_full_pipeline(fast, monkeypatch):
     _, rows = fast
     rows.clear()

@@ -1103,9 +1103,12 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
             for name in ([f"{kw(v)} {p}" for v in g.vendors[:2] for p in v.parts]
                          + [kw(v) for v in g.vendors[:2]]):
                 try:
-                    shared["cve"] = shared["cve"] + nvd.fetch(
+                    # Screened like the feed's advisories: NVD's keyword
+                    # search matches "rust" inside "falcon-rust".
+                    shared["cve"] = shared["cve"] + _on_subject(nvd.fetch(
                         name, limit=max(limit * 4, 20), days=days,
-                        retry=checks["nist_retry"], newest_first=checks["nist_sort"])
+                        retry=checks["nist_retry"], newest_first=checks["nist_sort"]),
+                        g.vendors[:2])
                 except Exception as e:  # noqa: BLE001 -- recorded, not swallowed
                     _record_fetch_error("NVD", e)
             # The KEV search is by query word, so "WebRTC" outranked "Edge" and
@@ -1156,10 +1159,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         # so the record is read instead. Counted, and unlike the older version
         # of this screen it does not restore what it dropped: an empty pool is
         # the finding here, as it is for the filter above.
-        on_subject = [r for r in scoped
-                      if vendor.classify_record(r) != "advisory"
-                      or any(vendor.advisory_names_vendor(r, v.name)
-                             for v in g.vendors)]
+        on_subject = _on_subject(scoped, g.vendors)
         results["mislabelled_dropped"] = len(scoped) - len(on_subject)
         results["releases"] = on_subject
     # Outside the vendor block: the feed ignores `q`, so a question with no
@@ -1430,6 +1430,13 @@ def _step_ms(state) -> Dict[str, int]:
     return out
 
 
+def _on_subject(rows: list, vendors) -> list:
+    """Drop advisories whose own text is about other software (see
+    `vendor.advisory_names_vendor`); release records pass untouched."""
+    return [r for r in rows if vendor.classify_record(r) != "advisory"
+            or any(vendor.advisory_names_vendor(r, v.name) for v in vendors)]
+
+
 def run_fast(query: str, limit: int = 5, source: str = "agent") -> Optional[dict]:
     """GR-1 fast path: a single-product version/date lookup, answered from one
     release-feed fetch. No rewriter, no community or CVE feed, no model.
@@ -1454,7 +1461,11 @@ def run_fast(query: str, limit: int = 5, source: str = "agent") -> Optional[dict
         fetch = caching_fetch(None if source == "lake" else db, "release",
                               fetch_release_notes, lambda: len(errors))
     rows = fetch(g.vendor_names[0], limit=max(limit * 10, 50)) or []
-    rows = vendor.filter_by_vendor(rows, g.vendors)
+    # The same two screens as the full pipeline's step 4b. Only the first ran
+    # here, so every CVE for a package that shares the name reached the gate:
+    # "Latest Django release notes" said Patch now on django-docutils and
+    # django-filer, "Did rust v1.92.0 ship?" on falcon-rust (sweep, 2026-11-21).
+    rows = _on_subject(vendor.filter_by_vendor(rows, g.vendors), g.vendors)
     shipped = [r for r in rows if not r.get("is_cve") and vendor.is_release_record(r)]
     advisories = [r for r in rows if r not in shipped]
     shipped = _drop_prerelease(shipped)
