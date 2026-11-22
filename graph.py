@@ -104,7 +104,18 @@ def asks(question: str) -> str:
         return "cve"
     if _DATE_WORDS.search(q) or extract_dates(q):
         return "date"
-    if _VERSION_WORDS.search(q):
+    cues = {w.lower() for w in _VERSION_WORDS.findall(q)}
+    # "Did the latest Fedora 44 update delete grub?" names its version after
+    # "latest", so "latest" only describes it: the question is yes/no about 44,
+    # not "which version is newest". Routed as version, it headlined Fedora 45
+    # (2026-11-21 demo sweep). A version named *before* it -- "Is Firefox
+    # v148 the latest release?" -- is still asking which is newest.
+    named = extract_versions(q, multipart_only=False)
+    first = re.search(r"\b(?:latest|newest)\b", q, re.I)
+    named_yesno = (cues <= {"latest", "newest"} and named and first
+                   and q.find(named[0], first.end()) != -1
+                   and looks_yesno(q, is_title=True))
+    if cues and not named_yesno:
         return "version"
     if _FIX_WORDS.search(q) or looks_yesno(q, is_title=True):
         return "stance"
