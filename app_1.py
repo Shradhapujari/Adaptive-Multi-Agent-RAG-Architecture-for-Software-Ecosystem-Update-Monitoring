@@ -34,7 +34,7 @@ import time
 from contextlib import nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
@@ -2369,9 +2369,28 @@ def _chrome_channels(_hour: int) -> Dict[str, str]:
 _SHIPPED_CHANNELS = {"stable", "extended", "beta"}
 
 
+_KEV_FRESH_DAYS = 365
+
+
 def _kev_first(rows):
-    """CISA KEV rows (known-exploited) ahead of the rest; stable within each."""
-    return sorted(rows, key=lambda r: not r.get("kev_vendor"))
+    """CISA KEV rows (known-exploited) ahead of the rest; stable within each.
+
+    Only entries added to KEV in the last year go first: being added is the
+    signal that it is exploited now. Older ones go last. Edge's five entries
+    are 2016-2020 bugs in the old EdgeHTML browser added in 2021-22; the
+    reranker put them first and they took the slots of today's Chromium-based
+    Edge advisories (2026-11-22). Stale entries still reach the verdict, which
+    reads the full pool.
+    """
+    def tier(r):
+        if not r.get("kev_vendor"):
+            return 1
+        try:
+            age = (_clock().date() - date.fromisoformat(str(r.get("date"))[:10])).days
+        except ValueError:
+            return 1
+        return 0 if age <= _KEV_FRESH_DAYS else 2
+    return sorted(rows, key=tier)
 
 
 def _drop_prerelease(rows: list) -> list:
