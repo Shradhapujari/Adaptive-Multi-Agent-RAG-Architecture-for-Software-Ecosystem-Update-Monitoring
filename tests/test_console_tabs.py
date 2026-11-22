@@ -211,9 +211,19 @@ def test_unshipped_chrome_builds_are_dropped_before_the_answer(monkeypatch):
 
 def test_kev_rows_survive_the_cut():
     import app_1
-    rows = [{"id": f"nvd{i}"} for i in range(5)] + [{"id": "kev", "kev_vendor": "Google"}]
-    top = app_1._kev_first(rows)[:5]
-    assert top[0]["id"] == "kev" and [r["id"] for r in top[1:]] == ["nvd0", "nvd1", "nvd2", "nvd3"]
+    from datetime import timedelta
+    today = app_1._clock().date()
+    new = (today - timedelta(days=30)).isoformat()
+    old = (today - timedelta(days=900)).isoformat()
+    rows = ([{"id": f"nvd{i}"} for i in range(5)]
+            + [{"id": "stale", "kev_vendor": "Microsoft", "date": old},
+               {"id": "kev", "kev_vendor": "Google", "date": new}])
+    ids = [r["id"] for r in app_1._kev_first(rows)]
+    # a recently added KEV entry leads; an old one (Edge's 2016-20 EdgeHTML
+    # bugs) goes last instead of taking a slot from current advisories
+    assert ids == ["kev", "nvd0", "nvd1", "nvd2", "nvd3", "nvd4", "stale"]
+    assert app_1._kev_first([{"id": "x", "kev_vendor": "Google"}])[0]["id"] == "x"  # no date: not fresh
+
 
 
 def test_component_notice_only_where_the_vendor_names_no_component():
