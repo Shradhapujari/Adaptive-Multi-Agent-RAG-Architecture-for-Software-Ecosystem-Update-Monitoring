@@ -1581,7 +1581,13 @@ def pause(): time.sleep(0.4)
 
 # The model the answer synthesiser asks for, named once so the prose that
 # reports which model wrote an answer cannot drift from the one called.
-SYNTH_MODEL = "mistral"
+#
+# MARAG_SYNTH_MODEL overrides it. On a 24 GB host llama3.1 stays loaded for
+# the other arms, and mistral could not load beside it (Ollama:
+# system_limited, 2.5-4.6 GiB free): 29 of 33 b1500 pilot questions timed out
+# here and printed "NO ANSWER" (2026-11-22). A MARAG_* name, so the run gate
+# records which model wrote the answer.
+SYNTH_MODEL = os.environ.get("MARAG_SYNTH_MODEL", "").strip() or "mistral"
 
 
 def call_llama(prompt: str, model: str = "llama3.1"):
