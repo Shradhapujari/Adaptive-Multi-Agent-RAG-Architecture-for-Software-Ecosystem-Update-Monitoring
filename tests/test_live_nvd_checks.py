@@ -90,7 +90,7 @@ def test_a_name_that_is_also_a_word_is_searched_with_its_owner_word(monkeypatch)
 def test_a_product_with_no_kev_rows_is_asked_for_by_name(monkeypatch):
     """The KEV search is by query word: "WebRTC" took both slots with Google's
     Chromium WebRTC rows and Edge's own never arrived (2026-11-20). Only a
-    product none of whose KEV rows arrived is asked for."""
+    product with no recent KEV row among those that arrived is asked for."""
     import multiagent_rag_v3 as marag
     monkeypatch.setenv("MARAG_RERANK", "bm25")   # no Ollama round trips
     edge = {"title": "[CISA KEV] Microsoft Internet Explorer and Edge Information Disclosure "
@@ -111,8 +111,10 @@ def test_a_product_with_no_kev_rows_is_asked_for_by_name(monkeypatch):
     r = app_1.run_pipeline("Edge WebRTC vulnerability", show_steps=False)
     assert asked == ["microsoft edge"]
     assert [d["cve_id"] for d in r["cve"]] == ["CVE-2016-3351"]
-    asked.clear()      # already has an Edge row: no second ask
+    asked.clear()      # already has a recent Edge row: no second ask
+    from datetime import timedelta
+    recent = {**edge, "date": (app_1._clock().date() - timedelta(days=30)).isoformat()}
     monkeypatch.setattr(app_1, "terminal_sources",
-                        lambda *a, **k: ({"community": [], "releases": [], "cve": [edge]}, []))
+                        lambda *a, **k: ({"community": [], "releases": [], "cve": [recent]}, []))
     app_1.run_pipeline("Edge WebRTC vulnerability", show_steps=False)
     assert asked == []

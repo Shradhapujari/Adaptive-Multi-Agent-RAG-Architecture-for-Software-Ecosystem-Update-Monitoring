@@ -1111,13 +1111,15 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
             # The KEV search is by query word, so "WebRTC" outranked "Edge" and
             # Google's Chromium WebRTC rows took both slots, then failed the
             # ownership check; Edge's own rows only appeared for other wordings
-            # ("advisories in Microsoft Edge"). A product none of whose KEV rows
-            # arrived is asked for by name; one that has some is left alone.
+            # ("advisories in Microsoft Edge"). A product with no recent KEV row
+            # among those that arrived is asked for by name, up to five, so its
+            # old entries all show (Edge's five, see `_show_cve`).
             import multiagent_rag_v3 as _marag
             for v in g.vendors[:2]:
-                if not any(r.get("kev_vendor") and decide.kev_owns(r, [v.name])
+                if not any(r.get("kev_vendor") and not _is_stale_kev(r)
+                           and decide.kev_owns(r, [v.name])
                            for r in results["cve"] + shared["cve"]):
-                    shared["cve"] = shared["cve"] + _marag.fetch_cisa_kev(kw(v), limit=2)
+                    shared["cve"] = shared["cve"] + _marag.fetch_cisa_kev(kw(v), limit=5)
         # Already fetched and screened in step 2. The app's own CVE feed is
         # Reddit; these are the advisory catalogues (CISA KEV, CIRCL) the
         # terminal reads and this app had no fetcher for. Deduped on url as
@@ -2402,19 +2404,17 @@ def _is_stale_kev(r: dict) -> bool:
 
 
 def _show_cve(rows: list, limit: int) -> list:
-    """The advisories shown: `_kev_first` order, cut to `limit`, with the last
-    slot kept for the newest old KEV entry when the cut would show none, and
-    every old KEV entry tagged as such. Edge's five are 2016-2020 EdgeHTML
-    bugs added in 2021-22: shown as history, after the current advisories
-    (PR #195 sorted them out of sight altogether)."""
+    """The advisories shown: `_kev_first` order cut to `limit`, then every old
+    KEV entry retrieved, newest-added first and tagged as such, in addition to
+    the cut so they never take a current advisory's slot. Edge's five are
+    2016-2020 EdgeHTML bugs added in 2021-22: shown as history, after the
+    current advisories (PR #195 sorted them out of sight, #197 kept one)."""
     ordered = _kev_first(rows)
-    shown = ordered[:limit]
-    old = [r for r in ordered[limit:] if _is_stale_kev(r)]
-    if limit > 1 and old and not any(r.get("kev_vendor") for r in shown):
-        shown = shown[:-1] + [max(old, key=lambda r: str(r.get("date")))]
-    return [{**r, "title": r["title"].replace(
-                "[CISA KEV]", f"[CISA KEV · legacy, added {r.get('date')}]", 1)}
-            if _is_stale_kev(r) else r for r in shown]
+    old = sorted((r for r in ordered if _is_stale_kev(r)),
+                 key=lambda r: str(r.get("date")), reverse=True)
+    current = [r for r in ordered if not _is_stale_kev(r)][:limit]
+    return current + [{**r, "title": r["title"].replace(
+        "[CISA KEV]", f"[CISA KEV · legacy, added {r.get('date')}]", 1)} for r in old]
 
 
 def _drop_prerelease(rows: list) -> list:
