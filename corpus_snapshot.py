@@ -73,6 +73,7 @@ import gzip
 import hashlib
 import json
 import os
+import tempfile
 from datetime import datetime
 import urllib.parse
 import urllib.request
@@ -154,6 +155,26 @@ def request_key(method: str, url: str, params: Optional[dict] = None,
 
 def _key_path(directory: str, key: str) -> str:
     return os.path.join(directory, hashlib.sha1(key.encode()).hexdigest()[:20] + ".json.gz")
+
+
+def _write_rec(path: str, rec: dict) -> None:
+    """Write one entry atomically: a temp file in the same folder, then rename.
+
+    Gathering fetches in parallel threads, so two threads can store the same
+    key at once. Written in place, their gzip streams interleaved: two entries
+    of the b1500 pilot snapshot (2026-11-21) failed their CRC, and `_load`
+    reads a corrupt entry as a miss, which aborts a strict replay. A rename
+    replaces the file whole, so a reader sees one complete entry or the other.
+    """
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as raw, gzip.open(raw, "wt", encoding="utf-8") as f:
+            json.dump(rec, f)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -330,8 +351,7 @@ class Snapshot:
             "headers": {str(k): str(v) for k, v in (headers or {}).items()},
             "body_b64": base64.b64encode(content or b"").decode("ascii"),
         }
-        with gzip.open(_key_path(self.dir, key), "wt", encoding="utf-8") as f:
-            json.dump(rec, f)
+        _write_rec(_key_path(self.dir, key), rec)
         self.recorded += 1
 
     @staticmethod
@@ -353,8 +373,7 @@ class Snapshot:
         arm on identical inputs, which is the property the control exists for.
         """
         rec = {"key": key, "url": url, "error": f"{type(exc).__name__}: {exc}"[:500]}
-        with gzip.open(_key_path(self.dir, key), "wt", encoding="utf-8") as f:
-            json.dump(rec, f)
+        _write_rec(_key_path(self.dir, key), rec)
         self.recorded += 1
 
     @staticmethod
