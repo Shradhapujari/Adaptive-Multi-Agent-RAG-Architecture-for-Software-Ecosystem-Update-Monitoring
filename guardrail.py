@@ -36,6 +36,7 @@ REFUSAL = ("I cannot determine that from the sources retrieved, so I am not "
 # Labels are long here on purpose -- "Release Notes - Django v5.2.1, 2026-08-20"
 # is the whole citation, so the span has to hold one.
 _CITE_RE = re.compile(r"\[([^\[\]\n]{1,120})\]")
+_BARE_YESNO = re.compile(r"\W*(?:yes|no|yeah|nope)\W*", re.I)
 # Dates are checked separately; cut them out before the version pass so a
 # dotted date form cannot arrive as a version.
 _ISO_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
@@ -488,6 +489,13 @@ def check(answer: str, evidence: Sequence, question: str = "", lead: str = "",
 
     for label in sorted(cited - labels):
         bad.append(Violation("unknown_citation", f"[{label}] was not in the prompt"))
+    # "Yes. [Community - r/arch]" was the whole answer to "Should I upgrade to
+    # Arch v2026.01.01?" under an insufficient-evidence verdict (2026-11-21
+    # sweep): cited, so nothing above caught it, and it reports nothing.
+    if _BARE_YESNO.fullmatch(_CITE_RE.sub(" ", text)):
+        bad.append(Violation(
+            "bare_yesno", "the answer is only yes or no — report what the sources "
+                          "say about the question instead"))
     # Declining excuses the *citation* requirement and nothing else: an answer
     # that says it cannot determine one thing and then states a version, a date
     # or a label anyway is asserting, and the assertion is what gets checked.
