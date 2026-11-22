@@ -167,13 +167,17 @@ _FIX_CLAUSE = re.compile(
 
 
 _PLATFORM_PREP = re.compile(r"\b(?:on|for)\b", re.I)
+# _owns also cuts at "by": "artifacts hosted by GitHub", "links supplied by
+# the GitHub server" name the service the affected software talks to.
+_OWNER_CUT = re.compile(r"\b(?:on|for|by)\b", re.I)
 
 # A component built *for* the product, named after it: "MariaDB Connector/
 # Node.js", "the foo Node.js driver", "a WordPress plugin". The product token
-# is there, but another vendor owns the affected artifact.
+# is there, but another vendor owns the affected artifact. "Linux Foundation
+# Magma" and "the Linux builds of hMailServer" are the same shape.
 _COMPONENT_AFTER = re.compile(
     r"\s*(?:connectors?|drivers?|modules?|packages?|plugins?|extensions?|add-?ons?"
-    r"|sdks?|bindings?|wrappers?|adapters?)\b", re.I)
+    r"|sdks?|bindings?|wrappers?|adapters?|foundation|builds?\s+of)\b", re.I)
 
 # Hand-curated per-product exclusions (data/vendor_kb.json): names that appear
 # in a product's advisory subjects without the product owning the advisory.
@@ -250,11 +254,17 @@ def _owns(segment: str, vtoks: set, exclude: Sequence[str] = ()) -> bool:
     after "on"/"for" (VeraCrypt on macOS), as the target of a component named
     after it (Connector/Node.js, "Node.js driver"), or next to a name the
     knowledge store lists for that product (iTerm2 on macOS)."""
-    head = _PLATFORM_PREP.split(segment.lower(), maxsplit=1)[0]
+    head = _OWNER_CUT.split(segment.lower(), maxsplit=1)[0]
     if any(x in head for x in exclude):
         return False
     for v in vtoks:
-        for m in re.finditer(re.escape(v), head):
+        # Whole word only: a name joined by "-", "_", "/" or a dotted suffix
+        # is another product built on this one -- falcon-rust, util-linux,
+        # install-artifact-from-github, github.com/octo-sts -- and the raw
+        # substring test made all of them "affects rust/linux/github"
+        # advisories in the 2026-11-21 demo sweep.
+        for m in re.finditer(r"(?<![a-z0-9_./@-])" + re.escape(v)
+                             + r"(?![a-z0-9_/@-]|\.[a-z0-9])", head):
             if head[:m.start()].endswith("/") or _COMPONENT_AFTER.match(head, m.end()):
                 continue
             return True
