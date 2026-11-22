@@ -243,16 +243,16 @@ def test_a_safety_question_keeps_the_full_advisory_lookback():
     assert app_1._nvd_days(q, resolve_temporal(q)) == 1
 
 
-def test_an_old_kev_entry_keeps_a_slot_and_is_tagged_legacy():
+def test_every_old_kev_entry_shows_after_the_current_ones_tagged_legacy():
     import app_1
     from datetime import timedelta
     today = app_1._clock().date()
-    old = lambda n, d: {"id": n, "kev_vendor": "Microsoft", "title": "[CISA KEV] Edge flaw",
+    kev = lambda n, d: {"id": n, "kev_vendor": "Microsoft", "title": "[CISA KEV] Edge flaw",
                         "date": (today - timedelta(days=d)).isoformat()}
-    rows = [{"id": f"nvd{i}", "title": "x"} for i in range(5)] + [old("a", 900), old("b", 800)]
-    shown = app_1._show_cve(rows, 5)
-    assert [r["id"] for r in shown] == ["nvd0", "nvd1", "nvd2", "nvd3", "b"]   # newest-added old one
-    assert shown[-1]["title"].startswith("[CISA KEV · legacy, added ")
-    assert app_1._show_cve(rows[:5], 5) == rows[:5]            # nothing old: untouched
-    fresh = {**old("f", 10)}
-    assert app_1._show_cve(rows[:5] + [fresh], 5)[0]["title"] == "[CISA KEV] Edge flaw"   # fresh: no tag
+    cur = [{"id": f"nvd{i}", "title": "x"} for i in range(5)]
+    shown = app_1._show_cve(cur + [kev("a", 900), kev("b", 800), kev("c", 700)], 5)
+    # all old ones, newest-added first, after the five current rows: no slot taken
+    assert [r["id"] for r in shown] == ["nvd0", "nvd1", "nvd2", "nvd3", "nvd4", "c", "b", "a"]
+    assert all(r["title"].startswith("[CISA KEV · legacy, added ") for r in shown[5:])
+    assert app_1._show_cve(cur, 5) == cur                       # nothing old: untouched
+    assert app_1._show_cve(cur + [kev("f", 10)], 5)[0]["title"] == "[CISA KEV] Edge flaw"   # fresh leads, untagged
