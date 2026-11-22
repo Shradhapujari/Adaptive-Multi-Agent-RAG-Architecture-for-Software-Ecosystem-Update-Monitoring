@@ -1242,7 +1242,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # newer NVD rows pushed them out of the cut. Stable, so order within each
     # group stays the reranker's.
     _cve = _safe_rank(results["cve"], top_k=len(results["cve"]) or 1)
-    results["cve"] = _kev_first(_cve)[:limit]
+    results["cve"] = _show_cve(_cve, limit)
     results["timing"]["filter"] = round(time.time() - t0, 2)
 
     # Step 4b — Yes/No consensus
@@ -2391,6 +2391,30 @@ def _kev_first(rows):
             return 1
         return 0 if age <= _KEV_FRESH_DAYS else 2
     return sorted(rows, key=tier)
+
+
+def _is_stale_kev(r: dict) -> bool:
+    try:
+        return bool(r.get("kev_vendor")) and (
+            _clock().date() - date.fromisoformat(str(r.get("date"))[:10])).days > _KEV_FRESH_DAYS
+    except ValueError:
+        return False
+
+
+def _show_cve(rows: list, limit: int) -> list:
+    """The advisories shown: `_kev_first` order, cut to `limit`, with the last
+    slot kept for the newest old KEV entry when the cut would show none, and
+    every old KEV entry tagged as such. Edge's five are 2016-2020 EdgeHTML
+    bugs added in 2021-22: shown as history, after the current advisories
+    (PR #195 sorted them out of sight altogether)."""
+    ordered = _kev_first(rows)
+    shown = ordered[:limit]
+    old = [r for r in ordered[limit:] if _is_stale_kev(r)]
+    if limit > 1 and old and not any(r.get("kev_vendor") for r in shown):
+        shown = shown[:-1] + [max(old, key=lambda r: str(r.get("date")))]
+    return [{**r, "title": r["title"].replace(
+                "[CISA KEV]", f"[CISA KEV · legacy, added {r.get('date')}]", 1)}
+            if _is_stale_kev(r) else r for r in shown]
 
 
 def _drop_prerelease(rows: list) -> list:
