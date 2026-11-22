@@ -91,3 +91,20 @@ def test_the_title_is_not_read():
     row = {"notes": "UVdesk core-framework before 1.1.7 contains a bypass",
            "title": "teams v1.1.7 — UVdesk core-framework"}
     assert advisory_names_vendor(row, "teams") is False
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("text, name, about", [
+    ("falcon-rust is a Rust implementation. Prior to 0.2.0, the sampler", "rust", False),
+    ("django-page-cms through 2.0.13 exempts five admin views", "django", False),
+    ("In util-linux 2.17 through 2.41.6, restricted users", "linux", False),
+    ("Rustrak before 0.26.0 contains a server-side request forgery", "rust", False),
+    ("Octo STS (github.com/octo-sts/app) before 0.11.2 returns", "github", False),
+    ("A flaw in Node.js TLS hostname verification before 26.9.0", "node.js", True),
+    ("The MongoDB Rust Driver before 3.2.1 does not neutralize NUL", "rust", True),
+])
+def test_a_name_fragment_is_not_the_vendor(text, name, about):
+    """Sweep 2026-11-21: packages containing the vendor's name drove Patch now."""
+    assert advisory_names_vendor({"notes": text}, name) is about

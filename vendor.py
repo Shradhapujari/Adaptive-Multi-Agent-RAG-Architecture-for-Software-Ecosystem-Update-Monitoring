@@ -561,7 +561,10 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     # The marker's own sentence, or the first one when there is no marker.
     span = text[:m.start()] if m else text
     span = re.split(r"[.!?]\s", span)[-1] if m else re.split(r"[.!?]\s", span)[0]
-    return want in span.lower()
+    # The whole name, not a fragment of another one: "falcon-rust",
+    # "django-page-cms", "util-linux", "Rustrak" and "github.com/octo-sts" each
+    # contain the vendor's name and are not the vendor (sweep, 2026-11-21).
+    return re.search(rf"(?<![\w-]){re.escape(want)}(?![\w-]|\.\w)", span.lower()) is not None
 
 
 def classify_record(row: Dict) -> str:
