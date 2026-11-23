@@ -118,3 +118,29 @@ def test_a_product_with_no_kev_rows_is_asked_for_by_name(monkeypatch):
                         lambda *a, **k: ({"community": [], "releases": [], "cve": [recent]}, []))
     app_1.run_pipeline("Edge WebRTC vulnerability", show_steps=False)
     assert asked == []
+
+
+def test_edge_component_question_adds_chromium_upstream_rows_that_stay_out_of_the_verdict(monkeypatch):
+    """Edge's records never name WebRTC, Chrome's do: the engine's CVEs are
+    listed, tagged, and never counted for Microsoft's verdict."""
+    monkeypatch.setenv("MARAG_RERANK", "bm25")
+    edge = {"title": "CVE-2026-1 — Use after free in Microsoft Edge (Chromium-based) allows an attacker",
+            "source": "nvd", "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-1", "cve_id": "CVE-2026-1",
+            "date": "2026-11-10", "detail": "Use after free in Microsoft Edge (Chromium-based)",
+            "severity": "HIGH", "is_cve": True, "verified": True, "tier": 1}
+    chrome = {**edge, "title": "CVE-2026-2 — Use after free in WebRTC in Google Chrome prior to 158",
+              "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-2", "cve_id": "CVE-2026-2",
+              "detail": "Use after free in WebRTC in Google Chrome prior to 158"}
+    monkeypatch.setattr(nvd, "fetch", lambda kw, *a, **k: [chrome] if kw == "chrome webrtc" else [edge])
+    monkeypatch.setattr(app_1, "union_fetch", lambda *a, **k: [])
+    monkeypatch.setattr(app_1, "terminal_sources", lambda *a, **k: ({"community": [], "releases": [], "cve": []}, []))
+    monkeypatch.setattr(app_1, "rewrite_query", lambda q: Rewrite(q, "rule-based"))
+    monkeypatch.setattr(app_1, "get_store", lambda: None)
+    import multiagent_rag_v3 as marag
+    monkeypatch.setattr(marag, "fetch_cisa_kev", lambda *a, **k: [])
+    r = app_1.run_pipeline("WebRTC in Edge", show_steps=False)
+    titles = [d["title"] for d in r["cve"]]
+    assert any(t.startswith("[Chromium upstream") and "WebRTC" in t for t in titles)
+    assert any("Microsoft Edge" in t and not t.startswith("[Chromium") for t in titles)
+    r = app_1.run_pipeline("Is it safe to update Edge?", show_steps=False)
+    assert not any(d["title"].startswith("[Chromium upstream") for d in r["cve"])

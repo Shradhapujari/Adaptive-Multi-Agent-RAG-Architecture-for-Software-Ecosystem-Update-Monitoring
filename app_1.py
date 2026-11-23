@@ -1080,6 +1080,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
             if (r.get("url") or "").rstrip("/").lower() not in _have]
         results["timing"]["releases"] = round(time.time()-t0, 1)
 
+    upstream_cve: list = []   # see the NVD block below
     # Step 4 — CVE Agent
     with _step("CVE Agent — fetching security vulnerabilities...", show_steps):
         t0 = time.time()
@@ -1123,6 +1124,19 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
                            and decide.kev_owns(r, [v.name])
                            for r in results["cve"] + shared["cve"]):
                     shared["cve"] = shared["cve"] + _marag.fetch_cisa_kev(kw(v), limit=5)
+            # Edge's records never name a component, but it is built on
+            # Chromium: Chrome's WebRTC CVEs are the engine's. Fetched here,
+            # added after scoping (which would drop them as not naming
+            # Microsoft) and tagged, so they never reach the verdict.
+            for v in g.vendors[:2]:
+                up = decide.KB.get(v.name, {}).get("upstream")
+                for p in (v.parts if up else ()):
+                    try:
+                        upstream_cve += [{**r, "upstream_of": v.name} for r in nvd.fetch(
+                            f"{up} {p}", limit=max(limit * 4, 20), days=days,
+                            retry=checks["nist_retry"], newest_first=checks["nist_sort"])]
+                    except Exception as e:  # noqa: BLE001 -- recorded, not swallowed
+                        _record_fetch_error("NVD", e)
         # Already fetched and screened in step 2. The app's own CVE feed is
         # Reddit; these are the advisory catalogues (CISA KEV, CIRCL) the
         # terminal reads and this app had no fetcher for. Deduped on url as
@@ -1245,6 +1259,12 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # group stays the reranker's.
     _cve = _safe_rank(results["cve"], top_k=len(results["cve"]) or 1)
     results["cve"] = _show_cve(_cve, limit)
+    # Upstream rows (Edge -> Chrome's component CVEs): newest `limit`, not
+    # already present, tagged. Added after the vendor scoping on purpose.
+    _have = {(r.get("url") or "").rstrip("/").lower() for r in results["cve"]}
+    results["cve"] += [{**r, "title": "[Chromium upstream — Edge shares this engine] " + r["title"]}
+                       for r in upstream_cve[:limit]
+                       if (r.get("url") or "").rstrip("/").lower() not in _have]
     results["timing"]["filter"] = round(time.time() - t0, 2)
 
     # Step 4b — Yes/No consensus
@@ -2497,7 +2517,9 @@ def _detail_tables(presented, results: Optional[dict] = None) -> None:
     for what in _unfocused_components(results.get("grounding")):
         st.caption(f"Advisories are not narrowed to “{what}”: the vendor's "
                    "records don't name the component, so these are its newest "
-                   "advisories for the product, not only that component's.")
+                   "advisories for the product, not only that component's. "
+                   "Rows tagged “Chromium upstream” are the shared engine's own "
+                   "advisories for it, not Microsoft's.")
     used, other = _split_tables(tables, _verdict_keys(results),
                                 _answer_keys(results, presented), product)
     n_other = sum(len(v) for v in other.values())
