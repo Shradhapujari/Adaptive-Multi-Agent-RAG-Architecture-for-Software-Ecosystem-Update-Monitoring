@@ -593,6 +593,12 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     # (live check, 2026-11-22).
     if text.lower().startswith("in the linux kernel, the following vulnerability"):
         return want in ("linux", "linux kernel", "kernel")
+    # "In the nrfconnect/ncs-zigbee repository, ..." names whose code it is, the
+    # same way the kernel preamble does; a later "GitHub Pages" or "GitHub
+    # Actions" is where that repository runs, not the product (sweep, 2026-11-23).
+    repo = re.match(r"\s*in the ([\w.-]+/[\w.-]+) repository\b", text, re.I)
+    if repo:
+        return re.search(rf"(?<![\w-]){re.escape(want)}(?![\w-])", repo.group(1).lower()) is not None
     # For Linux itself, a CVE has to say "Linux kernel". The feed files
     # "Linux Foundation Magma", "TeamViewer ... for Linux", hMailServer's Linux
     # builds and EilikO Linux robot firmware under it too (9 of 21 rows on a
@@ -618,7 +624,9 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     # A path component (".github/workflows") is not the product either.
     # "The devalue package for npm", "the connect-xcors npm package", "the
     # fastjsonschema Python package": the registry or language a package is
-    # published for, not the product (NVD "npm" search, 2026-11-22).
+    # published for, not the product (NVD "npm" search, 2026-11-22). Likewise
+    # "the hyper-staticfile Rust crate" and "Apache Arrow Rust (`parquet`
+    # crate)": a library written in Rust, not Rust (sweep, 2026-11-23).
     # The product as a platform: "OneCLI 5.5.0 for Linux", "Acronis Backup
     # plugin (Linux)", "a .desktop file on Linux", "Linux Foundation Magma",
     # "the Linux builds of hMailServer", "EilikO Linux robot firmware" --
@@ -633,7 +641,8 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     # "(", and stays.
     span = _PLATFORM_LIST.sub(" ", span.lower())
     return re.search(rf"(?<![\w./(-])(?<!for )(?<!on ){re.escape(want)}(?![\w/-]|\.\w)"
-                     r"(?!\s+actions?\b(?!\s+runner))(?!\s+(?:packages?|modules?)\b)"
+                     r"(?!\s+actions?\b(?!\s+runner))(?!\s+(?:packages?|modules?|crates?)\b)"
+                     r"(?!\s*\(\s*`?[\w.-]+`?\s+crates?\))"
                      r"(?!\s+(?:foundation|builds?)\b)(?!\s+(?:\w+\s+)?firmware\b)"
                      r"(?!\s+(?:x86|x64|amd64|arm64|aarch64|i386)\b)",
                      span) is not None
