@@ -177,7 +177,8 @@ def test_eol_reads_cycle(monkeypatch):
     _json_by_url(monkeypatch, {"all.json": (["python", "nodejs"], None), "/python.json": (PY, None)})
     docs, meta = L.fetch("eol", "Is Python 3.9 still supported?")
     assert meta["resolved"] and meta["source"] == "endoflife.date"
-    assert "Python 3.9: end of life 2025-10-31, latest 3.9.25" in docs[0]["text"]
+    assert "Python 3.9: support ended 2025-10-31 (" in docs[0]["text"]
+    assert "latest 3.9.25" in docs[0]["text"]
     assert docs[0]["label"] == "endoflife.date - python 3.9"
 
 
@@ -488,3 +489,15 @@ def test_suggestion_only_names_resolve_typos_without_becoming_known():
     assert vendor.suggest("What happended to miscrosoft recently?") == "microsoft"
     assert vendor.suggest("Is zom better or teems?") in ("zoom", "teams")
     assert not {"microsoft", "zoom", "teams", "slack"} & set(vendor.known_products())
+
+
+def test_eol_states_past_and_future_against_today(monkeypatch):
+    # The presenter can't tell "eol 2025-10-31" is past; the doc must say so.
+    import datetime as dt
+    L._eol_slugs.cache_clear()
+    _json_by_url(monkeypatch, {"all.json": (["python"], None), "/python.json": (PY, None)})
+    today = dt.date(2026, 11, 23)
+    docs, _ = L._eol("Is Python 3.9 still supported?", today=today)
+    assert "Python 3.9: support ended 2025-10-31 (1 year ago, as of 2026-11-23)" in docs[0]["text"]
+    docs, _ = L._eol("Is Python 3.10 still supported?", today=dt.date(2026, 10, 1))
+    assert "Python 3.10: supported until 2026-10-31 (30 days left, as of 2026-10-01)" in docs[0]["text"]
