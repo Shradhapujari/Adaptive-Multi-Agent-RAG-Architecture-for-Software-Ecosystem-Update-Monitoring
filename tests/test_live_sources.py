@@ -43,6 +43,23 @@ import websearch  # noqa: E402
     ("iOS 26.3 WiFi/RAM issues?", None),                   # update report, no general cue
     ("Latest Node.js version?", None),                     # release intent
     ("What happened during the GitHub outage?", "incident"),  # precedence
+    # Review 2026-11-22: security and breakage reports phrased without the
+    # classifier's cues must keep the feed verdict, not become news/general.
+    ("Was Chrome hacked recently?", None),
+    ("What happened with the Chrome 0day?", None),
+    ("Any news on the OpenSSL bug?", None),
+    ("Why is Windows Defender flagging Chrome?", None),
+    ("What happened to Chrome passwords?", None),
+    ("Recently installed Ubuntu 26.04 and wifi broke", None),
+    ("Any recent problems with iOS 26.1?", None),
+    ("Recent Chrome issues?", None),
+    ("Is Chrome broken lately?", None),
+    ("Why is Windows 11 so slow lately?", None),
+    ("Why is Windows 11 24H2 breaking printers?", None),
+    ("What is the Windows 11 24H2 bug?", None),
+    ("Why is Firefox crashing?", None),
+    ("What is Chrome 131?", None),
+    ("What are the changes in Chrome 131?", None),
 ])
 def test_kind(q, want):
     assert L.kind(q) == want

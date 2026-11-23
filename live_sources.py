@@ -76,9 +76,17 @@ _BETTER_OR = re.compile(r"\bbetter\b[^?]*\bor\b|\bor\b[^?]*\bbetter\b", _I)
 # News and general questions need a positive cue: "no update cue" alone sent
 # 145 of the 500 benchmark questions here, real update reports among them
 # ("iOS 26.3 WiFi/RAM issues?"); these cues send about 20 (2026-11-21).
-_NEWS = re.compile(r"\b(?:what happened|happening|going on with|recent(?:ly)?|lately"
-                   r"|news|this week)\b", _I)
+# Bare "recently"/"lately" are left out: "Recent Chrome issues?" is a bug report.
+_NEWS = re.compile(r"\b(?:what happened|happening|going on with|news|this week)\b", _I)
 _GENERAL = re.compile(r"^\s*(?:what (?:is|are)|what's|how does|explain|why (?:does|is))\b", _I)
+# A security word, a breakage word or a version/build number keeps the feed
+# verdict even without an intent cue: "Was Chrome hacked recently?", "Why is
+# Firefox crashing?", "What is Chrome 131?" (review, 2026-11-22). Losing a
+# verdict costs more than an update answer to a general question.
+_ISSUE_CUE = re.compile(r"\b(?:hack\w*|0[- ]?days?|bugs?|backdoor\w*|malicious|malware|infect\w*"
+                        r"|flag\w*|breach\w*|leak\w*|password\w*|issues?|problems?|broken"
+                        r"|break\w*|crash\w*|slow\w*|glitch\w*|regression\w*|freez\w*|fail\w*)\b"
+                        r"|\b\d+(?:\.\d+)*\b|\b\d{2}H\d\b", _I)
 
 _VERSION = re.compile(r"\bv?(\d+(?:\.\d+)+)\b")
 _NAME = r"([a-z0-9][\w.-]*[a-z0-9]|[a-z0-9])"
@@ -152,7 +160,7 @@ def kind(query: str, vendors: Sequence[str] = ()) -> Optional[str]:
     if _HOWTO.search(q) or _ERRNO.search(q):
         return "howto"
     # Anything the classifier calls an update question keeps the feed path.
-    if _UPDATE_CUE.search(q) or intent.classify(q).confident:
+    if _UPDATE_CUE.search(q) or _ISSUE_CUE.search(q) or intent.classify(q).confident:
         return None
     if _NEWS.search(q):
         return "news"
