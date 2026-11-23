@@ -517,8 +517,11 @@ def vendor_terms(vendors: Sequence[VendorMatch]) -> List[str]:
 # ("PraisonAI is a multi-agent teams system"), and were kept as Teams records.
 # The optional token before the digits is for "Prior to praisonaiagents
 # 1.6.59", where the package is named between the marker and its version.
+# "up to" is VulDB's: "A weakness has been identified in AIP-PUB
+# ACPs-community up to 2.2.0" -- without it the whole text was read and the
+# closing "The reported GitHub issue was closed" made it a GitHub advisory.
 _VERSION_MARKER = re.compile(
-    r"\b(?:prior to|before|versions?|through|from|until|up to and including)\s+"
+    r"\b(?:prior to|before|versions?|through|from|until|up to and including|up to)\s+"
     r"(?:[\w.@/-]+\s+)?v?\d", re.I)
 
 
