@@ -60,8 +60,9 @@ def test_evidence_labels_carry_source_name_and_date():
     # description -- so it is now labelled as one. Calling it "Release Notes -
     # Linux v6.18.21" told the reader a version by that name shipped; the
     # number in an advisory row is the *affected* version. Expectation changed
-    # deliberately with vendor.classify_record.
-    assert "Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28" in labels
+    # deliberately with vendor.classify_record. A kernel CVE carries no
+    # version at all: the feed's is scraped from free text (vendor.describe_record).
+    assert "Security Advisory - Linux advisory, 2026-08-28" in labels
     assert "Release Notes - Django v5.2.1, 2026-08-20" in labels
     # Rows from /api/reddit/query/cve are Reddit posts, not advisory records.
     # "CVE Feed" claimed a security feed had reported them; the endpoint
@@ -89,7 +90,7 @@ def test_deterministic_paragraph_cites_every_kind():
     # kind of evidence.
     assert "[Release Notes - Django v5.2.1, 2026-08-20]" in text
     assert "1 advisory record(s) apply" in text
-    assert "[Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28]" in text
+    assert "[Security Advisory - Linux advisory, 2026-08-28]" in text
     assert "Community security discussion adds 1 post(s)" in text
     assert "[Security Discussion - r/netsec, 2026-08-30]" in text
     assert "[Community - r/linux, 2026-08-31]" in text
@@ -124,7 +125,7 @@ def test_prompt_names_the_bracket_rule_and_only_listed_sources():
     # Sources are cited by a short tag and named by their full label on the
     # same line: the model copies [S1]; expand_tags restores the label.
     assert "[S1]" in prompt
-    assert "Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28" in prompt
+    assert "Security Advisory - Linux advisory, 2026-08-28" in prompt
 
 
 def test_guardrail_rejects_headline_contradicting_its_list():
@@ -465,11 +466,11 @@ def test_prompt_tells_the_model_an_in_window_source_is_an_answer():
 # the guardrail rejects a citation that was never in the prompt, so a stub that
 # cites a label collect_evidence no longer emits now falls back to rule-based.
 @pytest.mark.parametrize("raw,expected_start", [
-    ('Here is a flowing paragraph:\n\n"Linux shipped a fix [Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28]."',
+    ('Here is a flowing paragraph:\n\n"Linux shipped a fix [Security Advisory - Linux advisory, 2026-08-28]."',
      "Linux shipped a fix"),
-    ('Answer: Linux shipped a fix [Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28].',
+    ('Answer: Linux shipped a fix [Security Advisory - Linux advisory, 2026-08-28].',
      "Linux shipped a fix"),
-    ('Linux shipped a fix [Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28].',
+    ('Linux shipped a fix [Security Advisory - Linux advisory, 2026-08-28].',
      "Linux shipped a fix"),
 ])
 def test_model_preamble_and_wrapping_quotes_are_stripped(monkeypatch, raw, expected_start):

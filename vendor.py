@@ -771,6 +771,15 @@ def describe_record(row: Dict) -> str:
     # has YYYY first, Chrome's big number is third); revisit if one turns up.
     if re.match(r"\d+\.\d{4,}(?:\.|$)", version):
         version = ""
+    # A kernel CVE's description never states the affected range, so the feed
+    # takes the first version-like string in its free text: "hw2.1" from a
+    # Tested-on line, "DWC_usb31 v2.00a", the kernel a reporter booted ("Not
+    # tainted 7.2.0-rc7"). "CVE-2026-97442 (affects linux 2.1.0)" reached a
+    # demo answer (sweep, 2026-11-23); 12 of 12 kernel rows on the linux page
+    # had such a version.
+    notes = str(row.get("notes") or row.get("versionReleaseNotes") or "")
+    if notes.lstrip().lower().startswith("in the linux kernel, the following vulnerability"):
+        version = ""
     return f"{head} (affects {product} {version})" if version else head
 
 

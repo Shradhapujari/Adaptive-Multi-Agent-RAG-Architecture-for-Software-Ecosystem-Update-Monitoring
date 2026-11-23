@@ -246,8 +246,19 @@ def test_advisory_is_named_by_its_cve_not_its_version_string():
     # The affected-version field is junk here (second component 642087), so
     # it is not printed at all; a plausible one still is.
     assert describe_record(ADVISORY) == "CVE-2026-80688"
-    assert describe_record({**ADVISORY, "version": "7.2.0"}) == "CVE-2026-80688 (affects Linux 7.2.0)"
-    assert describe_record({**ADVISORY, "version": "153.0.8010.52"}).endswith("(affects Linux 153.0.8010.52)")
+    other = {**ADVISORY, "notes": "Use after free in Foo before 7.2.1 allows a crash."}
+    assert describe_record({**other, "version": "7.2.0"}) == "CVE-2026-80688 (affects Linux 7.2.0)"
+    assert describe_record({**other, "version": "153.0.8010.52"}).endswith("(affects Linux 153.0.8010.52)")
+
+
+def test_kernel_cve_prints_no_version():
+    # The feed read "Tested-on: WCN6855 hw2.1" as linux 2.1.0 (CVE-2026-97442,
+    # sweep 2026-11-23); a kernel CVE's text never states the affected range.
+    row = {**ADVISORY, "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-97442",
+           "notes": "In the Linux kernel, the following vulnerability has been resolved:\n\n"
+                    "wifi: ath11k: fix invalid data access\n\nTested-on: WCN6855 hw2.1 PCI"}
+    for v in ("2.1.0", "7.2.0", "2.00.0"):
+        assert describe_record({**row, "version": v}) == "CVE-2026-97442"
 
 
 def test_release_is_named_by_its_version():
