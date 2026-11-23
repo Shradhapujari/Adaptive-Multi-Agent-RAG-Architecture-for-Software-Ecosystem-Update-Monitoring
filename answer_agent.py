@@ -666,8 +666,34 @@ def drop_verdict_denials(body: str, verdict: Optional[str]) -> str:
     return "\n".join(lines).strip(" ").rstrip()
 
 
+# A live answer-only question (comparison, outage, EOL, how-to) is not an
+# update question, and the update framing made llama3.1 refuse it: given four
+# comparison pages, one saying outright which tool suits what, it called "Is
+# Zoom or Teams better?" subjective and declined; with these swaps it answered
+# from that page (2026-11-23). Stated first, before AGENT_RULES.md's update
+# Scope section, for the reason `feedback_prompt` gives. Grounding, citation
+# and the NOT_FOUND refusal are unchanged.
+LIVE_FRAME = ("This question is not about a software update. The sources were "
+              "fetched for it from a live source: answer what was asked from them. "
+              "The Scope rule's update focus does not apply.\n\n")
+_LIVE_SWAPS = (
+    ("State the ANSWER ITSELF \u2014 the specific thing that is wrong, changed or fixed.",
+     "State the ANSWER ITSELF \u2014 what the sources say about exactly what was asked."),
+    ("Name the symptom, the version, the fix.\n", "\n"),
+)
+
+
+def _live_citation_rule() -> str:
+    rule = CITATION_RULE
+    for old, new in _LIVE_SWAPS:
+        assert old in rule, f"CITATION_RULE changed; update _LIVE_SWAPS: {old!r}"
+        rule = rule.replace(old, new)
+    return rule
+
+
 def build_cited_prompt(query: str, evidence: List[Evidence],
-                       window_note: str = "", decision: Optional[Dict] = None) -> str:
+                       window_note: str = "", decision: Optional[Dict] = None,
+                       live_kind: Optional[str] = None) -> str:
     """The presenter's prompt: shared grounding instruction + citation rule."""
     try:
         from eval_harness.generators import SYNTHESIS_INSTRUCTION as base
@@ -683,7 +709,11 @@ def build_cited_prompt(query: str, evidence: List[Evidence],
     ruled = (f"\n\nA rule-based safety gate has already decided this question "
              f"against the advisory feeds: “{lead}” Your answer must "
              f"not contradict it.") if lead else ""
-    return (f"{rules_block()}{base}\n{REASONING_RULE}{UNTRUSTED_RULE}{CITATION_RULE}{ruled}\n\n"
+    frame, citation = "", CITATION_RULE
+    if live_kind:
+        frame, citation = LIVE_FRAME, _live_citation_rule()
+        base = base.replace("software-update assistant", "software assistant")
+    return (f"{frame}{rules_block()}{base}\n{REASONING_RULE}{UNTRUSTED_RULE}{citation}{ruled}\n\n"
             f"Question: {query}{dated}\n\nSources:\n{ctx}\n\nAnswer:")
 
 
@@ -985,8 +1015,10 @@ def _present(query: str, results: Dict, model_spec: Optional[str] = None,
             from eval_harness.providers import make_client, LLMError
             client = make_client(spec)
             if client.available():
+                live = results.get("live") or {}
                 prompt = build_cited_prompt(query, evidence, window_note,
-                                            decision=results.get("decision"))
+                                            decision=results.get("decision"),
+                                            live_kind=live.get("kind") if live.get("answer_only") else None)
                 note = "model returned an empty answer"
                 # One feedback pass: the guardrail's violations go back to the
                 # model by name before the rule-composed fallback is used.

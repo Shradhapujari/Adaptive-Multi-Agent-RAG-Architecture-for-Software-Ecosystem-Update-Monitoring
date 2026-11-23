@@ -893,3 +893,47 @@ def test_refusing_when_the_feed_has_the_latest_version_is_rejected():
     assert [x.code for x in v.violations] == ["missed_latest"], v.violations
     # Without a headline, declining stays allowed.
     assert guardrail.check(refusal, ev, "latest node.js version?").ok
+
+
+# ─────────────────────────────── live answer-only questions (2026-11-23)
+# The prompt was written for update questions only ("software-update
+# assistant", "Stay on software updates", "Name the symptom, the version, the
+# fix"). Given four comparison pages, one saying outright which tool suits
+# what, llama3.1 refused "Is Zoom or Teams better?" as subjective; with the
+# update framing swapped out it answered from [S4].
+
+ZOOM_DOC = {"title": "Zoom vs. Microsoft Teams: Which Is Best? | Zapier",
+            "text": "Zoom is better for external meetings and video conferencing, while Teams "
+                    "is more developed as an all-in-one collaboration tool.",
+            "url": "https://zapier.com/blog/zoom-vs-teams", "source": "live",
+            "label": "Web - zapier.com", "date": "", "host": "zapier.com"}
+LIVE_RESULTS = {"live": {"kind": "compare", "answer_only": True, "source": "DuckDuckGo"},
+                "web": [ZOOM_DOC], "decision": None}
+
+
+def test_live_answer_prompt_drops_the_update_only_framing(monkeypatch):
+    _no_env(monkeypatch)
+    stub = _StubClient("Zoom is better for external meetings [Web - zapier.com].")
+    _patch_client(monkeypatch, stub)
+    out = present_answer("Is Zoom or Teams better?", LIVE_RESULTS, model_spec="stub:model")
+    assert out.mode == "llm"
+    assert "software-update assistant" not in stub.prompt
+    assert "Name the symptom, the version, the fix" not in stub.prompt
+    assert stub.prompt.startswith(answer_agent.LIVE_FRAME)
+    # Grounding is unchanged: same refusal rule, same quoting rule.
+    assert answer_agent.NOT_FOUND in stub.prompt and "[untrusted:community]" in stub.prompt
+
+
+def test_update_question_prompt_keeps_the_update_framing(monkeypatch):
+    _no_env(monkeypatch)
+    stub = _StubClient("Linux shipped a kernel security fix [Release Notes - Django v5.2.1, 2026-08-20].")
+    _patch_client(monkeypatch, stub)
+    present_answer("Any critical Linux updates today?", RESULTS, model_spec="stub:model")
+    assert "software-update assistant" in stub.prompt
+    assert "Name the symptom, the version, the fix" in stub.prompt
+    assert answer_agent.LIVE_FRAME not in stub.prompt
+
+
+def test_live_kind_none_builds_the_same_prompt_as_before():
+    ev = collect_evidence(RESULTS)
+    assert build_cited_prompt("q", ev) == build_cited_prompt("q", ev, live_kind=None)
