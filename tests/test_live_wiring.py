@@ -309,3 +309,13 @@ def test_productless_general_question_is_declined_not_sent_to_web_search():
     q = "What is a race condition?"
     assert app_1._needs_live_note(q, live=False) is None
     assert app_1._off_topic_note(q, live=True) is not None
+
+
+def test_feed_tiles_hidden_when_the_live_source_is_the_answer():
+    """"Is zoom better or teams?" showed Latest release v26288… above a
+    comparison answer that read no feed row (2026-11-21)."""
+    g = type("G", (), {"vendors": ["zoom"]})()
+    assert app_1._show_feed_tiles({"grounding": g})
+    assert not app_1._show_feed_tiles({"grounding": g, "live": {"answer_only": True}})
+    assert app_1._show_feed_tiles({"grounding": g, "live": {"answer_only": False}})
+    assert not app_1._show_feed_tiles({"grounding": type("G", (), {"vendors": []})()})
