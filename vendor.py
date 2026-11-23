@@ -544,7 +544,7 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     ponytail: a substring test inside one clause, not a parser. It reads the
     convention NVD descriptions happen to follow, so an advisory phrased
     differently -- no version marker, or the product named only in a later
-    sentence -- falls back to the first sentence and may be kept. Prefer
+    sentence -- is searched whole and may be kept. Prefer
     keeping a mislabelled row to dropping a real one: this decides what may be
     *cited as a vendor's own record*, and a false drop silently removes real
     evidence.
@@ -559,8 +559,12 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
 
     m = _VERSION_MARKER.search(text)
     # The marker's own sentence, or the first one when there is no marker.
-    span = text[:m.start()] if m else text
-    span = re.split(r"[.!?]\s", span)[-1] if m else re.split(r"[.!?]\s", span)[0]
+    # With no marker the product may be named in any sentence: Mozilla's
+    # advisories read "Use-after-free in the Audio/Video: Playback component.
+    # This vulnerability was fixed in Firefox 160.0.1", and reading only the
+    # first sentence dropped every real Firefox CVE (sweep, 2026-11-22). Keeping
+    # a mislabelled row is the cheaper error, so the whole text is searched.
+    span = re.split(r"[.!?]\s", text[:m.start()])[-1] if m else text
     # The whole name, not a fragment of another one: "falcon-rust",
     # "django-page-cms", "util-linux", "Rustrak" and "github.com/octo-sts" each
     # contain the vendor's name and are not the vendor (sweep, 2026-11-21).
