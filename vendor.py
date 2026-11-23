@@ -584,9 +584,16 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     # "The devalue package for npm", "the connect-xcors npm package", "the
     # fastjsonschema Python package": the registry or language a package is
     # published for, not the product (NVD "npm" search, 2026-11-22).
-    return re.search(rf"(?<![\w./-])(?<!package for )(?<!packages for )(?<!module for )"
-                     rf"{re.escape(want)}(?![\w/-]|\.\w)"
-                     r"(?!\s+actions?\b(?!\s+runner))(?!\s+(?:packages?|modules?)\b)",
+    # The product as a platform: "OneCLI 5.5.0 for Linux", "Acronis Backup
+    # plugin (Linux)", "a .desktop file on Linux", "Linux Foundation Magma",
+    # "the Linux builds of hMailServer", "EilikO Linux robot firmware" --
+    # eleven of releasetrain's linux advisories, quoted for Fedora 44
+    # (live check, 2026-11-22). "Chrome on Android" is Chrome's, not Android's.
+    # ponytail: a platform named only in a list ("Windows, macOS, Linux") still
+    # passes; a list rule would also drop "affects Chrome, Firefox and Edge".
+    return re.search(rf"(?<![\w./(-])(?<!for )(?<!on ){re.escape(want)}(?![\w/-]|\.\w)"
+                     r"(?!\s+actions?\b(?!\s+runner))(?!\s+(?:packages?|modules?)\b)"
+                     r"(?!\s+(?:foundation|builds?)\b)(?!\s+(?:\w+\s+)?firmware\b)",
                      span.lower()) is not None
 
 
