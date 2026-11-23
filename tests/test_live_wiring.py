@@ -153,7 +153,16 @@ def test_live_answer_headline_is_the_answer_not_an_abstention(monkeypatch):
 def test_package_ecosystem_questions_pass_the_entry_gate_when_live(q):
     """Live check 2026-11-19: both were declined as "Not a software update question"."""
     assert app_1._off_topic_note(q, live=True) is None
-    assert app_1._off_topic_note(q) is not None          # web off: unchanged
+
+
+def test_web_off_pip_question_still_declined():
+    assert app_1._off_topic_note("Is requests 2.31.0 safe? (pip)") is not None
+
+
+def test_web_off_npm_question_names_a_product():
+    # npm became a product (vendor._ALIASES, 2026-11-22), so it is a software
+    # question with web search off too, not "Not a software update question".
+    assert app_1._off_topic_note("How do I fix EACCES on npm install?") is None
 
 
 def test_off_topic_how_to_stays_declined_when_live():
