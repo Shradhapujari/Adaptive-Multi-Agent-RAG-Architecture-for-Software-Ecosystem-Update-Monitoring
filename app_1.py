@@ -2170,6 +2170,15 @@ _NEEDS_LIVE = {"down_now": "whether a service is down", "incident": "what an out
                "news": "what's been happening recently", "general": "a general software question"}
 
 
+def _show_feed_tiles(results: dict) -> bool:
+    """Whether the Latest release / Advisories / Community tiles belong under
+    the answer. Not when a live source is the answer: the paragraph reads no
+    feed row then (answer_agent.collect_evidence), and "Latest release
+    v26288…" over a Zoom-vs-Teams comparison read as part of it (2026-11-21)."""
+    return (bool(getattr(results.get("grounding"), "vendors", None))
+            and not (results.get("live") or {}).get("answer_only"))
+
+
 def _needs_live_note(query: str, live: bool) -> Optional[str]:
     """Why the console declines an outage or end-of-life question when web
     search is off, or None. The feeds can't answer one, and without this the
@@ -2871,7 +2880,7 @@ def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = Non
     # away (Read more) or in the sidebar's Advanced checks.
     with st.container(border=True):
         _tab_short(results, presented)
-        if product:
+        if _show_feed_tiles(results):
             rel = _headline_release(results, q)
             latest, advisories, community = st.columns(3)
             latest.metric("Latest release", f"v{rel['version']}" if rel else "—")
