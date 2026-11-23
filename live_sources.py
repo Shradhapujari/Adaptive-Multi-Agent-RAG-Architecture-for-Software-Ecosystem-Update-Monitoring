@@ -19,6 +19,7 @@ the console's existing behaviour, which is the old answer, not a wrong one.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import re
 from functools import lru_cache
 from typing import List, Optional, Sequence, Tuple
@@ -266,7 +267,7 @@ _WORD = re.compile(r"[a-z0-9][\w.+-]*", _I)
 _NAME_BEFORE_VERSION = re.compile(r"\b([a-z][\w.+-]*)\s+v?(\d+(?:\.\d+)*)\b", _I)
 
 
-def _eol(query: str):
+def _eol(query: str, today: Optional[_dt.date] = None):
     site_err = None
     try:
         slugs = _eol_slugs()
@@ -300,10 +301,27 @@ def _eol(query: str):
                                             or asked.startswith(f"{c.get('cycle')}."))][:1]
     pick = pick or cycles[:4]
 
+    today = today or _dt.date.today()
+
+    def when_(eol) -> str:
+        # Settle past vs future here: the presenter isn't told today's date and
+        # read "end of life 2025-10-31" as still supported a year later.
+        if eol is False:
+            return "still supported, no end-of-life date yet"
+        if eol is True:
+            return "support ended (date not given)"
+        try:
+            days = (_dt.date.fromisoformat(str(eol)) - today).days
+        except ValueError:
+            return f"end of life {eol}"
+        n = abs(days)
+        span = f"{n // 365} year{'s' * (n >= 730)}" if n >= 365 else f"{n} day{'s' * (n != 1)}"
+        if days < 0:
+            return f"support ended {eol} ({span} ago, as of {today})"
+        return f"supported until {eol} ({span} left, as of {today})"
+
     def line(c):
-        eol = c.get("eol")
-        when = ("no end-of-life date yet" if eol is False else
-                "end of life (date not given)" if eol is True else f"end of life {eol}")
+        when = when_(c.get("eol"))
         return f"{word.capitalize()} {c.get('cycle')}: {when}, latest {c.get('latest', '?')}"
 
     text = "; ".join(line(c) for c in pick) + "."
