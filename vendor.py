@@ -434,6 +434,14 @@ _PRETTY = {"node.js": "Node.js", "nodejs": "Node.js", "macos": "macOS", "ios": "
 # d60eeef ("Microsoft Edge" is Edge). 0 bogus suggestions over the 168
 # no-product benchmark_500 questions with these added (2026-11-21).
 _SUGGEST_ONLY = ("microsoft", "zoom", "teams", "slack")
+# They also need a closer match than the 0.8 cutoff. One substitution in a
+# five-letter name scores exactly 0.8, and for these names that is usually an
+# English word: stack/snack/smack -> Slack, tears/terms/texas -> Teams
+# (/usr/share/dict/words: 13 and 9 such words; review, 2026-11-22). At 0.85 an
+# insertion or deletion ("slaack", "zooom", 0.89) and "miscrosoft" (0.95)
+# still resolve. ponytail: a substitution typo of Slack/Teams ("teems") gets no
+# suggestion; a missed suggestion costs less than a wrong one.
+_SUGGEST_ONLY_CUTOFF = 0.85
 
 
 def pretty(name: str) -> str:
@@ -474,6 +482,8 @@ def _closest(query: str, catalog: Optional[Sequence[str]] = None,
             if w in n or n in w or w[0] != n[0]:
                 continue
             r = difflib.SequenceMatcher(None, w, n).ratio()
+            if canon[n] in _SUGGEST_ONLY and r < _SUGGEST_ONLY_CUTOFF:
+                continue
             if r > best:
                 best, pick = r, (w, canon[n])
     return pick

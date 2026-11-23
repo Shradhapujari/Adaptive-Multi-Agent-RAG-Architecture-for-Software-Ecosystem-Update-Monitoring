@@ -487,7 +487,8 @@ def test_catalog_vendors_never_reach_osv(pkg):
 def test_suggestion_only_names_resolve_typos_without_becoming_known():
     import vendor
     assert vendor.suggest("What happended to miscrosoft recently?") == "microsoft"
-    assert vendor.suggest("Is zom better or teems?") in ("zoom", "teams")
+    assert vendor.suggest("Is Slaack down?") == "slack"          # insertion typo
+    assert vendor.suggest("Is Zooom down?") == "zoom"
     assert not {"microsoft", "zoom", "teams", "slack"} & set(vendor.known_products())
 
 
@@ -501,3 +502,16 @@ def test_eol_states_past_and_future_against_today(monkeypatch):
     assert "Python 3.9: support ended 2025-10-31 (1 year ago, as of 2026-11-23)" in docs[0]["text"]
     docs, _ = L._eol("Is Python 3.10 still supported?", today=dt.date(2026, 10, 1))
     assert "Python 3.10: supported until 2026-10-31 (30 days left, as of 2026-10-01)" in docs[0]["text"]
+
+
+@pytest.mark.parametrize("q", [
+    "Is Stack Overflow down?", "What about tears of the kingdom update?",
+    "Is Snack safe?", "Read the terms of service", "Is Texas Instruments safe?",
+    "Should I tease the new build?", "Is Smack a good XMPP library?",
+])
+def test_english_words_near_slack_or_teams_get_no_suggestion(q):
+    """One substitution in a five-letter name scores 0.8, the general cutoff:
+    "stack" -> Slack and "tears" -> Teams (review, 2026-11-22). The four
+    suggestion-only names need a closer match."""
+    import vendor
+    assert vendor.suggest(q) not in vendor._SUGGEST_ONLY
