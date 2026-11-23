@@ -137,6 +137,14 @@ _ALIASES: Dict[str, str] = {
     # named no product and its quoted thread went ungated (live check,
     # 2026-11-22).
     "npm": "npm",
+    # Also missing from the catalog: "Any new CVEs for nginx?" and "Is Log4j
+    # still vulnerable?" named no product and quoted unrelated Reddit threads
+    # (2026-11-23 sweep). Bare "go" is an English word, so only "golang".
+    "nginx": "nginx",
+    "log4j": "log4j",
+    "log4j2": "log4j",
+    "log4shell": "log4j",
+    "golang": "go",
     "nodejs": "node.js",
     "k8s": "kubernetes",
     "vscode": "visual studio code",
@@ -304,6 +312,14 @@ def detect_vendors(query: str, catalog: Optional[Sequence[str]] = None,
         if re.search(rf"(?<![\w.-]){re.escape(alias)}(?![\w-])", low) and not overlaps(canon):
             found.append(VendorMatch(name=canon, matched=alias, via_alias=True))
             claimed.append(canon)
+
+    # "Which version of Go is the newest?": a capitalised "Go" after the first
+    # word is the language; "go" and a leading "Go ..." are the verb. The word
+    # before is lower-case or the question's first, and no capitalised word
+    # follows, so "OpenCode Go" and "Go Finder" stay other names.
+    if re.search(r"(?:^\w+|\b[a-z]+,?) Go(?![\w-])(?! [A-Z])", query) and not overlaps("go"):
+        found.append(VendorMatch(name="go", matched="Go", via_alias=True))
+        claimed.append("go")
 
     for name in sorted(catalog, key=len, reverse=True):
         if len(found) >= limit:

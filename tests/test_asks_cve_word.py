@@ -32,6 +32,8 @@ def test_cve_word_is_a_cve_question(q):
     "What is the latest Linux version?",
     "Latest Chrome version?",
     "What is the most recent Python release?",
+    "Is the latest Firefox stable?",
+    "Latest version of Chrome broke my bookmarks, which version fixed it?",
 ])
 def test_plain_latest_is_still_a_version_question(q):
     assert asks(q) == "version"
@@ -41,6 +43,8 @@ def test_plain_latest_is_still_a_version_question(q):
     "Latest critical bugs in PostgreSQL?",
     "Latest breaking changes in React?",
     "What are the newest known issues in Windows 11?",
+    "Did the latest Chrome update break extensions?",
+    "What broke printing in the latest Windows update?",
 ])
 def test_latest_bugs_or_changes_is_not_a_version_lookup(q):
     assert asks(q) != "version"

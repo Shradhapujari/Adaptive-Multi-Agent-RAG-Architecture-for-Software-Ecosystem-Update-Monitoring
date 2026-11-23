@@ -98,6 +98,7 @@ _VERSION_WORDS = re.compile(r"\b(latest|newest|most recent|version|which release
 _LATEST_NOT_VERSION = re.compile(
     r"\b(?:latest|newest|most recent)\s+(?:\w+\s+){0,2}?(?:bugs?|issues?|problems?|crash(?:es)?"
     r"|regressions?|(?:breaking )?changes|features|news)\b", re.I)
+_BREAK_WORDS = re.compile(r"\b(?:break(?:s|ing)?|broke(?:n)?|crash(?:es|ed|ing)?)\b", re.I)
 _FIX_WORDS = re.compile(r"\b(fix(?:ed)?|broke(?:n)?|bug|crash|issue|problem|safe to|should i|okay to|worth)\b", re.I)
 
 
@@ -114,8 +115,13 @@ def asks(question: str) -> str:
     if _DATE_WORDS.search(q) or extract_dates(q):
         return "date"
     cues = {w.lower() for w in _VERSION_WORDS.findall(q)}
-    if _LATEST_NOT_VERSION.search(q):
-        cues -= {"latest", "newest", "most recent"}
+    # "Did the latest Chrome update break extensions?" asks about breakage;
+    # "latest" only names the update. Routed as version it headlined a
+    # release number (2026-11-23 sweep). "...which version fixed it?" keeps
+    # its own "version" cue.
+    latest = {"latest", "newest", "most recent"}
+    if _LATEST_NOT_VERSION.search(q) or (cues <= latest and _BREAK_WORDS.search(q)):
+        cues -= latest
     # "Did the latest Fedora 44 update delete grub?" names its version after
     # "latest", so "latest" only describes it: the question is yes/no about 44,
     # not "which version is newest". Routed as version, it headlined Fedora 45
