@@ -32,12 +32,14 @@ pilot (older code: #191, #193, #194 merged after `9d12b84`).
 2b. **`MARAG_SYNTH_MODEL=llama3.1` — done, #198 (`6b7164f`).** `ollama ps` shows llama3.1 pinned "Forever"
    (`keep_alive -1`); Ollama logs `system_limited` with 2.5–4.6 GiB free, and mistral gets no
    reply in 120 s. With the default, `marag`'s answer is "NO ANSWER" whenever memory is short.
-   The run is pinned to `8e3ff42`, the #204 merge (moved from `6b7164f` by #202, then again):
-   #201's whole-word match and #204's kernel-preamble rule in `vendor.advisory_names_vendor`,
-   which `fetch_vendor_releases` runs for all three arms, so the eval drops the same
-   wrong-product advisories the app does ("rust: configfs" kernel CVEs no longer count as rust).
-   #200, #203 and the rest of #201 are console-only (`app_1.py`, KB `upstream`), and the
-   pilot's snapshot and synth checks are unaffected.
+   The run is pinned to `27656ba`, the #215 merge (moved from `6b7164f` by #202 and #206):
+   #201, #204, #212 and #215 change `vendor.advisory_names_vendor`, which `fetch_vendor_releases`
+   runs for all three arms, so the eval drops the wrong-product advisories the app does --
+   kernel "rust:" CVEs, npm packages, and products named as the platform ("X for Linux",
+   "Chrome on Android"; 51 of 584 live releasetrain rows). #200, #203, #209 and #210 are
+   console-only, and the pilot's snapshot and synth checks are unaffected. Night 1 first ran on
+   `8e3ff42` (`run_1795415581_922f6707656d`, 91 questions) and was restarted on `27656ba`
+   with a new snapshot, `corpus_snapshot_b1500_full_1123`; that first run is not quoted.
 3. **The machine stays awake.** The pilot record pass took 18.6 h instead of ~3 h: from 02:00 the
    Mac went into *Clamshell Sleep* on battery, and questions 10–19 took 37,600 s of wall clock.
    Run on AC power, lid open, every command wrapped in `caffeinate -dimsu`.
@@ -70,7 +72,8 @@ resume whose commit, corpus spec or `MARAG_*` settings moved (`resumed-across-ch
   plus `--resume`. The worktree and env must be identical every time.
 - The snapshot's `recorded_at` pins `MARAG_NOW` to the first night, so every night answers
   "today" as the same date.
-- Record pass ≈ 5 nights of ~10 h (or ~2 days continuous). Strict pass ≈ 2 nights.
+- Record pass ≈ 35 h at night 1's measured ~1.4 min/question (≈ 4 nights of ~10 h). Strict pass
+  a few hours (pilot 2's strict medians were ~2 s per arm).
 
 ## Commands
 
@@ -82,11 +85,11 @@ export WT=/Users/shradha/marag-b1500-full
 export SNAP=$REPO/data/corpus_snapshot_b1500_full_MMDD
 ```
 
-Worktree, once (pinned to `8e3ff42`, the #204 merge; the pilot 2 worktree, moved there with
-`git -C $WT checkout --detach 8e3ff42`):
+Worktree, once (pinned to `27656ba`, the #215 merge; the pilot 2 worktree, moved there with
+`git -C $WT checkout --detach 27656ba`):
 
 ```bash
-git -C $REPO fetch origin && git -C $REPO worktree add --detach $WT 8e3ff42
+git -C $REPO fetch origin && git -C $REPO worktree add --detach $WT 27656ba
 ```
 
 Record pass, night 1:
