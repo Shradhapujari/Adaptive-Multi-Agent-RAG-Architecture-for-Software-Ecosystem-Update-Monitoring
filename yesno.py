@@ -357,7 +357,7 @@ def top_comment(thread: dict) -> Optional[dict]:
 
 
 def find_thread(question: str, pool: int = 100, timeout: int = 20,
-                scope=None, must_mention=()) -> Optional[dict]:
+                scope=None, must_mention=(), must_name=()) -> Optional[dict]:
     """The lake's question thread that best matches `question`, comments and all.
 
     The questions feed is where yes/no questions live and it returns each
@@ -385,6 +385,12 @@ def find_thread(question: str, pool: int = 100, timeout: int = 20,
     own subject words in its title or its body -- the body matters, because
     "fedora update" is a bare title whose question ("delete", "kernel",
     "grub") lives in `author_description`. No subject word, no thread.
+
+    `must_name` asks the winner to name the product itself, as a whole word.
+    A subreddit match is not enough: r/linux's "SuperTux v0.7.0.1 ... released:
+    Security patch" (a game) passed both tests above and was quoted as the
+    answer to "Any critical security vulnerabilities in Linux this month?"
+    (live check, 2026-11-22).
     """
     import requests
     try:
@@ -412,6 +418,12 @@ def find_thread(question: str, pool: int = 100, timeout: int = 20,
         text = (str(best[0].get("title", "")) + " "
                 + str(best[0].get("author_description") or "")).lower()
         if not any(str(w).lower() in text for w in must_mention):
+            return None
+    if must_name:
+        text = (str(best[0].get("title", "")) + " "
+                + str(best[0].get("author_description") or "")).lower()
+        if not any(re.search(rf"(?<![\w-]){re.escape(str(n).lower())}(?![\w-])", text)
+                   for n in must_name):
             return None
     return best[0]
 

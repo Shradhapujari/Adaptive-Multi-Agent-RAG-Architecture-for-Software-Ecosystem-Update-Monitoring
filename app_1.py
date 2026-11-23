@@ -1304,7 +1304,13 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
             query,
             scope=lambda rows: vendor.filter_community(rows, g.vendors,
                                                        terms=g.terms),
-            must_mention=subject)
+            must_mention=subject,
+            # The thread has to name the product, not just sit in its
+            # subreddit (SuperTux in r/linux, see `yesno.find_thread`).
+            must_name=sorted({n for v in g.vendors
+                              for n in (v.name, v.matched,
+                                        *(a for a, c in vendor._ALIASES.items()
+                                          if c == v.name))}))
     if thread is not None:
         results["thread"] = thread
         results["top_comment"] = yesno.top_comment(thread)
