@@ -197,8 +197,15 @@ _SENT_END = re.compile(r"(?<=[.!?])\s+(?=[\"\u201c\'(]?[A-Z])")
 
 
 def _one_sentence(text: str) -> str:
-    """The first sentence, citations intact. The rule says one; models drift."""
-    return _SENT_END.split((text or "").strip(), 1)[0].strip()
+    """The first sentence, citations intact. The rule says one; models drift.
+    Never cut inside a “quote”: a quoted news snippet is title. body, and the
+    cut headlined the title and dropped the cause (Microsoft outage, 2026-11-23)."""
+    t = (text or "").strip()
+    for m in _SENT_END.finditer(t):
+        head = t[:m.start()]
+        if head.count("“") <= head.count("”"):
+            return head.strip()
+    return t
 
 
 def split_summary(text: str):
@@ -792,8 +799,7 @@ def deterministic_paragraph(query: str, evidence: List[Evidence],
         bare = lambda t: re.sub(r"\[/?untrusted[^\]]*\]", "", t)  # noqa: E731
         said = [f"{e.label.split(' - ')[0]} says “{_clean(bare(e.detail or e.title), 200)}” [{e.label}]."
                 for e in web[:3]]
-        return " ".join(said + ["Every statement above is drawn from the bracketed "
-                                "sources; nothing outside them was used."])
+        return " ".join(said)
 
     scope = f" for {window_note}" if window_note else ""
     parts: List[str] = []
@@ -841,8 +847,6 @@ def deterministic_paragraph(query: str, evidence: List[Evidence],
         parts.append(f"Community coverage adds {len(com)} post(s){mood}: "
                      f"{listed(com)}.")
 
-    parts.append("Every statement above is drawn from the bracketed sources; "
-                 "nothing outside them was used.")
     return " ".join(parts)
 
 
