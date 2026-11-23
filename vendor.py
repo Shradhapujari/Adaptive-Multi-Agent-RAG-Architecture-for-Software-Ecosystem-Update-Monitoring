@@ -562,6 +562,14 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     # (live check, 2026-11-22).
     if text.lower().startswith("in the linux kernel, the following vulnerability"):
         return want in ("linux", "linux kernel", "kernel")
+    # For Linux itself, a CVE has to say "Linux kernel". The feed files
+    # "Linux Foundation Magma", "TeamViewer ... for Linux", hMailServer's Linux
+    # builds and EilikO Linux robot firmware under it too (9 of 21 rows on a
+    # live check, 2026-11-22) and each one added to the Patch-now count.
+    # ponytail: a distro-level CVE that never says "Linux kernel" is dropped
+    # here; loosen if one turns up.
+    if want in ("linux", "linux kernel", "kernel"):
+        return "linux kernel" in text.lower()
 
     m = _VERSION_MARKER.search(text)
     # The marker's own sentence, or the first one when there is no marker.
