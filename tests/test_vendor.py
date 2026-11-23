@@ -327,6 +327,15 @@ def test_generic_catalogue_words_do_not_crowd_out_the_product(tmp_path):
     assert [v.name for v in detect_vendors(q, catalog)] == ["firefox"]
 
 
+def test_printing_is_not_a_second_product():
+    # "What broke printing in the latest Windows update?" grounded to
+    # ["printing", "windows"], so Chrome's and Oracle's printing CVEs passed the
+    # subject screen and made Windows "Patch now" (sweep 5, 2026-11-23).
+    cat = ["windows", "printing"]
+    assert [v.name for v in detect_vendors(
+        "What broke printing in the latest Windows update?", cat)] == ["windows"]
+
+
 def test_a_component_named_in_a_known_product_is_not_a_second_product():
     """"Any WebRTC vulnerabilities in Chrome?" asked about webrtc too, which let
     a Mozilla WebRTC advisory answer a Chrome question (2026-11-19)."""

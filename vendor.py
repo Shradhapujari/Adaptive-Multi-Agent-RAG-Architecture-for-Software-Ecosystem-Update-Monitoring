@@ -338,6 +338,16 @@ def _drop_makers(low: str, found: List[VendorMatch]) -> List[VendorMatch]:
     return [v for v in found if not maker_of(v)]
 
 
+# Catalogue names that are a feature of whatever product they are asked about,
+# however the question is worded: "What broke printing in the latest Windows
+# update?" and "Windows 11 update broke printing?" asked about a product called
+# printing too, so Chrome's and Oracle's printing CVEs counted toward Windows'
+# "Patch now" (sweep 5, 2026-11-23). As a part, NVD is still searched for
+# "windows printing" and the community filter still keeps "... printing issues".
+# ponytail: a hand list; extend when another feature word turns up as a product.
+_GENERIC_PARTS = frozenset({"printing"})
+
+
 def _drop_components(low: str, found: List[VendorMatch]) -> List[VendorMatch]:
     """"Any WebRTC vulnerabilities in Chrome?": WebRTC is a catalogue name, but
     here it is a part of Chrome, and as a second asked product it let a Mozilla
@@ -368,8 +378,8 @@ def _drop_components(low: str, found: List[VendorMatch]) -> List[VendorMatch]:
                     # adjacency also took "Debian installer", "Docker image"
                     # and "Linux Mint" (11 of 1206 benchmark questions).
                     or re.search(rf"{bm}\s+{am}\s+(?:vulnerabilit|advisor|cve|exploit|flaw|security)", low))
-        return next((b for b in found if b is not a
-                     and b.name.split()[-1] in known and part_of(b)), None)
+        return next((b for b in found if b is not a and b.name.split()[-1] in known
+                     and (a.name in _GENERIC_PARTS or part_of(b))), None)
     # The dropped name is kept on its owner as a part: retrieval searches
     # "chrome webrtc", which finds Chrome's WebRTC advisories and not Mozilla's.
     parts = {}
@@ -849,8 +859,12 @@ def filter_community(rows: Iterable[Dict], vendors: Sequence[VendorMatch],
     for r in rows:
         sub = subreddit_vendor(r.get("subreddit", ""))
         title = str(r.get("title", "")).lower()
+        # A generic part in the title counts as the product: "Microsoft says
+        # November security updates cause printing issues" never says Windows.
         if (sub and sub in wanted) or any(
-                re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])", title) for w in wanted):
+                re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])", title)
+                for w in wanted | {p for v in vendors for p in v.parts
+                                   if p in _GENERIC_PARTS}):
             out.append(r)
 
     return [r for r in out if on_subject(r)] if pats else out
