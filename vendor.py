@@ -556,6 +556,12 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
                     ("notes", "versionReleaseNotes")).strip()
     if not text:
         return True                      # nothing to read: not evidence of a mismatch
+    # The kernel's own CVEs name their product in the preamble; what follows
+    # is a subsystem ("rust: configfs: ...", "btrfs: ..."), not another
+    # product. "Is it safe to update rust?" said Patch now on two of them
+    # (live check, 2026-11-22).
+    if text.lower().startswith("in the linux kernel, the following vulnerability"):
+        return want in ("linux", "linux kernel", "kernel")
 
     m = _VERSION_MARKER.search(text)
     # The marker's own sentence, or the first one when there is no marker.
