@@ -23,7 +23,7 @@ import answer_agent  # noqa: E402
 import guardrail  # noqa: E402
 from eval_harness.benchmarks import is_abstention  # noqa: E402
 from answer_agent import (  # noqa: E402
-    build_cited_prompt, collect_evidence, deterministic_paragraph, present_answer,
+    Evidence, build_cited_prompt, collect_evidence, deterministic_paragraph, present_answer,
 )
 
 RESULTS = {
@@ -665,6 +665,15 @@ def test_model_answer_is_trimmed_to_one_sentence(monkeypatch):
     assert answer_agent._one_sentence(trailing) == trailing
 
 
+def test_one_sentence_never_cuts_inside_a_quote():
+    """"Why did the Microsoft outage happen?" (2026-11-23): the news quote is
+    title. body, and cutting at the title's full stop headlined the title with
+    an open quote and dropped the cause the body gave."""
+    q = ("News says “Microsoft explains how its outage happened. A defect "
+         "installed in July was triggered…” [News - El Cronista, 2026-11-23].")
+    assert answer_agent._one_sentence(q + " Yahoo says “A bug.” [Y].") == q
+
+
 def test_top_comment_below_the_floor_does_not_become_the_answer():
     """A 1-point comment is its author's own upvote and nobody else's.
 
@@ -937,3 +946,12 @@ def test_update_question_prompt_keeps_the_update_framing(monkeypatch):
 def test_live_kind_none_builds_the_same_prompt_as_before():
     ev = collect_evidence(RESULTS)
     assert build_cited_prompt("q", ev) == build_cited_prompt("q", ev, live_kind=None)
+
+
+def test_no_provenance_footer_bullet():
+    """"Every statement above is drawn from..." rendered as its own bullet
+    under What the sources say -- a line about the answer, not a source."""
+    web = [Evidence(label="News - X", kind="web", title="t", detail="Outage.")]
+    rel = [Evidence(label="R1", kind="release", title="v1")]
+    for ev in (web, rel):
+        assert "outside them" not in deterministic_paragraph("q", ev)

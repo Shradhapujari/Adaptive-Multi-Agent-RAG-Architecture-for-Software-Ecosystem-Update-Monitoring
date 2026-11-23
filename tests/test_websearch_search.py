@@ -75,3 +75,11 @@ def test_web_doc_text_is_normalised():
     CVE id split by one was invisible to the regex."""
     d = websearch._to_doc(0, {"title": "t", "body": "fixes CVE\u200b-2026-1234", "href": "https://x.org"})
     assert "\u200b" not in d["text"] and d["cves"] == ["CVE-2026-1234"]
+
+
+def test_body_that_repeats_the_title_is_not_prefixed_with_it():
+    """The Independent's news body opened with its own title, so the quote
+    read the headline twice (Microsoft outage, 2026-11-23)."""
+    t = "What caused the global Microsoft outage? Why Outlook went down"
+    d = websearch._to_doc(0, {"title": t, "body": t + " - and how", "href": "https://x.org"})
+    assert d["text"].count("What caused") == 1
