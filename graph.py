@@ -86,9 +86,18 @@ class State:
 # ───────────────────────────────────────────────────────────── the gate
 
 _CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
-_CVE_WORDS = re.compile(r"\bCVE-\d{4}-\d{4,7}\b|\b(?:vulnerab|exploit|security (?:fix|patch|update))", re.I)
+# A bare "CVE" counts too: "What is the latest Linux CVE?" read as a version
+# lookup ("latest") and headlined linux v7.3.0 (user report, 2026-11-23).
+_CVE_WORDS = re.compile(r"\bCVE(?:-\d{4}-\d{4,7}|s)?\b|\b(?:vulnerab|exploit|zero[- ]?days?\b"
+                        r"|0-?days?\b|advisor(?:y|ies)\b|patch tuesday"
+                        r"|security (?:fix|patch|update|bulletin))", re.I)
 _DATE_WORDS = re.compile(r"\b(when|release date|released|coming out|eta|how long)\b", re.I)
-_VERSION_WORDS = re.compile(r"\b(latest|newest|version|which release|what release|v\d)\b", re.I)
+_VERSION_WORDS = re.compile(r"\b(latest|newest|most recent|version|which release|what release|v\d)\b", re.I)
+# "Latest critical bugs in PostgreSQL?" asks for the bugs, not the newest
+# release; routed as version it headlined a release number.
+_LATEST_NOT_VERSION = re.compile(
+    r"\b(?:latest|newest|most recent)\s+(?:\w+\s+){0,2}?(?:bugs?|issues?|problems?|crash(?:es)?"
+    r"|regressions?|(?:breaking )?changes|features|news)\b", re.I)
 _FIX_WORDS = re.compile(r"\b(fix(?:ed)?|broke(?:n)?|bug|crash|issue|problem|safe to|should i|okay to|worth)\b", re.I)
 
 
@@ -105,14 +114,16 @@ def asks(question: str) -> str:
     if _DATE_WORDS.search(q) or extract_dates(q):
         return "date"
     cues = {w.lower() for w in _VERSION_WORDS.findall(q)}
+    if _LATEST_NOT_VERSION.search(q):
+        cues -= {"latest", "newest", "most recent"}
     # "Did the latest Fedora 44 update delete grub?" names its version after
     # "latest", so "latest" only describes it: the question is yes/no about 44,
     # not "which version is newest". Routed as version, it headlined Fedora 45
     # (2026-11-21 demo sweep). A version named *before* it -- "Is Firefox
     # v148 the latest release?" -- is still asking which is newest.
     named = extract_versions(q, multipart_only=False)
-    first = re.search(r"\b(?:latest|newest)\b", q, re.I)
-    named_yesno = (cues <= {"latest", "newest"} and named and first
+    first = re.search(r"\b(?:latest|newest|most recent)\b", q, re.I)
+    named_yesno = (cues <= {"latest", "newest", "most recent"} and named and first
                    and q.find(named[0], first.end()) != -1
                    and looks_yesno(q, is_title=True))
     if cues and not named_yesno:

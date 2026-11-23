@@ -342,6 +342,17 @@ def summary_line(evidence) -> str:
     return out
 
 
+def newest_advisory_line(evidence) -> str:
+    """"Newest: CVE-X (date) -- what was wrong." for "What is the latest Linux
+    CVE?", which the count in `summary_line` does not answer. The newest dated
+    row with a CVE id; "" when there is none."""
+    rows = [r for r in details(evidence)["security"] if r["CVE"] != "—" and r["Date"]]
+    if not rows:
+        return ""
+    r = max(rows, key=lambda r: r["Date"])
+    return f"Newest: {r['CVE']} ({r['Date'][:10]}) — {r['What was wrong']}"
+
+
 @dataclass
 class Evidence:
     """One retrieved item, in the shape the presenter cites it by."""
