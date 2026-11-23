@@ -574,7 +574,11 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     # The whole name, not a fragment of another one: "falcon-rust",
     # "django-page-cms", "util-linux", "Rustrak" and "github.com/octo-sts" each
     # contain the vendor's name and are not the vendor (sweep, 2026-11-21).
-    return re.search(rf"(?<![\w-]){re.escape(want)}(?![\w-]|\.\w)", span.lower()) is not None
+    # "GitHub Action(s)" names someone's CI workflow or a third-party action
+    # (JetBrains Junie GitHub Action), not GitHub; GitHub's own runner stays.
+    # A path component (".github/workflows") is not the product either.
+    return re.search(rf"(?<![\w./-]){re.escape(want)}(?![\w/-]|\.\w)"
+                     r"(?!\s+actions?\b(?!\s+runner))", span.lower()) is not None
 
 
 def classify_record(row: Dict) -> str:
