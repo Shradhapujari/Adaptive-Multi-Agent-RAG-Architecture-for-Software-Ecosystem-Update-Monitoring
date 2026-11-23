@@ -278,3 +278,34 @@ def test_rule_based_answer_quotes_the_live_source():
     text = answer_agent.deterministic_paragraph("Is GitHub down?", ev)
     assert "All Systems Operational" in text and "[Status page - githubstatus.com]" in text
     assert "No release notes matched" not in text and "untrusted" not in text
+
+
+# ─────────────────────────────────────────────── general software questions
+
+@pytest.mark.parametrize("q", ["What happened to Microsoft recently?", "What is Kubernetes?"])
+def test_general_questions_need_web_search(q):
+    assert "Web search" in app_1._needs_live_note(q, live=False)
+    assert app_1._needs_live_note(q, live=True) is None
+
+
+def test_update_question_is_not_sent_to_web_search():
+    assert app_1._needs_live_note("Is it safe to update Chrome?", live=False) is None
+
+
+@pytest.mark.parametrize("q,want", [("Is zoom better or teams?", "compare"),
+                                    ("What happened to Microsoft recently?", "news")])
+def test_general_question_gets_no_update_verdict(empty_lake, monkeypatch, q, want):
+    """Before this, both read an act/hold verdict off the vendor's advisories."""
+    adv = {"title": "Zoom Workplace CVE-2026-9998", "notes": "CVE-2026-9998 in Zoom and Microsoft Teams",
+           "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-9998", "is_cve": True, "product": "zoom"}
+    monkeypatch.setattr(app_1, "terminal_sources",
+                        lambda *a, **k: ({"community": [], "releases": [], "cve": [adv]}, []))
+    r = app_1.run_pipeline(q, show_steps=False, web_fallback=True)
+    assert r["live"]["kind"] == want and r["decision"] is None
+
+
+def test_productless_general_question_is_declined_not_sent_to_web_search():
+    """Turning web search on would not help: the off-topic gate declines it then too."""
+    q = "What is a race condition?"
+    assert app_1._needs_live_note(q, live=False) is None
+    assert app_1._off_topic_note(q, live=True) is not None

@@ -429,6 +429,12 @@ def suggest(query: str, catalog: Optional[Sequence[str]] = None) -> Optional[str
 _PRETTY = {"node.js": "Node.js", "nodejs": "Node.js", "macos": "macOS", "ios": "iOS",
            "postgresql": "PostgreSQL", "openssl": "OpenSSL", "gpt": "GPT"}
 
+# Typo targets that are not `known_products`: a known product is exempt from
+# detect_vendors' word-gap drop, so adding "microsoft" there would undo
+# d60eeef ("Microsoft Edge" is Edge). 0 bogus suggestions over the 168
+# no-product benchmark_500 questions with these added (2026-11-21).
+_SUGGEST_ONLY = ("microsoft", "zoom", "teams", "slack")
+
 
 def pretty(name: str) -> str:
     return _PRETTY.get(name, name[:1].upper() + name[1:])
@@ -450,7 +456,7 @@ def _closest(query: str, catalog: Optional[Sequence[str]] = None,
     """(misspelt word as found, product) for `suggest` and `respell`."""
     from keywords import QUESTION_STOPWORDS
     if catalog is None:
-        catalog = known_products()
+        catalog = list(known_products()) + list(_SUGGEST_ONLY)
     canon = {n: n for n in catalog if len(n) >= 3}
     canon.update({a: c for a, c in _ALIASES.items() if " " not in a})
     names = list(canon)

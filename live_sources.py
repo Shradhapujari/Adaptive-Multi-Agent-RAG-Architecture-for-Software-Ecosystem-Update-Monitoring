@@ -24,12 +24,15 @@ from functools import lru_cache
 from typing import List, Optional, Sequence, Tuple
 
 import graph
+import intent
 import websearch
 
-KINDS = ("package_safety", "down_now", "incident", "eol", "compare", "compat", "howto")
+KINDS = ("package_safety", "down_now", "incident", "eol", "compare", "compat", "howto",
+         "news", "general")
 KIND_LABEL = {"package_safety": "Package safety", "down_now": "Is it down",
               "incident": "Incident", "eol": "End of life", "compare": "Comparison",
-              "compat": "Compatibility", "howto": "How-to"}
+              "compat": "Compatibility", "howto": "How-to", "news": "News",
+              "general": "General"}
 
 # Statuspage hosts verified 2026-11-19 (/api/v2/summary.json answered).
 STATUS_HOSTS = {
@@ -51,7 +54,8 @@ _I = re.I
 # talks about an update or a security fix, in which case the verdict stays and
 # the live docs are extra context. "Does Chrome 131 fix CVE-2024-1234?" reads
 # as a how-to ("fix") and lost its "Patch now" before this (review, 2026-11-19).
-ANSWER_ONLY = frozenset({"down_now", "incident", "eol", "compare", "compat", "howto"})
+ANSWER_ONLY = frozenset({"down_now", "incident", "eol", "compare", "compat", "howto",
+                         "news", "general"})
 _UPDATE_CUE = re.compile(r"\b(?:updat\w*|upgrad\w*|patch\w*|cves?|cve-\d+-\d+|vulnerab\w*"
                          r"|exploit\w*|security|safe|releases?|released)\b", re.I)
 _PKG_CUE = re.compile(r"\b(?:package|library|module|npm|pip|pypi)\b", _I)
@@ -67,6 +71,22 @@ _A_OR_B = re.compile(r"\b[A-Z][\w.+#-]* or [A-Z][\w.+#-]*")
 _COMPAT = re.compile(r"\bcompatib\w*|\bworks? with\b|\bdoes \S+(?: \S+)? support\b", _I)
 _HOWTO = re.compile(r"\bhow (?:do|can|to|should)\b|\berror\b|\bfix\b|\bexception\b|\bfailed\b", _I)
 _ERRNO = re.compile(r"\bE[A-Z]{3,}\b")          # EACCES, ENOENT: case-sensitive
+# "Is zoom better or teams?": lowercase names slip past _A_OR_B.
+_BETTER_OR = re.compile(r"\bbetter\b[^?]*\bor\b|\bor\b[^?]*\bbetter\b", _I)
+# News and general questions need a positive cue: "no update cue" alone sent
+# 145 of the 500 benchmark questions here, real update reports among them
+# ("iOS 26.3 WiFi/RAM issues?"); these cues send about 20 (2026-11-21).
+# Bare "recently"/"lately" are left out: "Recent Chrome issues?" is a bug report.
+_NEWS = re.compile(r"\b(?:what happened|happening|going on with|news|this week)\b", _I)
+_GENERAL = re.compile(r"^\s*(?:what (?:is|are)|what's|how does|explain|why (?:does|is))\b", _I)
+# A security word, a breakage word or a version/build number keeps the feed
+# verdict even without an intent cue: "Was Chrome hacked recently?", "Why is
+# Firefox crashing?", "What is Chrome 131?" (review, 2026-11-22). Losing a
+# verdict costs more than an update answer to a general question.
+_ISSUE_CUE = re.compile(r"\b(?:hack\w*|0[- ]?days?|bugs?|backdoor\w*|malicious|malware|infect\w*"
+                        r"|flag\w*|breach\w*|leak\w*|password\w*|issues?|problems?|broken"
+                        r"|break\w*|crash\w*|slow\w*|glitch\w*|regression\w*|freez\w*|fail\w*)\b"
+                        r"|\b\d+(?:\.\d+)*\b|\b\d{2}H\d\b", _I)
 
 _VERSION = re.compile(r"\bv?(\d+(?:\.\d+)+)\b")
 _NAME = r"([a-z0-9][\w.-]*[a-z0-9]|[a-z0-9])"
@@ -132,12 +152,20 @@ def kind(query: str, vendors: Sequence[str] = ()) -> Optional[str]:
         return "incident"
     if _EOL.search(q):
         return "eol"
-    if graph._COMPARE_RE.search(q) or _CHOOSE.search(q) or _A_OR_B.search(q):
+    if (graph._COMPARE_RE.search(q) or _CHOOSE.search(q) or _A_OR_B.search(q)
+            or _BETTER_OR.search(q)):
         return "compare"
     if _COMPAT.search(q):
         return "compat"
     if _HOWTO.search(q) or _ERRNO.search(q):
         return "howto"
+    # Anything the classifier calls an update question keeps the feed path.
+    if _UPDATE_CUE.search(q) or _ISSUE_CUE.search(q) or intent.classify(q).confident:
+        return None
+    if _NEWS.search(q):
+        return "news"
+    if _GENERAL.search(q):
+        return "general"
     return None
 
 
@@ -195,7 +223,7 @@ def _down_now(query: str):
     host = STATUS_HOSTS[product]
     data, err = _get_json(f"https://{host}/api/v2/summary.json")
     if err or not isinstance(data, dict):
-        docs, meta = _incident(query)
+        docs, meta = _news(query)
         meta.update(kind="down_now", error=f"{_STATUS_NAME[product]} status page: {err or 'bad reply'}"
                     + (f"; {meta['error']}" if meta["error"] else ""))
         return docs, meta
@@ -212,16 +240,16 @@ def _down_now(query: str):
     return docs, _meta("down_now", f"{name} status page", docs, None, True)
 
 
-def _incident(query: str):
+def _news(query: str, kind_: str = "incident"):
     hits, err = websearch.search(query, timelimit="m", news=True)
     if hits:
         docs = _web_docs(hits, news=True)
-        return docs, _meta("incident", "DuckDuckGo news, last month", docs, None, False)
+        return docs, _meta(kind_, "DuckDuckGo news, last month", docs, None, False)
     hits, err2 = websearch.search(query, timelimit="m")
     docs = _web_docs(hits, news=False)
     # An error only when nothing came back: a failed news search the text
     # search made up for isn't worth a "search failed" beside the results.
-    return docs, _meta("incident", "DuckDuckGo, last month", docs,
+    return docs, _meta(kind_, "DuckDuckGo, last month", docs,
                        None if docs else (err2 or err), False)
 
 
@@ -313,8 +341,8 @@ def fetch(kind_: str, query: str) -> Tuple[List[dict], dict]:
     error, resolved (the product was found by name in a structured source)."""
     if kind_ == "down_now":
         return _down_now(query)
-    if kind_ == "incident":
-        return _incident(query)
+    if kind_ in ("incident", "news"):
+        return _news(query, kind_)
     if kind_ == "eol":
         return _eol(query)
     if kind_ == "compat":
