@@ -5,11 +5,17 @@ import pytest
 import vendor
 
 NOT_GITHUB = [
-    # CVE-2026-129840 (no version marker: whole text is read)
+    # CVE-2026-129840, full NVD text (no version marker: whole text is read).
+    # Its last sentence names GitHub Pages; the trimmed copy here hid that
+    # and the row reached "Patch now" again (sweep, 2026-11-23).
     "In the nrfconnect/ncs-zigbee repository, the GitHub Actions workflow "
     ".github/workflows/build_documentation.yml used the pull_request_target trigger "
     "while checking out and executing untrusted pull request code. This allowed a "
-    "pull request from a fork to run attacker-controlled code with a write-scoped GITHUB_TOKEN.",
+    "pull request from a fork to run attacker-controlled code in the base repository "
+    "context with a write-scoped GITHUB_TOKEN (contents: write, pages: write, "
+    "pull-requests: write), enabling remote code execution in CI, token "
+    "exfiltration, and unauthorized modification of repository content and GitHub "
+    "Pages. The workflow was disabled and then rewritten to remove the issue.",
     # CVE-2026-133630
     "The flowintel Docker build workflow used the GitHub Actions checkout action with "
     "default credential persistence, causing the job authentication token to be written "
