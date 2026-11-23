@@ -684,6 +684,12 @@ def describe_record(row: Dict) -> str:
 
     cve = advisory_id(row)
     head = cve or f"{product} advisory"
+    # The feed's version field on a CVE row is often junk ("linux 6.885580.0",
+    # "309.784531.0"); the CVE is real, so keep it and drop only the version.
+    # ponytail: a second dotted component >= 1000 is never a release (calver
+    # has YYYY first, Chrome's big number is third); revisit if one turns up.
+    if re.match(r"\d+\.\d{4,}(?:\.|$)", version):
+        version = ""
     return f"{head} (affects {product} {version})" if version else head
 
 

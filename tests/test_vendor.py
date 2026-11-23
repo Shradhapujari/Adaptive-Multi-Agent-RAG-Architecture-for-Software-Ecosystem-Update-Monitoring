@@ -243,7 +243,11 @@ def test_a_term_still_matches_its_plural():
 def test_advisory_is_named_by_its_cve_not_its_version_string():
     # "Linux v25.642087.0" invites the reader to believe a version by that
     # name shipped. It did not; that is an NVD affected-version field.
-    assert describe_record(ADVISORY) == "CVE-2026-80688 (affects Linux 25.642087.0)"
+    # The affected-version field is junk here (second component 642087), so
+    # it is not printed at all; a plausible one still is.
+    assert describe_record(ADVISORY) == "CVE-2026-80688"
+    assert describe_record({**ADVISORY, "version": "7.2.0"}) == "CVE-2026-80688 (affects Linux 7.2.0)"
+    assert describe_record({**ADVISORY, "version": "153.0.8010.52"}).endswith("(affects Linux 153.0.8010.52)")
 
 
 def test_release_is_named_by_its_version():
