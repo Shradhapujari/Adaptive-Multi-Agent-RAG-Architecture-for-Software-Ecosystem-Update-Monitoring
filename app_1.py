@@ -1414,6 +1414,14 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # down?" read "Patch now" off a feed advisory), or a package OSV cleared.
     if (results.get("live") or {}).get("answer_only"):
         results["decision"] = None
+    # Same with web search off: "Which is more stable, Teams or Zoom?" read
+    # "Patch now: 5 advisories ... I cannot find that information" (sweep,
+    # 2026-11-22). A comparison or how-to has no patch verdict either way.
+    elif live_kind is None:
+        k = live_sources.kind(query, g.vendor_names)
+        if k not in (None, "package_safety") and live_sources.answer_only(k, query):
+            results["decision"] = None
+            results["verdictless_kind"] = k
     # GR-2 fires only when the local lake was ABSENT on a *healthy* fetch: the
     # documents came back and none was about the asked product. A degraded
     # fetch is the rewrite-retry case, not a web-search case, and a verdict that
@@ -2243,6 +2251,17 @@ def _tab_short(results: dict, presented=None) -> None:
             st.caption(f"Also: {icon} {label} — {dec.get('rationale') or ''}")
         return
     line = _answer_line(results, presented.text) if presented is not None else ""
+    # Before the advisory-composed headline below: for "Which is more stable,
+    # Teams or Zoom?" that read "Recent updates fixed 4 security bug(s),
+    # including the ... Zoom WordPress plugin" (live, 2026-11-23).
+    if not dec and results.get("verdictless_kind"):
+        import live_sources
+        k = results["verdictless_kind"]
+        st.markdown(f"### {line or 'See the sources below'}")
+        st.caption(f"{live_sources.KIND_LABEL.get(k, k)} question: no patch verdict. Turn on "
+                   "**Web search for questions the feeds can't answer** in Settings to "
+                   "check a live source.")
+        return
     # Under Patch now too: the model's first sentence there was a denial one
     # run and a hedge the next ("...do not indicate these are critical or
     # unpatched", 2026-11-12), each printed as the answer under a red badge.

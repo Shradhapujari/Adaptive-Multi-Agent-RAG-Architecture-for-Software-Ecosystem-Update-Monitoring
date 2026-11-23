@@ -319,3 +319,24 @@ def test_feed_tiles_hidden_when_the_live_source_is_the_answer():
     assert not app_1._show_feed_tiles({"grounding": g, "live": {"answer_only": True}})
     assert app_1._show_feed_tiles({"grounding": g, "live": {"answer_only": False}})
     assert not app_1._show_feed_tiles({"grounding": type("G", (), {"vendors": []})()})
+
+
+def test_comparison_shows_no_verdict_with_web_off(empty_lake, monkeypatch):
+    """Sweep 2026-11-22: "Which is more stable, Teams or Zoom?" read "Patch now:
+    5 advisories ... I cannot find that information" with web search off."""
+    adv = {"title": "Zoom CVE-2026-1111", "notes": "CVE-2026-1111 in Zoom Workplace for Windows",
+           "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-1111", "is_cve": True, "product": "zoom"}
+    monkeypatch.setattr(app_1, "terminal_sources",
+                        lambda *a, **k: ({"community": [], "releases": [], "cve": [adv]}, []))
+    r = app_1.run_pipeline("Which is more stable, Teams or Zoom?", show_steps=False, web_fallback=False)
+    assert r["live"] is None and r["decision"] is None
+    assert r["verdictless_kind"] == "compare"
+
+
+def test_cve_question_keeps_its_verdict_with_web_off(empty_lake, monkeypatch):
+    adv = {"title": "Chrome CVE-2024-1234", "notes": "CVE-2024-1234 use after free in Google Chrome",
+           "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-1234", "is_cve": True, "product": "chrome"}
+    monkeypatch.setattr(app_1, "terminal_sources",
+                        lambda *a, **k: ({"community": [], "releases": [], "cve": [adv]}, []))
+    r = app_1.run_pipeline("Does Chrome 131 fix CVE-2024-1234?", show_steps=False, web_fallback=False)
+    assert r["decision"] is not None
