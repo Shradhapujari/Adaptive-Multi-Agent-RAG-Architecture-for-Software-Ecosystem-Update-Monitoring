@@ -117,3 +117,15 @@ def test_a_name_fragment_is_not_the_vendor(text, name, about):
 def test_a_mozilla_cve_naming_the_product_in_its_second_sentence_is_kept(text):
     """Regression from #201: no version marker, product in sentence two -> was dropped."""
     assert advisory_names_vendor({"notes": text}, "firefox") is True
+
+
+@pytest.mark.parametrize("text,about", [
+    ("In the Linux kernel, the following vulnerability has been resolved: nvme-tcp: check the data direction", True),
+    ("Linux Kernel through 6.1 allows a local attacker to escalate privileges.", True),
+    ("A weakness has been identified in Linux Foundation Magma up to 1.9.0.", False),
+    ("TeamViewer Full Client and Host for Linux prior version 15.82 contains an improper path validation.", False),
+    ("Missing network timeouts in the Linux builds of Progressive Robot hMailServer 6.3.0 through 6.3.5", False),
+    ("Out-of-Bounds Write Vulnerability in Hitachi Dynamic Link Manager for Linux.", False),
+])
+def test_a_linux_advisory_has_to_say_linux_kernel(text, about):
+    assert advisory_names_vendor({"notes": text}, "linux") is about
