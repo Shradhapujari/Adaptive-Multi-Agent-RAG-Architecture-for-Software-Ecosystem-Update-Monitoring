@@ -133,6 +133,10 @@ _ALIASES: Dict[str, str] = {
     "gcloud": "google cloud",
     "postgres": "postgresql",
     "node": "node.js",
+    # Not in releasetrain's catalog, so "How do I fix EACCES on npm install?"
+    # named no product and its quoted thread went ungated (live check,
+    # 2026-11-22).
+    "npm": "npm",
     "nodejs": "node.js",
     "k8s": "kubernetes",
     "vscode": "visual studio code",
@@ -577,8 +581,13 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     # "GitHub Action(s)" names someone's CI workflow or a third-party action
     # (JetBrains Junie GitHub Action), not GitHub; GitHub's own runner stays.
     # A path component (".github/workflows") is not the product either.
-    return re.search(rf"(?<![\w./-]){re.escape(want)}(?![\w/-]|\.\w)"
-                     r"(?!\s+actions?\b(?!\s+runner))", span.lower()) is not None
+    # "The devalue package for npm", "the connect-xcors npm package", "the
+    # fastjsonschema Python package": the registry or language a package is
+    # published for, not the product (NVD "npm" search, 2026-11-22).
+    return re.search(rf"(?<![\w./-])(?<!package for )(?<!packages for )(?<!module for )"
+                     rf"{re.escape(want)}(?![\w/-]|\.\w)"
+                     r"(?!\s+actions?\b(?!\s+runner))(?!\s+(?:packages?|modules?)\b)",
+                     span.lower()) is not None
 
 
 def classify_record(row: Dict) -> str:
