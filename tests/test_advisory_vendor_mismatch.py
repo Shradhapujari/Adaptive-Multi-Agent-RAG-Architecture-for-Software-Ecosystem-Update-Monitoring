@@ -108,3 +108,12 @@ import pytest  # noqa: E402
 def test_a_name_fragment_is_not_the_vendor(text, name, about):
     """Sweep 2026-11-21: packages containing the vendor's name drove Patch now."""
     assert advisory_names_vendor({"notes": text}, name) is about
+
+
+@pytest.mark.parametrize("text", [
+    "Use-after-free in the Audio/Video: Playback component. This vulnerability was fixed in Firefox 160.0.1.",
+    "Sandbox escape in the DOM: Navigation component. This vulnerability was fixed in Firefox 160, Firefox ESR 153.7.",
+])
+def test_a_mozilla_cve_naming_the_product_in_its_second_sentence_is_kept(text):
+    """Regression from #201: no version marker, product in sentence two -> was dropped."""
+    assert advisory_names_vendor({"notes": text}, "firefox") is True
