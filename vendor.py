@@ -522,6 +522,14 @@ _VERSION_MARKER = re.compile(
     r"(?:[\w.@/-]+\s+)?v?\d", re.I)
 
 
+# Operating systems as they appear in a list of platforms an advisory's
+# product runs on. ponytail: hand list; add an OS when one slips through.
+_OS_NAME = (r"(?:windows|macos|mac os x|os x|linux|bsd|freebsd|openbsd|android|ios"
+            r"|ipados|watchos|tvos|chromeos|chrome os|unix|solaris)")
+_PLATFORM_LIST = re.compile(
+    rf"(?:\bfor|\bon|\()\s*{_OS_NAME}(?:\s*(?:,|/|\band\b|\bor\b)\s*(?:and\s+|or\s+)?{_OS_NAME}\b)+")
+
+
 def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     """Whether a CVE record is really about `vendor_name`, by its own text.
 
@@ -597,10 +605,17 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     # (live check, 2026-11-22). "Chrome on Android" is Chrome's, not Android's.
     # ponytail: a platform named only in a list ("Windows, macOS, Linux") still
     # passes; a list rule would also drop "affects Chrome, Firefox and Edge".
+    # The same holds down a list ("Supremo for Windows and macOS", "(Windows,
+    # macOS, Linux, BSD)") and for a build architecture ("Linux x86-64"), so
+    # the list is removed before the search. Apple's "fixed in iOS 26.7.1 and
+    # iPadOS 26.7.1, macOS Sequoia 15.8.1" follows neither "for", "on" nor
+    # "(", and stays.
+    span = _PLATFORM_LIST.sub(" ", span.lower())
     return re.search(rf"(?<![\w./(-])(?<!for )(?<!on ){re.escape(want)}(?![\w/-]|\.\w)"
                      r"(?!\s+actions?\b(?!\s+runner))(?!\s+(?:packages?|modules?)\b)"
-                     r"(?!\s+(?:foundation|builds?)\b)(?!\s+(?:\w+\s+)?firmware\b)",
-                     span.lower()) is not None
+                     r"(?!\s+(?:foundation|builds?)\b)(?!\s+(?:\w+\s+)?firmware\b)"
+                     r"(?!\s+(?:x86|x64|amd64|arm64|aarch64|i386)\b)",
+                     span) is not None
 
 
 def classify_record(row: Dict) -> str:
