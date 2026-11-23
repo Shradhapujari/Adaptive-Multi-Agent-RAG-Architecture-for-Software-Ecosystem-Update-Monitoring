@@ -2166,7 +2166,8 @@ def _off_topic_note(query: str, live: bool = False) -> Optional[str]:
 
 
 _NEEDS_LIVE = {"down_now": "whether a service is down", "incident": "what an outage was about",
-               "eol": "whether a version is still supported"}
+               "eol": "whether a version is still supported",
+               "news": "what's been happening recently", "general": "a general software question"}
 
 
 def _needs_live_note(query: str, live: bool) -> Optional[str]:
@@ -2177,8 +2178,13 @@ def _needs_live_note(query: str, live: bool) -> Optional[str]:
     if live:
         return None
     import live_sources
-    k = live_sources.kind(query, ground(query).vendor_names)
+    g = ground(query)
+    k = live_sources.kind(query, g.vendor_names)
     if k not in _NEEDS_LIVE or not live_sources.answer_only(k, query):
+        return None
+    # A news/general question naming no product is declined by the off-topic
+    # gate even with web search on, so "turn it on" would be a false promise.
+    if k in ("news", "general") and not g.vendors:
         return None
     return (f"This asks {_NEEDS_LIVE[k]}, which the release and advisory feeds "
             "can't answer, so I haven't searched. Turn on "
