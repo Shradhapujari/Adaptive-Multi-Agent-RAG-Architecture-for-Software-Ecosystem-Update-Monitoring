@@ -778,7 +778,8 @@ def test_the_presenter_sees_the_advisories_set_aside_for_the_verdict():
     results = {**RESULTS, "decision_advisories": [
         {"product": "Firefox", "version": "157.0.1", "date": "2026-10-06",
          "is_cve": True, "isCve": True,
-         "notes": "Mitigation bypass in the File Handling component.",
+         "notes": "Mitigation bypass in the File Handling component. "
+                  "This vulnerability affects Firefox < 157.0.1.",
          "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-5555"}]}
     ev = collect_evidence(results)
     advisories = [e for e in ev if e.kind == "advisory"]
