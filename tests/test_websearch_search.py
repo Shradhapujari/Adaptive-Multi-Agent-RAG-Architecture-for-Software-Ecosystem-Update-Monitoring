@@ -9,7 +9,16 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pytest  # noqa: E402
+
 import websearch  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _backend(monkeypatch):
+    """_ddg is stubbed below; without this, a host lacking the ddgs package
+    returns "no backend" before the stub is ever called."""
+    monkeypatch.setattr(websearch, "available", lambda: True)
 
 
 def _no_sleep(monkeypatch):
