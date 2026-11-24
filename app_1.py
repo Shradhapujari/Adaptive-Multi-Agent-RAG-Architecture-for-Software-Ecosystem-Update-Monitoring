@@ -3039,8 +3039,12 @@ def _sources_list(results: dict, presented=None) -> None:
 # ── SIDEBAR ───────────────────────────────────────────────
 
 with st.sidebar:
+    # Set before the radio exists: a sidebar question asked from Monitor or
+    # Results (see below) lands here on the rerun that switches to Ask.
+    if st.session_state.pop("goto_ask", False):
+        st.session_state["view"] = "Ask"
     view = st.radio("View", ["Ask", "Monitor", "Results"], horizontal=True,
-                    label_visibility="collapsed")
+                    label_visibility="collapsed", key="view")
     with st.expander("About", expanded=False):
         st.image("https://upload.wikimedia.org/wikipedia/en/b/bb/University_of_the_Pacific_seal.svg", width=80)
         st.markdown("**Adaptive Multi-Agent RAG Architecture** · University of the Pacific · 2026")
@@ -3362,6 +3366,13 @@ with st.sidebar:
                         _submit(r.query)
 
 # ── MAIN UI ───────────────────────────────────────────────
+
+# The sidebar's questions show in every view, but only Ask answers them. A
+# click elsewhere switches to Ask and runs there, rather than leaving the run
+# flag set for whenever Ask is next opened.
+if view != "Ask" and st.session_state.get("auto_ask"):
+    st.session_state["goto_ask"] = True
+    st.rerun()
 
 st.caption("Software Ecosystem Monitoring")
 
