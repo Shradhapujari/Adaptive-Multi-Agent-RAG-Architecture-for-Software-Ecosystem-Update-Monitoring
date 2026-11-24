@@ -36,3 +36,34 @@ def test_example_after_a_thread_forgets_it(state):
     state["reddit_id"] = "abc"
     app_1._submit("Latest Django release notes")
     assert "reddit_id" not in state
+
+
+@pytest.fixture
+def calls(monkeypatch):
+    seen = {"fast": [], "full": []}
+
+    def fake_pipeline(q, **kw):
+        seen["full"].append(kw)
+        return {"original_query": q}
+
+    def fake_fast(q, **kw):
+        seen["fast"].append(q)
+        return None
+
+    monkeypatch.setattr(app_1, "run_pipeline", fake_pipeline)
+    monkeypatch.setattr(app_1, "run_fast", fake_fast)
+    monkeypatch.setattr(app_1, "_present_answer", lambda *a, **k: object())
+    monkeypatch.setattr(app_1.graph, "route_query", lambda q: ("fast", "version lookup"))
+    return seen
+
+
+def test_picked_thread_goes_full_path_with_its_id(calls):
+    results, _ = app_1.ask("Did 44 break grub?", reddit_id="abc")
+    assert calls["fast"] == []
+    assert calls["full"][0]["reddit_id"] == "abc"
+    assert results["route"]["mode"] == "full"
+
+
+def test_typed_question_has_no_thread(calls):
+    app_1.ask("Latest Node.js version?")
+    assert all(kw.get("reddit_id") is None for kw in calls["full"])
