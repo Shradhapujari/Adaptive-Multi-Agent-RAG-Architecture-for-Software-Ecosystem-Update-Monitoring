@@ -3226,15 +3226,13 @@ with st.sidebar:
             return fn() if fn else 0
 
         def _ask_thread(row: dict) -> None:
-            """Put a picked thread in the question box and remember which it is.
+            """Ask a picked thread: its title in the box, answered at once.
 
             Shared by the dropdown and the two buttons so a thread arrives the
             same way however it was chosen: `reddit_id` is what makes the run
             answer from *this* thread's comments instead of searching for one.
             """
-            st.session_state["main_query"] = row.get("title", "")
-            st.session_state["reddit_title"] = row.get("title", "")
-            st.session_state["reddit_id"] = row.get("redditId")
+            _submit(row.get("title", ""), row)
 
         @st.cache_data(ttl=3600, show_spinner=False)
         def _catalog():
@@ -3304,11 +3302,17 @@ with st.sidebar:
                 st.caption("No question matched — try All vendors.")
         q_opts = {f"{vendor.attribution(r) or '—'} · {r.get('title','')[:70]} "
                   f"({len(r.get('comments') or [])} comments)": r for r in q_rows}
-        picked = st.selectbox("Question", ["—"] + list(q_opts), key="reddit_pick")
-        # Applied once per pick, so the box stays editable afterwards.
-        if picked != "—" and st.session_state.get("reddit_title") != q_opts[picked].get("title"):
-            _ask_thread(q_opts[picked])
-        elif not q_rows:
+        def _on_pick(opts: dict) -> None:
+            pick = st.session_state.get("reddit_pick", "—")
+            if pick in opts:
+                _ask_thread(opts[pick])
+
+        # on_change, so a pick applies once, when it is made. Comparing the pick
+        # with the box on every rerun re-applied a stale pick over Latest or
+        # Random in the same rerun, and over whatever was typed since.
+        st.selectbox("Question", ["—"] + list(q_opts), key="reddit_pick",
+                     on_change=_on_pick, args=(q_opts,))
+        if not q_rows:
             st.caption("Feed unreachable — type a question instead.")
     st.divider()
     st.markdown("#### Example queries")
@@ -3324,8 +3328,7 @@ with st.sidebar:
     ]
     for ex in examples:
         if st.button(ex, use_container_width=True):
-            st.session_state["main_query"] = ex
-            st.session_state.pop("reddit_id", None)
+            _submit(ex)
 
     st.divider()
     st.markdown("#### Store")
@@ -3356,7 +3359,7 @@ with st.sidebar:
                                f"{r.n_documents} document(s){flag}")
                     if st.button("Ask again", key=f"again_{r.run_id}",
                                  use_container_width=True):
-                        st.session_state["main_query"] = r.query
+                        _submit(r.query)
 
 # ── MAIN UI ───────────────────────────────────────────────
 
