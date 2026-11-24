@@ -2854,6 +2854,20 @@ def _console_html(text: str) -> str:
     return f'<div class="sys-console">{body}</div>'
 
 
+def _submit(q: str, row: Optional[dict] = None) -> None:
+    """Ask `q` from the sidebar: fill both question boxes (the console's and
+    the classic view's -- only one is on screen) and flag one run, so a click
+    answers without a second press of Ask. `row` is a Reddit thread, answered
+    from its own comments; without one, any earlier pick is forgotten."""
+    st.session_state["main_query"] = st.session_state["ask_query"] = q
+    if row is not None:
+        st.session_state["reddit_title"] = row.get("title", "")
+        st.session_state["reddit_id"] = row.get("redditId")
+    else:
+        st.session_state.pop("reddit_id", None)
+    st.session_state["auto_ask"] = True
+
+
 def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = None,
                     details=None) -> None:
     st.markdown("### Software Update Decision Intelligence")
