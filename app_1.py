@@ -1480,7 +1480,8 @@ def _on_subject(rows: list, vendors, strict: bool = True) -> list:
         text = str(r.get("notes") or r.get("versionReleaseNotes") or r.get("text")
                    or r.get("detail") or r.get("title") or "")
         doc = {"doc_id": "-", "source": "nvd", "text": text}
-        return decide._about(doc, decide._vendor_tokens([name]), set(), vendors=[name])
+        exclude = [x.lower() for x in decide.KB.get(name, {}).get("not_this_product", ())]
+        return decide._about(doc, decide._vendor_tokens([name]), set(), exclude, vendors=[name])
     return [r for r in rows if vendor.classify_record(r) != "advisory"
             or any(vendor.advisory_names_vendor(r, v.name) and (not strict or about(r, v.name))
                    for v in vendors)]

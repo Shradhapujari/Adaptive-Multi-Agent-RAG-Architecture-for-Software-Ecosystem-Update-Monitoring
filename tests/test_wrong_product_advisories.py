@@ -215,3 +215,72 @@ def test_java_advisories_belong_to_oracle_or_openjdk(text, want):
            "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-135125"}
     assert decide.decide([row], "What is the newest version of Java?",
                          vendors=["java"]).verdict == want
+
+
+# ── 2026-11-25 sweep: plugins, bundlers, possessives, legacy text ────────
+
+def _nvd_row(text):
+    return {"doc_id": "n1", "source": "nvd", "date": "20261124", "title": "CVE-2026-136214",
+            "text": f"{text} (CVE-2026-136214)",
+            "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-136214"}
+
+
+@pytest.mark.parametrize("want, text", [
+    ("wordpress", "Astra WordPress theme before 4.14.0 contains an improper input neutralization vulnerability."),
+    ("wordpress", "Prevent Direct Access – Protect WordPress Files plugin before 2.8.9.2 contains an "
+                  "information disclosure vulnerability."),
+    ("wordpress", "The Synoptic Web Designer: best WordPress design tool WordPress plugin through 1.12 "
+                  "does not perform any capability check."),
+    ("python", "Python Packaging Authority pip Configuration File Incorrect Permission Assignment "
+               "Local Privilege Escalation Vulnerability."),
+    ("python", "Flowintel's community data launcher script passes the admin API key as a command-line "
+               "argument to a child Python helper process."),
+    ("openssl", "An uncontrolled search path vulnerability (CWE-427) in statically linked OpenSSL "
+                "libraries within Netskope Client (stAgentSvc.exe) on Windows allows code execution."),
+    ("openssl", "A high privileged remote attacker can perform an OpenSSL code injection in the "
+                "backends ImportPKCS12 function leading to code execution."),
+])
+def test_another_products_advisory_is_not_the_product(want, text):
+    assert decide.decide([_nvd_row(text)], f"Any security issues in {want}?",
+                         vendors=[want]).verdict != "patch_urgently"
+
+
+@pytest.mark.parametrize("want, text", [
+    ("openssl", "Issue summary: A QUIC peer that sends many small out-of-order STREAM fragments may "
+                "cause OpenSSL to buffer a large amount of data."),
+    ("python", "Python's tarfile module before 3.14.1 allows path traversal."),
+    ("wordpress", "WordPress Core before 6.8.2 allows stored XSS via the theme customizer."),
+])
+def test_the_products_own_advisory_still_counts(want, text):
+    assert decide.decide([_nvd_row(text)], f"Any security issues in {want}?",
+                         vendors=[want]).verdict == "patch_urgently"
+
+
+def test_zimbra_is_detected_and_owns_its_kev_rows():
+    import vendor
+    assert [v.name for v in vendor.detect_vendors("Is it safe to update Zimbra?")] == ["zimbra"]
+    assert decide.kev_owns(_kev("Synacor", "Zimbra Collaboration Suite (ZCS)", "XSS"), ["zimbra"])
+    assert not decide.kev_owns(_kev("Cisco", "Secure Firewall ASA Software", "NULL deref"), ["zimbra"])
+
+
+def test_console_list_reads_the_kb_exclusions():
+    import app_1
+    from vendor import VendorMatch
+    row = {"is_cve": True, "product": "python", "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-136440",
+           "notes": "Python Packaging Authority pip Configuration File Incorrect Permission Assignment."}
+    assert app_1._on_subject([row], [VendorMatch(name="python", matched="Python")]) == []
+
+
+def test_legacy_kev_rows_are_not_said_to_apply():
+    import answer_agent as A
+    ev = [A.Evidence(label="Security Advisory - CVE-2013-0422 (CISA US-CERT), 2022-05-25",
+                     kind="advisory", title="Oracle JRE Remote Code Execution Vulnerability",
+                     source="cisa_kev", security=True, legacy=True)]
+    text = A.deterministic_paragraph("What is the newest version of Java?", ev)
+    assert "apply" not in text and "older advisory record(s)" in text
+
+
+def test_a_bare_link_is_not_quoted_as_a_note():
+    import answer_agent as A
+    assert A._BARE_URL.match("https://en.wikipedia.org/wiki/WordPress")
+    assert not A._BARE_URL.match("Fixes a crash, see https://x.org/1")

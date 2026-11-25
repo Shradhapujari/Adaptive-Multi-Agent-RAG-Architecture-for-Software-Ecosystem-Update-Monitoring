@@ -137,6 +137,9 @@ _ALIASES: Dict[str, str] = {
     # named no product and its quoted thread went ungated (live check,
     # 2026-11-22).
     "npm": "npm",
+    # Not in the catalog either: "Is it safe to update Zimbra?" named no
+    # product, so Cisco ASA and Siemens KEV rows were listed (2026-11-25).
+    "zimbra": "zimbra",
     "nodejs": "node.js",
     "k8s": "kubernetes",
     "vscode": "visual studio code",
@@ -554,18 +557,31 @@ _PLATFORM_LIST = re.compile(
 
 
 # Wordfence's form, "The <plugin> plugin for WordPress is vulnerable to ...".
-_WP_PLUGIN = re.compile(r"\W*(?:the\s+)?(.+?)\s+(?:plugin|theme)\s+for\s+wordpress\b", re.I)
+_WP_PLUGIN = re.compile(r"\W*(?:the\s+)?(.{1,300}?)\s+(?:plugin|theme)\s+for\s+wordpress\b", re.I)
+# NVD's other shapes: "Astra WordPress theme before 4.14.0", "Prevent Direct
+# Access – Protect WordPress Files plugin before 2.8.9.2", "... WordPress
+# plugin through 1.12". The name ends where the version range starts.
+_WP_PLUGIN_BEFORE = re.compile(
+    r"\W*(?:the\s+)?(.{1,300}?)\s+(?:wordpress\s+)?(?:plugin|theme)\s+"
+    r"(?:before|through|prior\s+to|up\s+to|versions?|<=?|\d)", re.I)
 
 
 def other_wordpress_plugin(text: str, vendor_name: str) -> bool:
-    """True when `text` is a WordPress plugin's advisory and the plugin is not
-    `vendor_name`: its name does not start with the product. "The OpenStation:
-    Desktop Windows, Dock & Virtual Desktops for WP Admin plugin for WordPress"
-    said Patch now for "Latest Windows 11 version?" (sweep, 2026-11-23);
-    "The Elementor Website Builder plugin for WordPress" stays Elementor's."""
-    m = _WP_PLUGIN.match(text or "")
+    """True when `text` is a WordPress plugin's or theme's advisory and the
+    plugin is not `vendor_name`: its name does not start with the product.
+    "The OpenStation: Desktop Windows, Dock & Virtual Desktops for WP Admin
+    plugin for WordPress" said Patch now for "Latest Windows 11 version?"
+    (sweep, 2026-11-23); "The Elementor Website Builder plugin for WordPress"
+    stays Elementor's. For WordPress itself no plugin or theme is core, even
+    one named "Protect WordPress Files" (sweep, 2026-11-25)."""
+    text = text or ""
+    m = _WP_PLUGIN.match(text)
+    if not m and "wordpress" in text.lower():
+        m = _WP_PLUGIN_BEFORE.match(text)
     want = (vendor_name or "").strip().lower()
-    return bool(m and want) and not re.match(rf"{re.escape(want)}(?![\w-])", m.group(1).lower())
+    if not (m and want):
+        return False
+    return want == "wordpress" or not re.match(rf"{re.escape(want)}(?![\w-])", m.group(1).lower())
 
 
 _KB_OWNERS: Optional[Dict[str, set]] = None
@@ -587,6 +603,11 @@ def _owner_words(product: str) -> set:
     return _KB_OWNERS.get(product, set())
 
 
+_POSSESSIVE_LEAD = re.compile(r"\W*((?:[A-Z][\w.+-]*\s+){0,2}[A-Z][\w.+-]*)['’]s\s")
+_BUNDLED_AFTER = re.compile(
+    r"\s+(?:librar(?:y|ies)|components?|binar(?:y|ies)|dlls?)\s+"
+    r"(?:within|bundled\s+(?:in|with)|shipped\s+(?:in|with)|included\s+in|used\s+by)\s+[A-Z]")
+_ATTACK_AFTER = re.compile(r"\s+(?:code|command|argument)\s+injection\b", re.I)
 _CVE_LEAD = re.compile(r"^(?:\W*CVE-\d{4}-\d+\W*)+", re.I)
 
 
@@ -606,9 +627,20 @@ def foreign_name_before(text: str, vendor_name: str) -> bool:
     # A record's title leads with its CVE id ("CVE-2026-2001 Linux kernel ..."):
     # an id is not a product name.
     text = _CVE_LEAD.sub("", text or "")
+    # "Flowintel's community data launcher script passes ... a child Python
+    # helper": the possessive opening names whose artifact it is.
+    own = _POSSESSIVE_LEAD.match(text)
+    if own and want not in own.group(1).lower() and not (
+            {w.lower() for w in own.group(1).split()} & owners):
+        return True
     m = re.search(rf"(?<![\w-]){re.escape(want)}(?![\w-])", text or "", re.I)
     if not m:
         return False
+    # The product inside another one, or as the name of an attack: "statically
+    # linked OpenSSL libraries within Netskope Client", "perform an OpenSSL
+    # code injection in the backends ImportPKCS12 function" (sweep, 2026-11-25).
+    if _BUNDLED_AFTER.match(text, m.end()) or _ATTACK_AFTER.match(text, m.end()):
+        return True
     before = text[:m.start()].rstrip()
     prev = re.findall(r"[\w.+-]+$", before)
     if not prev or before != before.rstrip(",;:(."):

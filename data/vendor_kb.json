@@ -28,12 +28,15 @@
     "chrome": {"owner": "Google", "not_this_product": ["chrome-devtools-mcp"], "kev_vendors": ["google"], "kev_products": ["chromium"]},
     "android": {"owner": "Google", "kev_vendors": ["android", "google"]},
     "edge": {"owner": "Microsoft", "name_requires": ["microsoft"], "components_unnamed": true, "upstream": "chrome", "kev_vendors": ["microsoft"]},
+    "zimbra": {"owner": "Synacor", "kev_vendors": ["zimbra", "synacor"]},
     "java": {"owner": "Oracle", "kev_vendors": ["oracle", "openjdk"], "kev_products": ["java se", "jre"]},
     "windows": {"owner": "Microsoft", "kev_vendors": ["microsoft"], "kev_products": ["win32k"]},
     "firefox": {"owner": "Mozilla", "kev_vendors": ["mozilla"]},
     "linux": {"owner": "Linux kernel maintainers", "kev_vendors": ["linux"], "kev_products": ["kernel"]},
     "openssl": {"owner": "OpenSSL Project", "kev_vendors": ["openssl"]},
     "docker": {"owner": "Docker", "kev_vendors": ["docker"]},
-    "python": {"owner": "Python Software Foundation", "kev_vendors": ["python", "python software foundation"]}
+    "python": {"owner": "Python Software Foundation", "kev_vendors": ["python", "python software foundation"],
+      "not_this_product": ["python packaging authority"]
+    }
   }
 }
