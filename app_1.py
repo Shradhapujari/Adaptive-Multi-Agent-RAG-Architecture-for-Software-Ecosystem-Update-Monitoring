@@ -742,7 +742,7 @@ def _decide_pool(results: dict) -> list:
                 "url": d.get("url", ""),
                 "date": d.get("date", ""),
                 # KEV's own vendor/product fields: decide attributes by these.
-                **{k: d[k] for k in ("kev_vendor", "kev_product") if d.get(k)},
+                **{k: d[k] for k in ("kev_vendor", "kev_product", "legacy") if d.get(k)},
             })
     return out
 
@@ -1109,7 +1109,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
                     shared["cve"] = shared["cve"] + _on_subject(nvd.fetch(
                         name, limit=max(limit * 4, 20), days=days,
                         retry=checks["nist_retry"], newest_first=checks["nist_sort"]),
-                        g.vendors[:2])
+                        g.vendors[:2], strict=checks["vendor_check"])
                 except Exception as e:  # noqa: BLE001 -- recorded, not swallowed
                     _record_fetch_error("NVD", e)
             # The KEV search is by query word, so "WebRTC" outranked "Edge" and
@@ -1466,11 +1466,24 @@ def _step_ms(state) -> Dict[str, int]:
     return out
 
 
-def _on_subject(rows: list, vendors) -> list:
+def _on_subject(rows: list, vendors, strict: bool = True) -> list:
     """Drop advisories whose own text is about other software (see
-    `vendor.advisory_names_vendor`); release records pass untouched."""
+    `vendor.advisory_names_vendor`); release records pass untouched.
+
+    An advisory listed must also pass the verdict's own subject rule
+    (`decide._about`): the list said "8 advisory record(s) apply" to Windows
+    -- SumatraPDF "for Windows", "the Windows port of wolfSSHd", CrowdStrike's
+    "Falcon sensor for Windows" -- under a verdict that had rejected all of
+    them (sweep, 2026-11-23)."""
+    def about(r, name):
+        # Release-feed rows carry `notes`; NVD rows carry `text`/`detail`/`title`.
+        text = str(r.get("notes") or r.get("versionReleaseNotes") or r.get("text")
+                   or r.get("detail") or r.get("title") or "")
+        doc = {"doc_id": "-", "source": "nvd", "text": text}
+        return decide._about(doc, decide._vendor_tokens([name]), set(), vendors=[name])
     return [r for r in rows if vendor.classify_record(r) != "advisory"
-            or any(vendor.advisory_names_vendor(r, v.name) for v in vendors)]
+            or any(vendor.advisory_names_vendor(r, v.name) and (not strict or about(r, v.name))
+                   for v in vendors)]
 
 
 def run_fast(query: str, limit: int = 5, source: str = "agent") -> Optional[dict]:
@@ -2484,7 +2497,7 @@ def _show_cve(rows: list, limit: int) -> list:
     old = sorted((r for r in ordered if _is_stale_kev(r)),
                  key=lambda r: str(r.get("date")), reverse=True)
     current = [r for r in ordered if not _is_stale_kev(r)][:limit]
-    return current + [{**r, "title": r["title"].replace(
+    return current + [{**r, "legacy": True, "title": r["title"].replace(
         "[CISA KEV]", f"[CISA KEV · legacy, added {r.get('date')}]", 1)} for r in old]
 
 

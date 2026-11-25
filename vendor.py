@@ -553,6 +553,71 @@ _PLATFORM_LIST = re.compile(
     rf"(?:\bfor|\bon|\()\s*{_OS_NAME}(?:\s*(?:,|/|\band\b|\bor\b)\s*(?:and\s+|or\s+)?{_OS_NAME}\b)+")
 
 
+# Wordfence's form, "The <plugin> plugin for WordPress is vulnerable to ...".
+_WP_PLUGIN = re.compile(r"\W*(?:the\s+)?(.+?)\s+(?:plugin|theme)\s+for\s+wordpress\b", re.I)
+
+
+def other_wordpress_plugin(text: str, vendor_name: str) -> bool:
+    """True when `text` is a WordPress plugin's advisory and the plugin is not
+    `vendor_name`: its name does not start with the product. "The OpenStation:
+    Desktop Windows, Dock & Virtual Desktops for WP Admin plugin for WordPress"
+    said Patch now for "Latest Windows 11 version?" (sweep, 2026-11-23);
+    "The Elementor Website Builder plugin for WordPress" stays Elementor's."""
+    m = _WP_PLUGIN.match(text or "")
+    want = (vendor_name or "").strip().lower()
+    return bool(m and want) and not re.match(rf"{re.escape(want)}(?![\w-])", m.group(1).lower())
+
+
+_KB_OWNERS: Optional[Dict[str, set]] = None
+# Capitalised words that open a sentence rather than name a product.
+_SENTENCE_OPENERS = frozenset("the a an in on this when if multiple".split())
+
+
+def _owner_words(product: str) -> set:
+    """Words of the owners vendor_kb.json lists for `product` ("microsoft")."""
+    global _KB_OWNERS
+    if _KB_OWNERS is None:
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "data", "vendor_kb.json"), encoding="utf-8") as f:
+                _KB_OWNERS = {k.lower(): {w for o in v.get("kev_vendors", ()) for w in o.lower().split()}
+                              for k, v in json.load(f)["products"].items()}
+        except (OSError, ValueError, KeyError):
+            _KB_OWNERS = {}
+    return _KB_OWNERS.get(product, set())
+
+
+_CVE_LEAD = re.compile(r"^(?:\W*CVE-\d{4}-\d+\W*)+", re.I)
+
+
+def foreign_name_before(text: str, vendor_name: str) -> bool:
+    """True when the first mention of a product whose owner is on file follows
+    another product's capitalised name: "OpenClaw Windows Node", "Maono Link
+    3.8.13 MaonoAiServices Windows service" (sweep, 2026-11-23). The owner's
+    own advisories say "in Windows Win32K", "Windows Kernel ...", "Microsoft
+    Windows": a lowercase word, the owner, or nothing before the name.
+
+    ponytail: one word of look-behind. Only products with an owner on file
+    are judged, so "Canonical Ubuntu" and "Apache Log4j" are never touched."""
+    want = (vendor_name or "").strip().lower()
+    owners = _owner_words(want)
+    if not owners:
+        return False
+    # A record's title leads with its CVE id ("CVE-2026-2001 Linux kernel ..."):
+    # an id is not a product name.
+    text = _CVE_LEAD.sub("", text or "")
+    m = re.search(rf"(?<![\w-]){re.escape(want)}(?![\w-])", text or "", re.I)
+    if not m:
+        return False
+    before = text[:m.start()].rstrip()
+    prev = re.findall(r"[\w.+-]+$", before)
+    if not prev or before != before.rstrip(",;:(."):
+        return False
+    p = prev[0]
+    # Any capital or digit makes it a name: "iTerm2", "MaonoAiServices".
+    return (p != p.lower() or any(c.isdigit() for c in p)) and p.lower() not in owners | _SENTENCE_OPENERS
+
+
 def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     """Whether a CVE record is really about `vendor_name`, by its own text.
 
@@ -618,6 +683,8 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     if want in ("linux", "linux kernel", "kernel"):
         return "linux kernel" in text.lower()
 
+    if other_wordpress_plugin(text, want) or foreign_name_before(text, want):
+        return False
     m = _VERSION_MARKER.search(text)
     # The marker's own sentence, or the first one when there is no marker.
     # With no marker the product may be named in any sentence: Mozilla's
@@ -653,7 +720,7 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     return re.search(rf"(?<![\w./(-])(?<!for )(?<!on ){re.escape(want)}(?![\w/-]|\.\w)"
                      r"(?!\s+actions?\b(?!\s+runner))(?!\s+(?:packages?|modules?|crates?)\b)"
                      r"(?!\s*\(\s*`?[\w.-]+`?\s+crates?\))"
-                     r"(?!\s+(?:foundation|builds?)\b)(?!\s+(?:\w+\s+)?firmware\b)"
+                     r"(?!\s+(?:foundation|builds?|installers?)\b)(?!\s+(?:\w+\s+)?firmware\b)"
                      r"(?!\s+(?:x86|x64|amd64|arm64|aarch64|i386)\b)",
                      span) is not None
 
