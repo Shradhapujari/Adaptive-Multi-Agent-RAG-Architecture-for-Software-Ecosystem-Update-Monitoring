@@ -146,6 +146,10 @@ def _vendor_tokens(vendors: Iterable[str]) -> set:
     out = set()
     for v in vendors:
         out |= {w for w in _WORD_RE.findall(str(v).lower()) if len(w) > 2}
+        # The project's own name is the product's too: "In CPython 3.13 ..."
+        # is a Python advisory (vendor_kb.json `nvd_keywords`).
+        out |= {w for x in KB.get(str(v).lower(), {}).get("nvd_keywords", ())
+                for w in _WORD_RE.findall(x.lower())}
     return out
 
 
@@ -311,7 +315,11 @@ def _subject_names_product(d: dict, vtoks: set, exclude: Sequence[str] = ()) -> 
     # "prior to" there and counted for a Node.js question (2026-11-12). The
     # first sentence stands in for the subject -- when it names the product at
     # all; a bare "CVE-2026-1234" still abstains.
-    subject = (body[:m.start()] if m else re.split(r"(?<=[.;])\s", body, maxsplit=1)[0]).lower()
+    # Never past the first sentence: "A ... flaw has been found in ... the
+    # pulp_python package. ... a Python distribution that has a remote" put
+    # "Python" in the subject because the first predicate was two sentences
+    # on (sweep, 2026-11-26).
+    subject = re.split(r"(?<=[.;])\s", body[:m.start()] if m else body, maxsplit=1)[0].lower()
     if not m and not any(v in subject for v in vtoks):
         return True
     # Within the subject, a name after "on"/"for" is the platform the product
