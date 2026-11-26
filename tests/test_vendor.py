@@ -284,10 +284,12 @@ def test_feed_guessed_product_is_not_printed():
 
 
 def test_product_named_by_the_cve_is_still_printed():
-    row = {"product": "wordpress", "version": "3.5.1", "isCve": True,
-           "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-135446",
-           "notes": "Bold pagos en linea WordPress plugin before 3.5.1 contains an improper signature verification."}
-    assert describe_record(row) == "CVE-2026-135446 (affects wordpress 3.5.1)"
+    # Not a WordPress plugin: "<plugin> WordPress plugin before 3.5.1" is the
+    # plugin's version, which is not WordPress's (#231).
+    row = {"product": "mattermost", "version": "11.7.0", "isCve": True,
+           "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-19531",
+           "notes": "Mattermost versions 11.7.x <= 11.7.13, 11.10.x <= 11.10.3, 11.11.x <= 11.11.3 fail to verify the request."}
+    assert describe_record(row) == "CVE-2026-19531 (affects mattermost 11.7.0)"
     row = {"product": "nginx", "version": "1.3.0", "isCve": True,
            "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-132779",
            "notes": "When NGINX Plus or NGINX Open Source is configured to use TLS 1.3 early data, a crash can occur."}
