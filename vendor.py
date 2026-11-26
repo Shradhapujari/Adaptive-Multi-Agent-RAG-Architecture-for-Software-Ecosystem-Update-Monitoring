@@ -879,7 +879,26 @@ def describe_record(row: Dict) -> str:
     notes = str(row.get("notes") or row.get("versionReleaseNotes") or "")
     if notes.lstrip().lower().startswith("in the linux kernel, the following vulnerability"):
         version = ""
+    # With no product in the question nothing has checked the feed's product
+    # field, and its mitre bot guesses it from the CVE text: "3" for phpBB,
+    # "vulnerability", "booking" (sweep, 2026-11-23: "CVE-2026-134927 (affects 3
+    # 3.3.19)"), or labels a WordPress plugin's version as WordPress's. Print
+    # the product only when it is a real name the CVE's own text is about. On
+    # /api/v/ (2026-11-23) this keeps 161 of 685 such labels.
+    if notes and (not _searchable(product) or product.lower() in _FEED_GUESSES
+                  or not advisory_names_vendor(row, product)):
+        version = ""
     return f"{head} (affects {product} {version})" if version else head
+
+
+# Ordinary words the feed's bot files CVEs under that `_searchable` lets through
+# (counted on /api/v/, 2026-11-23). ponytail: a stopword list; the bot's guess
+# is upstream's and cannot be fixed here.
+_FEED_GUESSES = frozenset({
+    "automation", "booking", "builder", "crm", "csv", "embedded", "force",
+    "framework", "html", "kit", "lite", "otp", "sql", "submit", "ultimate",
+    "unknown", "url",
+})
 
 
 # Subreddit -> catalog product. The community feed carries no product field at
