@@ -589,6 +589,23 @@ _KB_OWNERS: Optional[Dict[str, set]] = None
 _SENTENCE_OPENERS = frozenset("the a an in on this when if multiple".split())
 
 
+_KB_PROJECT_NAMES: Optional[Dict[str, tuple]] = None
+
+
+def _project_names(product: str) -> tuple:
+    """Other names vendor_kb.json lists for `product` (`nvd_keywords`)."""
+    global _KB_PROJECT_NAMES
+    if _KB_PROJECT_NAMES is None:
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "data", "vendor_kb.json"), encoding="utf-8") as f:
+                _KB_PROJECT_NAMES = {k.lower(): tuple(x.lower() for x in v.get("nvd_keywords", ()))
+                                     for k, v in json.load(f)["products"].items()}
+        except (OSError, ValueError, KeyError):
+            _KB_PROJECT_NAMES = {}
+    return tuple(x for x in _KB_PROJECT_NAMES.get(product, ()) if x != product)
+
+
 def _owner_words(product: str) -> set:
     """Words of the owners vendor_kb.json lists for `product` ("microsoft")."""
     global _KB_OWNERS
@@ -689,6 +706,10 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     """
     want = (vendor_name or "").strip().lower()
     if not want:
+        return True
+    # The project's own name (vendor_kb.json `nvd_keywords`) names it too:
+    # "In CPython 3.13 and earlier, the tarfile module ..." is Python's.
+    if any(advisory_names_vendor(row, alt) for alt in _project_names(want)):
         return True
     text = " ".join(str(row.get(f) or "") for f in
                     ("notes", "versionReleaseNotes")).strip()

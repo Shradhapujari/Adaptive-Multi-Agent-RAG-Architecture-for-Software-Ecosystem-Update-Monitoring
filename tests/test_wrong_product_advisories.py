@@ -284,3 +284,96 @@ def test_a_bare_link_is_not_quoted_as_a_note():
     import answer_agent as A
     assert A._BARE_URL.match("https://en.wikipedia.org/wiki/WordPress")
     assert not A._BARE_URL.match("Fixes a crash, see https://x.org/1")
+
+
+# ── "safe" must not stand on a search that never reached the product ────
+
+def _pipeline(monkeypatch, fetch):
+    import app_1, nvd
+    from app_1 import Rewrite
+    monkeypatch.setattr(app_1, "union_fetch", lambda *a, **k: [])
+    monkeypatch.setattr(app_1, "terminal_sources",
+                        lambda *a, **k: ({"community": [], "releases": [], "cve": []}, []))
+    monkeypatch.setattr(app_1, "rewrite_query", lambda q: Rewrite(q, "rule-based"))
+    monkeypatch.setattr(app_1, "get_store", lambda: None)
+    monkeypatch.setattr(nvd, "fetch", fetch)
+    return app_1.run_pipeline("Any security issues in Python?", show_steps=False)
+
+
+def _foreign(i):
+    return {"title": f"CVE-2026-{9000 + i} — Acme{i} is a Python package", "source": "nvd",
+            "url": f"https://nvd.nist.gov/vuln/detail/CVE-2026-{9000 + i}", "date": "2026-11-20",
+            "text": f"Acme{i} is a Python package. Prior to 1.{i} it allows code execution.",
+            "is_cve": True}
+
+
+def test_a_page_of_other_products_leaves_cves_unchecked(monkeypatch):
+    import app_1
+    r = _pipeline(monkeypatch, lambda kw, limit=5, *a, **k: [_foreign(i) for i in range(limit)])
+    assert any(e["agent"] == "NVD (crowded)" for e in r["errors"])
+    assert "cve" in app_1._unchecked(r["errors"])
+
+
+def test_the_projects_own_name_is_searched_and_counts(monkeypatch):
+    import app_1
+    own = {"title": "CVE-2026-82049 — In CPython 3.13 and earlier, the tarfile module",
+           "source": "nvd", "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-82049",
+           "date": "2026-09-14", "is_cve": True,
+           "text": "In CPython 3.13 and earlier, the tarfile module's extraction filters are "
+                   "vulnerable to crafted archives."}
+    asked = []
+
+    def fetch(kw, limit=5, *a, **k):
+        asked.append(kw)
+        return [own] if kw == "cpython" else [_foreign(i) for i in range(limit)]
+    r = _pipeline(monkeypatch, fetch)
+    assert "cpython" in asked
+    assert [d["url"].rsplit("/", 1)[-1] for d in r["cve"] if "82049" in d["url"]] == ["CVE-2026-82049"]
+    assert not any(e["agent"] == "NVD (crowded)" for e in r["errors"])
+
+
+def test_an_nvd_outage_leaves_cves_unchecked():
+    import app_1
+    assert app_1._unchecked([{"agent": "NVD", "error": "HTTPError: 503"}]) == {"cve"}
+
+
+def test_safe_needs_the_cve_source_read():
+    rel = {"doc_id": "r1", "source": "releases", "date": "2026-10-25",
+           "text": "Python 3.14.10 released with bug fixes."}
+    assert decide.decide([rel], "Any security issues in Python?", vendors=["python"]).verdict == "safe"
+    assert decide.decide([rel], "Any security issues in Python?", vendors=["python"],
+                         unchecked={"cve"}).verdict == "insufficient_evidence"
+
+
+PULP = ("A **server-side request forgery** flaw has been found in the get_remote_artifact_url() "
+        "function in pulp_python/app/models.py of the pull-through caching feature in the "
+        "**pulp_python** package. The function uses the redirect query parameter as the URL to "
+        "download. A network attacker who can reach the content app of a Python distribution "
+        "that has a remote can choose the URL.")
+TARFILE = ("In CPython 3.13 and earlier, the tarfile\xa0module's data\xa0and tar extraction filters "
+           "are vulnerable to crafted archives containing a hard link to a symbolic link.")
+
+
+def test_a_package_named_after_python_is_not_python():
+    # The subject stops at the first sentence; "a Python distribution" two
+    # sentences on is where the package runs, not what it is.
+    assert decide.decide([_nvd_row(PULP)], "Any security issues in Python?",
+                         vendors=["python"]).verdict != "patch_urgently"
+
+
+def test_cpython_rows_reach_the_console_list_and_the_verdict():
+    import app_1, vendor
+    from vendor import VendorMatch
+    row = {"is_cve": True, "source": "nvd", "text": TARFILE, "detail": TARFILE, "notes": TARFILE,
+           "title": "CVE-2026-82049 — " + TARFILE[:60],
+           "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-82049"}
+    assert vendor.advisory_names_vendor(row, "python")
+    assert app_1._on_subject([row], [VendorMatch(name="python", matched="Python")]) == [row]
+    assert decide.decide([_nvd_row(TARFILE)], "Any security issues in Python?",
+                         vendors=["python"]).verdict == "patch_urgently"
+
+
+def test_a_crowded_page_is_not_a_degraded_fetch(monkeypatch):
+    import app_1
+    r = _pipeline(monkeypatch, lambda kw, limit=5, *a, **k: [_foreign(i) for i in range(limit)])
+    assert r["decision"].get("evidence_class") != "degraded"

@@ -664,6 +664,9 @@ def _release_rows(docs: list) -> list:
 # key it by vendor if CIRCL outages ever cost a real answer.
 _UNCHECKED_BY_AGENT = {
     "CISA KEV": {"cve"}, "CIRCL": {"cve"}, "Release Notes": {"cve"},
+    # An NVD outage, or a page crowded with other products (see the NVD loop
+    # in run_pipeline), is an unread feed, not an empty one.
+    "NVD": {"cve"}, "NVD (crowded)": {"cve"},
     "Community": {"community"}, "CVE": {"community"},
     "Shared sources": {"cve", "community"},
 }
@@ -1101,17 +1104,34 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
             def kw(v) -> str:
                 need = decide.KB.get(v.name, {}).get("name_requires") or []
                 return f"{need[0]} {v.name}" if need else v.name
+            # `nvd_keywords` (vendor_kb.json): the project's own name where the
+            # product's is everyone's. "python" matches every package's CVE, so
+            # the newest page held pip and Flowintel and never CPython's own
+            # tarfile advisory (sweep, 2026-11-26).
+            extra = [x for v in g.vendors[:2] for x in decide.KB.get(v.name, {}).get("nvd_keywords", ())]
+            nvd_limit = max(limit * 4, 20)
+            crowded, kept = [], 0
             for name in ([f"{kw(v)} {p}" for v in g.vendors[:2] for p in v.parts]
-                         + [kw(v) for v in g.vendors[:2]]):
+                         + [kw(v) for v in g.vendors[:2]] + extra):
                 try:
+                    raw = nvd.fetch(name, limit=nvd_limit, days=days,
+                                    retry=checks["nist_retry"], newest_first=checks["nist_sort"])
                     # Screened like the feed's advisories: NVD's keyword
                     # search matches "rust" inside "falcon-rust".
-                    shared["cve"] = shared["cve"] + _on_subject(nvd.fetch(
-                        name, limit=max(limit * 4, 20), days=days,
-                        retry=checks["nist_retry"], newest_first=checks["nist_sort"]),
-                        g.vendors[:2], strict=checks["vendor_check"])
+                    mine = _on_subject(raw, g.vendors[:2], strict=checks["vendor_check"])
+                    shared["cve"] = shared["cve"] + mine
+                    kept += len(mine)
+                    if len(raw) >= nvd_limit and not mine:
+                        crowded.append(name)
                 except Exception as e:  # noqa: BLE001 -- recorded, not swallowed
                     _record_fetch_error("NVD", e)
+            # A full page of other products' CVEs hides any older ones of this
+            # product: finding none of its own there is not evidence of none,
+            # so the verdict must not say Safe on it.
+            if crowded and not kept:
+                _record_fetch_error("NVD (crowded)", RuntimeError(
+                    f"newest {nvd_limit} results for {', '.join(map(repr, crowded))} "
+                    "were all other products; older advisories may be hidden"))
             # The KEV search is by query word, so "WebRTC" outranked "Edge" and
             # Google's Chromium WebRTC rows took both slots, then failed the
             # ownership check; Edge's own rows only appeared for other wordings
@@ -1358,7 +1378,8 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # An empty pool is not a degraded fetch: the documents came back and were
     # ruled uncitable for this question. Only an outage that returned nothing
     # at all is degraded, and it is the one case a retry could change.
-    degraded = bool(results["errors"]) and not shown
+    # A crowded NVD page is not an outage: the feed answered (see run_pipeline).
+    degraded = any(e.get("agent") != "NVD (crowded)" for e in results["errors"]) and not shown
     state = graph.run(
         query,
         rewrite=lambda q, tried: results["grounded_query"] or q,
@@ -3769,6 +3790,10 @@ elif run_btn and query:
         # title was the exception text, which the answer then cited as a source.
         if results.get("errors"):
             for e in results["errors"]:
+                if e["agent"] == "NVD (crowded)":
+                    st.warning(f"**NVD search crowded** — {e['error']}. The verdict does "
+                               "not say Safe on a search that never reached this product.")
+                    continue
                 st.error(f"**{e['agent']} feed unreachable** — {e['error']}. "
                          "No documents from this feed are included below, and "
                          "nothing is cited from it.")
