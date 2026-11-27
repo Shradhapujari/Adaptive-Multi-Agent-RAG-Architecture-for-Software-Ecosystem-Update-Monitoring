@@ -2174,6 +2174,24 @@ def _no_product_note(results: dict) -> str:
     return out
 
 
+def _no_product_answer(results: dict):
+    """"Which product?" as the answer, for a version/date question naming no
+    product, or None.
+
+    The headline already said so (`_tab_short`), but the answer was still
+    composed from the unscoped pool and shown under Read more and in the
+    source tables: "Latest Nodej.s version?" cited CVEs for rest, backdrop and
+    hustoj (sweep, 2026-11-25). A live answer (EOL, outage, ...) is its own.
+    """
+    g = results.get("grounding")
+    if (g is None or getattr(g, "vendors", None)
+            or (results.get("live") or {}).get("answer_only")
+            or graph.asks(results.get("original_query", "")) not in ("version", "date")):
+        return None
+    return answer_agent.PresentedAnswer(text=_no_product_note(results), mode="rule-based",
+                                        note="no product recognised; nothing composed")
+
+
 # The verdict in the words of the question. "Is it safe to update Firefox?"
 # answered "Patch urgently" left the reader to work out that this means yes.
 _STANCE_WORDS = {
@@ -2752,7 +2770,8 @@ def ask(q: str, limit: int = 5, source: str = "agent", checks: Optional[dict] = 
             route = {"mode": "full", "why": "fast path could not answer — escalated"}
         results["route"] = route
         t0 = time.time()
-        presented = _present_answer(results["original_query"], results)
+        presented = (_no_product_answer(results)
+                     or _present_answer(results["original_query"], results))
         results.setdefault("timing", {})["answer"] = round(time.time() - t0, 2)
         return results, presented
 
