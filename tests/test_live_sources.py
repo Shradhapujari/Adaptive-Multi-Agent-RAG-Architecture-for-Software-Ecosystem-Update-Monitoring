@@ -515,3 +515,41 @@ def test_english_words_near_slack_or_teams_get_no_suggestion(q):
     suggestion-only names need a closer match."""
     import vendor
     assert vendor.suggest(q) not in vendor._SUGGEST_ONLY
+
+
+# ─────────────────────────────────────────────── "Is X down?" (sweep 2026-11-25)
+
+def test_stack_overflow_reads_its_status_page(monkeypatch):
+    # "Is Stack Overflow down?" had no status host and was answered with AI
+    # coding news that never named Stack Overflow.
+    assert L.kind("Is Stack Overflow down?") == "down_now"
+    _json_by_url(monkeypatch, {"stackstatus.net": ({"status": {"description": "All Systems Operational"},
+                                                    "incidents": []}, None)})
+    docs, meta = L.fetch("down_now", "Is Stack Overflow down?")
+    assert meta["resolved"] and meta["source"] == "Stack Overflow status page"
+    assert "All Systems Operational" in docs[0]["text"]
+
+
+def test_is_x_down_news_must_name_x(monkeypatch):
+    _search_returns(monkeypatch, [
+        {"title": "Satya Nadella admits VS Code faded", "body": "IDEs...", "url": "https://w.com/1",
+         "date": "2026-11-23T00:00:00+00:00", "source": "Windows Latest"},
+        {"title": "Azure outage hits Europe", "body": "b", "url": "https://v.com/2",
+         "date": "2026-11-22T00:00:00+00:00", "source": "The Verge"},
+    ])
+    docs, _ = L.fetch("incident", "Is Azure down?")
+    assert [d["title"] for d in docs] == ["Azure outage hits Europe"]
+
+
+def test_is_x_down_with_nothing_naming_x_says_so(monkeypatch):
+    _search_returns(monkeypatch, [{"title": "Unrelated AI study", "body": "b", "url": "https://b.com/1",
+                                   "date": "2026-11-24T00:00:00+00:00", "source": "B"}])
+    docs, meta = L.fetch("incident", "Is Foobarqux down?")
+    assert docs == [] and "Foobarqux" in meta["error"]
+
+
+def test_about_subject_keeps_only_docs_naming_the_service():
+    docs = [{"title": "Downdetector - Check real-time service problems", "text": "generic"},
+            {"title": "Zorblaxio status", "text": "All good"}]
+    assert L.about_subject("Is Zorblaxio down?", docs) == docs[1:]
+    assert L.about_subject("What was the Microsoft outage about?", docs) == docs

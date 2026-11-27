@@ -1472,6 +1472,9 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         # insufficient_evidence -- relabelled as coming from the web.
         results["web"] = (results.get("web") or []) + web_docs
         results["timing"]["web_fallback"] = round(time.time() - t0, 2)
+    # "Is X down?" is answered only by documents that name X.
+    if live_kind in ("down_now", "incident") and (results.get("live") or {}).get("answer_only"):
+        results["web"] = live_sources.about_subject(query, results.get("web") or [])
 
     # Retry new terms: a healthy fetch with no evidence gets one more run on
     # the rewriter's terms. Adopted only if that run finds evidence.

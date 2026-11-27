@@ -42,11 +42,14 @@ STATUS_HOSTS = {
     "reddit": "www.redditstatus.com", "vercel": "www.vercel-status.com",
     "docker": "www.dockerstatus.com", "discord": "discordstatus.com",
     "atlassian": "status.atlassian.com",
+    # Verified 2026-11-26. Both spellings: status_product matches whole words.
+    "stack overflow": "stackstatus.net", "stackoverflow": "stackstatus.net",
 }
 
 _STATUS_NAME = {"github": "GitHub", "npm": "npm", "cloudflare": "Cloudflare",
                 "openai": "OpenAI", "reddit": "Reddit", "vercel": "Vercel",
-                "docker": "Docker", "discord": "Discord", "atlassian": "Atlassian"}
+                "docker": "Docker", "discord": "Discord", "atlassian": "Atlassian",
+                "stack overflow": "Stack Overflow", "stackoverflow": "Stack Overflow"}
 EOL_ALIASES = {"node": "nodejs", "node.js": "nodejs", "postgres": "postgresql",
                "k8s": "kubernetes"}
 
@@ -241,15 +244,45 @@ def _down_now(query: str):
     return docs, _meta("down_now", f"{name} status page", docs, None, True)
 
 
+# "Is Stack Overflow down?" -> "Stack Overflow". Only this shape names its
+# subject plainly enough to filter on; "Microsoft outage" etc. are left alone.
+_DOWN_SUBJECT = re.compile(r"\b(?:is|are)\s+(?:the\s+|my\s+)?(.+?)\s+(?:down|not (?:working|loading))\b", _I)
+_SQUASH = lambda s: re.sub(r"\W+", "", str(s).lower())  # noqa: E731
+
+
+def down_subject(query: str) -> str:
+    """"Stack Overflow" for "Is Stack Overflow down?", else ""."""
+    m = _DOWN_SUBJECT.search(query or "")
+    return m.group(1) if m else ""
+
+
+def about_subject(query: str, docs: List[dict]) -> List[dict]:
+    """`docs` naming the service an "Is X down?" question asks about; all of
+    them for any other question. A news search for "Is Stack Overflow down?"
+    returned AI-coding news that never named it, and the answer quoted it; the
+    web fallback's generic "is it down" checkers let the model say a made-up
+    service was down (sweep / live, 2026-11-25/26)."""
+    subject = _SQUASH(down_subject(query))
+    if not subject:
+        return docs
+    return [d for d in docs
+            # The url counts: a vendor's own page (github.blog) names it there.
+            if subject in _SQUASH(" ".join(str(d.get(k, "")) for k in ("title", "text", "detail", "url")))]
+
+
 def _news(query: str, kind_: str = "incident"):
+    subject = down_subject(query)
+    keep = lambda docs: about_subject(query, docs)  # noqa: E731
     hits, err = websearch.search(query, timelimit="m", news=True)
-    if hits:
-        docs = _web_docs(hits, news=True)
+    docs = keep(_web_docs(hits, news=True))
+    if docs:
         return docs, _meta(kind_, "DuckDuckGo news, last month", docs, None, False)
-    hits, err2 = websearch.search(query, timelimit="m")
-    docs = _web_docs(hits, news=False)
+    hits2, err2 = websearch.search(query, timelimit="m")
+    docs = keep(_web_docs(hits2, news=False))
     # An error only when nothing came back: a failed news search the text
     # search made up for isn't worth a "search failed" beside the results.
+    if not docs and subject and (hits or hits2):
+        err2 = f"no news or web result in the last month names {subject}"
     return docs, _meta(kind_, "DuckDuckGo, last month", docs,
                        None if docs else (err2 or err), False)
 
