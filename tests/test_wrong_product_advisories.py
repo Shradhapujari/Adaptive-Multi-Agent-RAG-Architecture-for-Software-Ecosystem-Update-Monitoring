@@ -377,3 +377,27 @@ def test_a_crowded_page_is_not_a_degraded_fetch(monkeypatch):
     import app_1
     r = _pipeline(monkeypatch, lambda kw, limit=5, *a, **k: [_foreign(i) for i in range(limit)])
     assert r["decision"].get("evidence_class") != "degraded"
+
+
+# GitHub's CNA writes "<weakness> was identified in GitHub Enterprise Server"
+# and fixes "in versions 3.17.12": the product is in neither the subject nor
+# the fix clause, so all GHES advisories read as not-about-GitHub and the
+# sweep-5 GitHub answer listed four CVEs under insufficient_evidence.
+_GHES = ("A stored cross-site scripting vulnerability was identified in GitHub "
+         "Enterprise Server that allowed an organization member with permission to "
+         "manage custom-property definitions to inject scripts. This vulnerability "
+         "affected all versions of GitHub Enterprise Server prior to 3.23 and was "
+         "fixed in versions 3.17.12, 3.18.6.")
+
+
+def test_an_identified_in_advisory_names_its_product():
+    assert _verdict([_nvd(_GHES)], "github",
+                    q="Any security vulnerabilities in GitHub?") == "patch_urgently"
+
+
+def test_identified_in_another_product_is_still_not_this_one():
+    # VulDB's shape; the GitHub word is the bug tracker, not the product.
+    text = ("A weakness has been identified in AIP-PUB ACPs-community up to 2.2.0. "
+            "The reported GitHub issue was closed.")
+    assert _verdict([_nvd(text)], "github",
+                    q="Any security vulnerabilities in GitHub?") != "patch_urgently"
