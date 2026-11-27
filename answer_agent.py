@@ -867,7 +867,11 @@ def deterministic_paragraph(query: str, evidence: List[Evidence],
         # Nothing on the empty branch: the app fetches the positive feed, so
         # "with no negative reaction reported" was a claim about the endpoint
         # dressed up as a finding about the community.
-        mood = " with negative reaction reported" if neg else ""
+        # A count, not a blanket mood: "4 post(s) with negative reaction
+        # reported" read as all four when one was tagged, and the tag is a
+        # title-keyword label ("fixed" matches "fix"), not a reaction (rust,
+        # sweep 5, 2026-11-25).
+        mood = f" ({len(neg)} tagged negative by the source feed)" if neg else ""
         parts.append(f"Community coverage adds {len(com)} post(s){mood}: "
                      f"{listed(com)}.")
 
