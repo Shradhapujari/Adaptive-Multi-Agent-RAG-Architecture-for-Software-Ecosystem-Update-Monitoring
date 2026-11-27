@@ -414,14 +414,27 @@ def _one_row_per_release(rows: list) -> list:
 
     Never empties the list: a feed that is all commits keeps one row per version
     rather than showing no release at all.
+
+    Reads both shapes -- the raw feed row and this app's release row -- and
+    passes advisories through untouched, so it can run on the merged pool: the
+    terminal's release rows reach it without having been through here, and
+    cited "linux v7.44.0" (7.4-rc4) for a Fedora question (sweep, 2026-11-25).
     """
-    tags = [v for v in rows if "/commit/" not in (v.get("versionUrl") or "")]
+    url = lambda v: v.get("versionUrl") or v.get("url") or ""  # noqa: E731
+    rel = [v for v in rows if vendor.is_release_record(v)]
+    tags = [v for v in rel if "/commit/" not in url(v)]
+    is_rel, keep = {id(v) for v in rel}, {id(v) for v in (tags or rel)}
     seen, out = set(), []
-    for v in tags or rows:
-        key = (v.get("versionProductName"), v.get("versionNumber"))
-        if key not in seen:
+    for v in rows:
+        if id(v) in is_rel:
+            if id(v) not in keep:
+                continue
+            key = (v.get("versionProductName") or v.get("product"),
+                   v.get("versionNumber") or v.get("version"))
+            if key in seen:
+                continue
             seen.add(key)
-            out.append(v)
+        out.append(v)
     return out
 
 
@@ -1081,6 +1094,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
         results["releases"] += [
             r for r in shared["releases"]
             if (r.get("url") or "").rstrip("/").lower() not in _have]
+        results["releases"] = _one_row_per_release(results["releases"])
         results["timing"]["releases"] = round(time.time()-t0, 1)
 
     upstream_cve: list = []   # see the NVD block below
