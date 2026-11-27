@@ -53,6 +53,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from eval_harness.benchmarks import extract_versions
 from guardrail import normalize
+import vendor as _vendor_rules
 
 VERDICTS = ("patch_urgently", "hold", "update_with_caveat", "safe",
             "insufficient_evidence")
@@ -145,6 +146,10 @@ def _vendor_tokens(vendors: Iterable[str]) -> set:
     out = set()
     for v in vendors:
         out |= {w for w in _WORD_RE.findall(str(v).lower()) if len(w) > 2}
+        # The project's own name is the product's too: "In CPython 3.13 ..."
+        # is a Python advisory (vendor_kb.json `nvd_keywords`).
+        out |= {w for x in KB.get(str(v).lower(), {}).get("nvd_keywords", ())
+                for w in _WORD_RE.findall(x.lower())}
     return out
 
 
@@ -177,7 +182,7 @@ _OWNER_CUT = re.compile(r"\b(?:on|for|by)\b", re.I)
 # Magma" and "the Linux builds of hMailServer" are the same shape.
 _COMPONENT_AFTER = re.compile(
     r"\s*(?:connectors?|drivers?|modules?|packages?|plugins?|extensions?|add-?ons?"
-    r"|sdks?|bindings?|wrappers?|adapters?|foundation|builds?\s+of)\b", re.I)
+    r"|sdks?|bindings?|wrappers?|adapters?|foundation|(?:builds?|installers?)\s+of)\b", re.I)
 
 # Hand-curated per-product exclusions (data/vendor_kb.json): names that appear
 # in a product's advisory subjects without the product owning the advisory.
@@ -310,7 +315,11 @@ def _subject_names_product(d: dict, vtoks: set, exclude: Sequence[str] = ()) -> 
     # "prior to" there and counted for a Node.js question (2026-11-12). The
     # first sentence stands in for the subject -- when it names the product at
     # all; a bare "CVE-2026-1234" still abstains.
-    subject = (body[:m.start()] if m else re.split(r"(?<=[.;])\s", body, maxsplit=1)[0]).lower()
+    # Never past the first sentence: "A ... flaw has been found in ... the
+    # pulp_python package. ... a Python distribution that has a remote" put
+    # "Python" in the subject because the first predicate was two sentences
+    # on (sweep, 2026-11-26).
+    subject = re.split(r"(?<=[.;])\s", body[:m.start()] if m else body, maxsplit=1)[0].lower()
     if not m and not any(v in subject for v in vtoks):
         return True
     # Within the subject, a name after "on"/"for" is the platform the product
@@ -369,7 +378,12 @@ def kev_owns(d: dict, vendors: Sequence[str], exclude: Sequence[str] = ()) -> bo
             names = vtoks | {p.lower() for p in kb.get("kev_products", ())}
             if _tokens(head) & names or _subject_names_product(d, vtoks, exclude):
                 return True
-        elif _tokens(_PLATFORM_PREP.split(f"{vend} {prod}", maxsplit=1)[0]) & vtoks:
+        # With no owner on file, every word of the name must be there: one
+        # shared word is not the product. "vs code" matched Collabora's
+        # "Built-in CODE Server" and "Code Aurora" on "code" alone and said
+        # Patch now (sweep, 2026-11-23).
+        elif set(_WORD_RE.findall(str(v).lower())) <= set(_WORD_RE.findall(
+                _PLATFORM_PREP.split(f"{vend} {prod}", maxsplit=1)[0])):
             return True
     return False
 
@@ -430,6 +444,10 @@ def _about(d: dict, vtoks: set, qtoks: set, exclude: Sequence[str] = (),
     if vtoks and d.get("source") in ADVISORY and d.get("kev_vendor"):
         return kev_owns(d, vendors, exclude)
     if vtoks and d.get("source") in ADVISORY and _lacks_required_word(d, vendors):
+        return False
+    if vtoks and d.get("source") in ADVISORY and vendors and all(
+            _vendor_rules.other_wordpress_plugin(_text(d), v)
+            or _vendor_rules.foreign_name_before(_text(d), v) for v in vendors):
         return False
     if vtoks:
         if not toks & vtoks:
@@ -498,7 +516,10 @@ def decide(pool: Sequence[dict], question: str, vendors: Iterable[str] = (),
     # exploitation. Whether the version was confirmed shows in `confidence`.
     advisories = [d for d in about if d.get("source") in ADVISORY
                   and _CVE_RE.search(_text(d) + " " + str(d.get("url", "")))]
-    advisories = [d for d in advisories if not _stale(d, pool, asked)]
+    # `legacy`: a KEV entry the console shows as history (added over a year
+    # ago, app_1._show_cve). Java's 2013 JRE rows said Patch now on a question
+    # about the newest Java (sweep, 2026-11-23).
+    advisories = [d for d in advisories if not _stale(d, pool, asked) and not d.get("legacy")]
     releases = [d for d in on_version if d.get("source") in RELEASE]
     reports = [d for d in on_version
                if d.get("source") in COMMUNITY and _PROBLEM_RE.search(_text(d))]

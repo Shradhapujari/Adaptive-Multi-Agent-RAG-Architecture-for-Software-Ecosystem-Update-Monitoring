@@ -41,6 +41,26 @@ _BARE_YESNO = re.compile(r"\W*(?:yes|no|yeah|nope)\W*", re.I)
 _DONT_UPDATE = re.compile(
     r"(?:(?:not|n't)\s+(?:be\s+)?(?:safe|advisable|recommended|wise)\s+to\s+(?:update|upgrade|install|patch)"
     r"|(?:do\s*not|don't|should\s*not|shouldn't|must\s*not|avoid)\s+(?:updat|upgrad|install|patch))", re.I)
+# A release cycle the source marks ended ("Python 3.9: support ended
+# 2025-10-31", live_sources' endoflife.date line) and an answer sentence that
+# calls it supported anyway.
+_ENDED_CYCLE = re.compile(r"(?<![\w.])(\d+(?:\.\d+)*):\s+support ended\b", re.I)
+_SUPPORTED = re.compile(r"\b(?:is|are|remains?|still)\s+(?:still\s+)?(?:being\s+)?supported\b", re.I)
+_UNSUPPORTED = re.compile(r"\b(?:not|no\s+longer|n't|never|ended|unsupported|end[- ]of[- ]life|eol)\b", re.I)
+
+
+def _calls_ended_supported(text: str, haystack: str) -> List[str]:
+    """Ended cycles that a sentence of `text` calls supported."""
+    out = []
+    for cycle in dict.fromkeys(_ENDED_CYCLE.findall(haystack)):
+        tok = re.compile(rf"(?<![\w.]){re.escape(cycle)}(?!\.?\d)")
+        for sent in re.split(r"(?<=[.!?;])\s+", text):
+            if tok.search(sent) and _SUPPORTED.search(sent) and not _UNSUPPORTED.search(sent):
+                out.append(cycle)
+                break
+    return out
+
+
 # Dates are checked separately; cut them out before the version pass so a
 # dotted date form cannot arrive as a version.
 _ISO_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
@@ -507,6 +527,13 @@ def check(answer: str, evidence: Sequence, question: str = "", lead: str = "",
         bad.append(Violation(
             "verdict_conflict", "the verdict above says to patch now, but the answer "
                                 "says not to update — report the advisories and the fixed version instead"))
+    # "Python 3.9 is still supported" over "Python 3.9: support ended
+    # 2025-10-31 (1 year ago)" (live sweep, 2026-11-25): every version and the
+    # citation were real, so nothing else here caught it.
+    for cycle in _calls_ended_supported(text, haystack):
+        bad.append(Violation(
+            "eol_conflict", f"the source says support for {cycle} has ended, but the "
+                            f"answer calls it supported — give the end-of-life date instead"))
     # Declining excuses the *citation* requirement and nothing else: an answer
     # that says it cannot determine one thing and then states a version, a date
     # or a label anyway is asserting, and the assertion is what gets checked.

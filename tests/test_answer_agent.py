@@ -23,7 +23,7 @@ import answer_agent  # noqa: E402
 import guardrail  # noqa: E402
 from eval_harness.benchmarks import is_abstention  # noqa: E402
 from answer_agent import (  # noqa: E402
-    build_cited_prompt, collect_evidence, deterministic_paragraph, present_answer,
+    Evidence, build_cited_prompt, collect_evidence, deterministic_paragraph, present_answer,
 )
 
 RESULTS = {
@@ -60,8 +60,9 @@ def test_evidence_labels_carry_source_name_and_date():
     # description -- so it is now labelled as one. Calling it "Release Notes -
     # Linux v6.18.21" told the reader a version by that name shipped; the
     # number in an advisory row is the *affected* version. Expectation changed
-    # deliberately with vendor.classify_record.
-    assert "Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28" in labels
+    # deliberately with vendor.classify_record. A kernel CVE carries no
+    # version at all: the feed's is scraped from free text (vendor.describe_record).
+    assert "Security Advisory - Linux advisory, 2026-08-28" in labels
     assert "Release Notes - Django v5.2.1, 2026-08-20" in labels
     # Rows from /api/reddit/query/cve are Reddit posts, not advisory records.
     # "CVE Feed" claimed a security feed had reported them; the endpoint
@@ -89,7 +90,7 @@ def test_deterministic_paragraph_cites_every_kind():
     # kind of evidence.
     assert "[Release Notes - Django v5.2.1, 2026-08-20]" in text
     assert "1 advisory record(s) apply" in text
-    assert "[Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28]" in text
+    assert "[Security Advisory - Linux advisory, 2026-08-28]" in text
     assert "Community security discussion adds 1 post(s)" in text
     assert "[Security Discussion - r/netsec, 2026-08-30]" in text
     assert "[Community - r/linux, 2026-08-31]" in text
@@ -124,7 +125,7 @@ def test_prompt_names_the_bracket_rule_and_only_listed_sources():
     # Sources are cited by a short tag and named by their full label on the
     # same line: the model copies [S1]; expand_tags restores the label.
     assert "[S1]" in prompt
-    assert "Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28" in prompt
+    assert "Security Advisory - Linux advisory, 2026-08-28" in prompt
 
 
 def test_guardrail_rejects_headline_contradicting_its_list():
@@ -465,11 +466,11 @@ def test_prompt_tells_the_model_an_in_window_source_is_an_answer():
 # the guardrail rejects a citation that was never in the prompt, so a stub that
 # cites a label collect_evidence no longer emits now falls back to rule-based.
 @pytest.mark.parametrize("raw,expected_start", [
-    ('Here is a flowing paragraph:\n\n"Linux shipped a fix [Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28]."',
+    ('Here is a flowing paragraph:\n\n"Linux shipped a fix [Security Advisory - Linux advisory, 2026-08-28]."',
      "Linux shipped a fix"),
-    ('Answer: Linux shipped a fix [Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28].',
+    ('Answer: Linux shipped a fix [Security Advisory - Linux advisory, 2026-08-28].',
      "Linux shipped a fix"),
-    ('Linux shipped a fix [Security Advisory - Linux advisory (affects Linux 6.18.21), 2026-08-28].',
+    ('Linux shipped a fix [Security Advisory - Linux advisory, 2026-08-28].',
      "Linux shipped a fix"),
 ])
 def test_model_preamble_and_wrapping_quotes_are_stripped(monkeypatch, raw, expected_start):
@@ -665,6 +666,15 @@ def test_model_answer_is_trimmed_to_one_sentence(monkeypatch):
     assert answer_agent._one_sentence(trailing) == trailing
 
 
+def test_one_sentence_never_cuts_inside_a_quote():
+    """"Why did the Microsoft outage happen?" (2026-11-23): the news quote is
+    title. body, and cutting at the title's full stop headlined the title with
+    an open quote and dropped the cause the body gave."""
+    q = ("News says “Microsoft explains how its outage happened. A defect "
+         "installed in July was triggered…” [News - El Cronista, 2026-11-23].")
+    assert answer_agent._one_sentence(q + " Yahoo says “A bug.” [Y].") == q
+
+
 def test_top_comment_below_the_floor_does_not_become_the_answer():
     """A 1-point comment is its author's own upvote and nobody else's.
 
@@ -768,7 +778,8 @@ def test_the_presenter_sees_the_advisories_set_aside_for_the_verdict():
     results = {**RESULTS, "decision_advisories": [
         {"product": "Firefox", "version": "157.0.1", "date": "2026-10-06",
          "is_cve": True, "isCve": True,
-         "notes": "Mitigation bypass in the File Handling component.",
+         "notes": "Mitigation bypass in the File Handling component. "
+                  "This vulnerability affects Firefox < 157.0.1.",
          "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-5555"}]}
     ev = collect_evidence(results)
     advisories = [e for e in ev if e.kind == "advisory"]
@@ -937,3 +948,12 @@ def test_update_question_prompt_keeps_the_update_framing(monkeypatch):
 def test_live_kind_none_builds_the_same_prompt_as_before():
     ev = collect_evidence(RESULTS)
     assert build_cited_prompt("q", ev) == build_cited_prompt("q", ev, live_kind=None)
+
+
+def test_no_provenance_footer_bullet():
+    """"Every statement above is drawn from..." rendered as its own bullet
+    under What the sources say -- a line about the answer, not a source."""
+    web = [Evidence(label="News - X", kind="web", title="t", detail="Outage.")]
+    rel = [Evidence(label="R1", kind="release", title="v1")]
+    for ev in (web, rel):
+        assert "outside them" not in deterministic_paragraph("q", ev)

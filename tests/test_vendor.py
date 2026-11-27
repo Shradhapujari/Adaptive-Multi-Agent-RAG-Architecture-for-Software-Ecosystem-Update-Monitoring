@@ -246,8 +246,54 @@ def test_advisory_is_named_by_its_cve_not_its_version_string():
     # The affected-version field is junk here (second component 642087), so
     # it is not printed at all; a plausible one still is.
     assert describe_record(ADVISORY) == "CVE-2026-80688"
-    assert describe_record({**ADVISORY, "version": "7.2.0"}) == "CVE-2026-80688 (affects Linux 7.2.0)"
-    assert describe_record({**ADVISORY, "version": "153.0.8010.52"}).endswith("(affects Linux 153.0.8010.52)")
+    other = {**ADVISORY, "notes": "Use after free in the Linux kernel before 7.2.1 allows a crash."}
+    assert describe_record({**other, "version": "7.2.0"}) == "CVE-2026-80688 (affects Linux 7.2.0)"
+    assert describe_record({**other, "version": "153.0.8010.52"}).endswith("(affects Linux 153.0.8010.52)")
+
+
+def test_kernel_cve_prints_no_version():
+    # The feed read "Tested-on: WCN6855 hw2.1" as linux 2.1.0 (CVE-2026-97442,
+    # sweep 2026-11-23); a kernel CVE's text never states the affected range.
+    row = {**ADVISORY, "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-97442",
+           "notes": "In the Linux kernel, the following vulnerability has been resolved:\n\n"
+                    "wifi: ath11k: fix invalid data access\n\nTested-on: WCN6855 hw2.1 PCI"}
+    for v in ("2.1.0", "7.2.0", "2.00.0"):
+        assert describe_record({**row, "version": v}) == "CVE-2026-97442"
+
+
+def test_feed_guessed_product_is_not_printed():
+    # The feed's mitre bot guesses the product from the CVE text: "3" for
+    # phpBB, "vulnerability" for a radio's web UI. "CVE-2026-134927 (affects 3
+    # 3.3.19)" reached a demo answer (sweep, 2026-11-23). Notes as in the feed.
+    junk = [
+        ("3", "3.3.19", "CVE-2026-134927",
+         "A weakness has been identified in phpBB up to 3.3.19. Affected by this vulnerability is the function phpbb_get_user_rank."),
+        ("vulnerability", "4.9.0", "CVE-2026-94252",
+         "An unauthenticated stored and reflected cross-site scripting (XSS) vulnerability in the embedded web interface of Frontier Smart Technologies Venice X FS2340 running IR4.9 allows a network attacker to inject JavaScript."),
+        ("vulnerability", "1.2.5", "CVE-2026-135078",
+         "A vulnerability has been found in KeudellCoding User Location Map up to 1.2.5. Affected by this issue is some unknown functionality."),
+        ("booking", "2.8.5", "CVE-2026-131761",
+         "Missing Authorization vulnerability in Magepeople inc. Booking and Rental Manager booking-and-rental-manager-for-woocommerce allows Exploiting Incorrectly Configured Access Control Security Levels.This issue affects Booking and Rental Manager: from n/a through 2.8.5."),
+        ("postgresql", "42.7.15", "CVE-2026-134848",
+         "pgjdbc, the PostgreSQL JDBC Driver, does not refuse a NUL character in a startup parameter. All versions before 42.7.15 are affected, and 42.7.15 fixes the problem."),
+    ]
+    for product, version, cve, notes in junk:
+        row = {"product": product, "version": version, "isCve": True, "notes": notes,
+               "url": f"https://nvd.nist.gov/vuln/detail/{cve}"}
+        assert describe_record(row) == cve, product
+
+
+def test_product_named_by_the_cve_is_still_printed():
+    # Not a WordPress plugin: "<plugin> WordPress plugin before 3.5.1" is the
+    # plugin's version, which is not WordPress's (#231).
+    row = {"product": "mattermost", "version": "11.7.0", "isCve": True,
+           "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-19531",
+           "notes": "Mattermost versions 11.7.x <= 11.7.13, 11.10.x <= 11.10.3, 11.11.x <= 11.11.3 fail to verify the request."}
+    assert describe_record(row) == "CVE-2026-19531 (affects mattermost 11.7.0)"
+    row = {"product": "nginx", "version": "1.3.0", "isCve": True,
+           "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-132779",
+           "notes": "When NGINX Plus or NGINX Open Source is configured to use TLS 1.3 early data, a crash can occur."}
+    assert describe_record(row) == "CVE-2026-132779 (affects nginx 1.3.0)"
 
 
 def test_release_is_named_by_its_version():
@@ -325,6 +371,15 @@ def test_generic_catalogue_words_do_not_crowd_out_the_product(tmp_path):
     q = ("Firefox 151: Weather from New Tab Page disappeared and there's no "
          "option in settings anymore. How to get it back?")
     assert [v.name for v in detect_vendors(q, catalog)] == ["firefox"]
+
+
+def test_printing_is_not_a_second_product():
+    # "What broke printing in the latest Windows update?" grounded to
+    # ["printing", "windows"], so Chrome's and Oracle's printing CVEs passed the
+    # subject screen and made Windows "Patch now" (sweep 5, 2026-11-23).
+    cat = ["windows", "printing"]
+    assert [v.name for v in detect_vendors(
+        "What broke printing in the latest Windows update?", cat)] == ["windows"]
 
 
 def test_a_component_named_in_a_known_product_is_not_a_second_product():

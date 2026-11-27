@@ -103,7 +103,9 @@ def _to_doc(i: int, hit: dict) -> Optional[dict]:
     title = str(hit.get("title") or "").strip()
     body = str(hit.get("body") or hit.get("snippet") or "").strip()
     url = str(hit.get("href") or hit.get("url") or "").strip()
-    raw = guardrail.normalize(f"{title}. {body}")   # NFKC, zero-width and format chars gone
+    # A news body often opens with its own headline; prefixing it read it twice.
+    lead = "" if body.lower().startswith(title.lower()) else f"{title}. "
+    raw = guardrail.normalize(f"{lead}{body}")   # NFKC, zero-width and format chars gone
     if guardrail.screen({"title": title, "text": body}) is not None:  # tripped the injection screen
         return None
     scrubbed, _ = guardrail.scrub(raw)   # secrets redacted

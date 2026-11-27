@@ -197,8 +197,15 @@ _SENT_END = re.compile(r"(?<=[.!?])\s+(?=[\"\u201c\'(]?[A-Z])")
 
 
 def _one_sentence(text: str) -> str:
-    """The first sentence, citations intact. The rule says one; models drift."""
-    return _SENT_END.split((text or "").strip(), 1)[0].strip()
+    """The first sentence, citations intact. The rule says one; models drift.
+    Never cut inside a “quote”: a quoted news snippet is title. body, and the
+    cut headlined the title and dropped the cause (Microsoft outage, 2026-11-23)."""
+    t = (text or "").strip()
+    for m in _SENT_END.finditer(t):
+        head = t[:m.start()]
+        if head.count("“") <= head.count("”"):
+            return head.strip()
+    return t
 
 
 def split_summary(text: str):
@@ -353,6 +360,9 @@ def newest_advisory_line(evidence) -> str:
     return f"Newest: {r['CVE']} ({r['Date'][:10]}) — {r['What was wrong']}"
 
 
+_BARE_URL = re.compile(r"\s*\S+://\S+\s*$")
+
+
 @dataclass
 class Evidence:
     """One retrieved item, in the shape the presenter cites it by."""
@@ -367,6 +377,7 @@ class Evidence:
     sentiment: str = ""
     source: str = ""      # feed tag, e.g. cisa_kev -- the KEV column reads it
     severity: str = ""    # versionSeverity as the feed states it; never inferred
+    legacy: bool = False  # a KEV entry added over a year ago (app_1._show_cve)
 
     def line(self, tag: str = "") -> str:
         """One source line for the prompt: the citation label, then the facts.
@@ -541,6 +552,7 @@ def collect_evidence(results: Dict, per_kind: int = 4) -> List[Evidence]:
             kind="advisory", title=title, detail=_clean(c.get("detail", "")),
             url=c.get("url", ""), date=date, security=True,
             source=c.get("source", ""), severity=str(c.get("versionSeverity") or ""),
+            legacy=bool(c.get("legacy")),
         ))
 
     for c in [c for c in posts if not is_kev(c)][:per_kind]:
@@ -791,7 +803,8 @@ def deterministic_paragraph(query: str, evidence: List[Evidence],
 
     rel = [e for e in evidence if e.kind == "release"]
     sec = [e for e in rel if e.security]
-    adv = [e for e in evidence if e.kind == "advisory"]
+    adv = [e for e in evidence if e.kind == "advisory" and not e.legacy]
+    old = [e for e in evidence if e.kind == "advisory" and e.legacy]
     cve = [e for e in evidence if e.kind == "cve"]
     com = [e for e in evidence if e.kind == "community"]
     web = [e for e in evidence if e.kind == "web"]
@@ -803,8 +816,7 @@ def deterministic_paragraph(query: str, evidence: List[Evidence],
         bare = lambda t: re.sub(r"\[/?untrusted[^\]]*\]", "", t)  # noqa: E731
         said = [f"{e.label.split(' - ')[0]} says “{_clean(bare(e.detail or e.title), 200)}” [{e.label}]."
                 for e in web[:3]]
-        return " ".join(said + ["Every statement above is drawn from the bracketed "
-                                "sources; nothing outside them was used."])
+        return " ".join(said)
 
     scope = f" for {window_note}" if window_note else ""
     parts: List[str] = []
@@ -820,13 +832,15 @@ def deterministic_paragraph(query: str, evidence: List[Evidence],
             f"{len(sec)} of the matching releases{scope} are classified as "
             f"security fixes: {listed(sec)}.")
         lead = sec[0]
-        if lead.detail:
+        if lead.detail and not _BARE_URL.match(lead.detail):
             parts.append(f"The most relevant of them reports “{_clean(lead.detail, 160)}” "
                          f"[{lead.label}].")
     elif rel:
         parts.append(f"The release feed returned {len(rel)} matching "
                      f"release(s){scope}: {listed(rel)}.")
-        if rel[0].detail:
+        # A bare link is no note: "The top result notes “https://en.wikipedia.
+        # org/wiki/WordPress”" (sweep, 2026-11-25).
+        if rel[0].detail and not _BARE_URL.match(rel[0].detail):
             parts.append(f"The top result notes “{_clean(rel[0].detail, 160)}” "
                          f"[{rel[0].label}].")
     else:
@@ -835,6 +849,11 @@ def deterministic_paragraph(query: str, evidence: List[Evidence],
     if adv:
         parts.append(f"On the security side, {len(adv)} advisory record(s) "
                      f"apply: {listed(adv)}.")
+    # Java's 2013 JRE entries were listed as applying to the newest Java while
+    # the verdict (rightly) ignored them (sweep, 2026-11-23).
+    if old:
+        parts.append(f"{len(old)} older advisory record(s), on CISA's exploited list for "
+                     f"over a year, are history, not a reason to patch now: {listed(old)}.")
 
     if cve:
         # Deliberately a separate sentence and a separate count: a Reddit
@@ -852,8 +871,6 @@ def deterministic_paragraph(query: str, evidence: List[Evidence],
         parts.append(f"Community coverage adds {len(com)} post(s){mood}: "
                      f"{listed(com)}.")
 
-    parts.append("Every statement above is drawn from the bracketed sources; "
-                 "nothing outside them was used.")
     return " ".join(parts)
 
 

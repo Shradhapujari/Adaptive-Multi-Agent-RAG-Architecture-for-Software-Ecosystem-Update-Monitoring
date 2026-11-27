@@ -9,6 +9,7 @@
   "not_this_product": "names that sit in this product's advisory subjects while another vendor owns the affected artifact; read by decide._owns",
     "kev_vendors": "CISA KEV vendorProject strings (lowercase) that ship this product; a KEV row from any other vendorProject is not this product's. Read by decide.kev_owns",
     "kev_products": "extra words in a KEV product field that name this product (Chrome is filed as 'Chromium V8', the Windows kernel as 'Win32k')",
+    "nvd_keywords": "the project's own name, for a product whose name matches every ecosystem package (python: cpython): searched on NVD as well and counted as the product's name. Read by app_1.run_pipeline and decide._vendor_tokens",
     "_not_here": "aliases live in vendor._ALIASES and subreddit->product in vendor._SUBREDDIT_VENDOR; not duplicated"
   },
   "products": {
@@ -28,11 +29,16 @@
     "chrome": {"owner": "Google", "not_this_product": ["chrome-devtools-mcp"], "kev_vendors": ["google"], "kev_products": ["chromium"]},
     "android": {"owner": "Google", "kev_vendors": ["android", "google"]},
     "edge": {"owner": "Microsoft", "name_requires": ["microsoft"], "components_unnamed": true, "upstream": "chrome", "kev_vendors": ["microsoft"]},
+    "zimbra": {"owner": "Synacor", "kev_vendors": ["zimbra", "synacor"]},
+    "java": {"owner": "Oracle", "kev_vendors": ["oracle", "openjdk"], "kev_products": ["java se", "jre"]},
     "windows": {"owner": "Microsoft", "kev_vendors": ["microsoft"], "kev_products": ["win32k"]},
     "firefox": {"owner": "Mozilla", "kev_vendors": ["mozilla"]},
     "linux": {"owner": "Linux kernel maintainers", "kev_vendors": ["linux"], "kev_products": ["kernel"]},
     "openssl": {"owner": "OpenSSL Project", "kev_vendors": ["openssl"]},
     "docker": {"owner": "Docker", "kev_vendors": ["docker"]},
-    "python": {"owner": "Python Software Foundation", "kev_vendors": ["python", "python software foundation"]}
+    "python": {"owner": "Python Software Foundation", "kev_vendors": ["python", "python software foundation"],
+      "not_this_product": ["python packaging authority"],
+      "nvd_keywords": ["cpython"]
+    }
   }
 }

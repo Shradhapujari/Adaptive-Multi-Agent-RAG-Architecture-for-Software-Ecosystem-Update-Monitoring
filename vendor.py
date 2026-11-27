@@ -145,6 +145,9 @@ _ALIASES: Dict[str, str] = {
     "log4j2": "log4j",
     "log4shell": "log4j",
     "golang": "go",
+    # Not in the catalog either: "Is it safe to update Zimbra?" named no
+    # product, so Cisco ASA and Siemens KEV rows were listed (2026-11-25).
+    "zimbra": "zimbra",
     "nodejs": "node.js",
     "k8s": "kubernetes",
     "vscode": "visual studio code",
@@ -354,6 +357,16 @@ def _drop_makers(low: str, found: List[VendorMatch]) -> List[VendorMatch]:
     return [v for v in found if not maker_of(v)]
 
 
+# Catalogue names that are a feature of whatever product they are asked about,
+# however the question is worded: "What broke printing in the latest Windows
+# update?" and "Windows 11 update broke printing?" asked about a product called
+# printing too, so Chrome's and Oracle's printing CVEs counted toward Windows'
+# "Patch now" (sweep 5, 2026-11-23). As a part, NVD is still searched for
+# "windows printing" and the community filter still keeps "... printing issues".
+# ponytail: a hand list; extend when another feature word turns up as a product.
+_GENERIC_PARTS = frozenset({"printing"})
+
+
 def _drop_components(low: str, found: List[VendorMatch]) -> List[VendorMatch]:
     """"Any WebRTC vulnerabilities in Chrome?": WebRTC is a catalogue name, but
     here it is a part of Chrome, and as a second asked product it let a Mozilla
@@ -384,8 +397,8 @@ def _drop_components(low: str, found: List[VendorMatch]) -> List[VendorMatch]:
                     # adjacency also took "Debian installer", "Docker image"
                     # and "Linux Mint" (11 of 1206 benchmark questions).
                     or re.search(rf"{bm}\s+{am}\s+(?:vulnerabilit|advisor|cve|exploit|flaw|security)", low))
-        return next((b for b in found if b is not a
-                     and b.name.split()[-1] in known and part_of(b)), None)
+        return next((b for b in found if b is not a and b.name.split()[-1] in known
+                     and (a.name in _GENERIC_PARTS or part_of(b))), None)
     # The dropped name is kept on its owner as a part: retrieval searches
     # "chrome webrtc", which finds Chrome's WebRTC advisories and not Mozilla's.
     parts = {}
@@ -559,6 +572,117 @@ _PLATFORM_LIST = re.compile(
     rf"(?:\bfor|\bon|\()\s*{_OS_NAME}(?:\s*(?:,|/|\band\b|\bor\b)\s*(?:and\s+|or\s+)?{_OS_NAME}\b)+")
 
 
+# Wordfence's form, "The <plugin> plugin for WordPress is vulnerable to ...".
+_WP_PLUGIN = re.compile(r"\W*(?:the\s+)?(.{1,300}?)\s+(?:plugin|theme)\s+for\s+wordpress\b", re.I)
+# NVD's other shapes: "Astra WordPress theme before 4.14.0", "Prevent Direct
+# Access – Protect WordPress Files plugin before 2.8.9.2", "... WordPress
+# plugin through 1.12". The name ends where the version range starts.
+_WP_PLUGIN_BEFORE = re.compile(
+    r"\W*(?:the\s+)?(.{1,300}?)\s+(?:wordpress\s+)?(?:plugin|theme)\s+"
+    r"(?:before|through|prior\s+to|up\s+to|versions?|<=?|\d)", re.I)
+
+
+def other_wordpress_plugin(text: str, vendor_name: str) -> bool:
+    """True when `text` is a WordPress plugin's or theme's advisory and the
+    plugin is not `vendor_name`: its name does not start with the product.
+    "The OpenStation: Desktop Windows, Dock & Virtual Desktops for WP Admin
+    plugin for WordPress" said Patch now for "Latest Windows 11 version?"
+    (sweep, 2026-11-23); "The Elementor Website Builder plugin for WordPress"
+    stays Elementor's. For WordPress itself no plugin or theme is core, even
+    one named "Protect WordPress Files" (sweep, 2026-11-25)."""
+    text = text or ""
+    m = _WP_PLUGIN.match(text)
+    if not m and "wordpress" in text.lower():
+        m = _WP_PLUGIN_BEFORE.match(text)
+    want = (vendor_name or "").strip().lower()
+    if not (m and want):
+        return False
+    return want == "wordpress" or not re.match(rf"{re.escape(want)}(?![\w-])", m.group(1).lower())
+
+
+_KB_OWNERS: Optional[Dict[str, set]] = None
+# Capitalised words that open a sentence rather than name a product.
+_SENTENCE_OPENERS = frozenset("the a an in on this when if multiple".split())
+
+
+_KB_PROJECT_NAMES: Optional[Dict[str, tuple]] = None
+
+
+def _project_names(product: str) -> tuple:
+    """Other names vendor_kb.json lists for `product` (`nvd_keywords`)."""
+    global _KB_PROJECT_NAMES
+    if _KB_PROJECT_NAMES is None:
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "data", "vendor_kb.json"), encoding="utf-8") as f:
+                _KB_PROJECT_NAMES = {k.lower(): tuple(x.lower() for x in v.get("nvd_keywords", ()))
+                                     for k, v in json.load(f)["products"].items()}
+        except (OSError, ValueError, KeyError):
+            _KB_PROJECT_NAMES = {}
+    return tuple(x for x in _KB_PROJECT_NAMES.get(product, ()) if x != product)
+
+
+def _owner_words(product: str) -> set:
+    """Words of the owners vendor_kb.json lists for `product` ("microsoft")."""
+    global _KB_OWNERS
+    if _KB_OWNERS is None:
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "data", "vendor_kb.json"), encoding="utf-8") as f:
+                _KB_OWNERS = {k.lower(): {w for o in v.get("kev_vendors", ()) for w in o.lower().split()}
+                              for k, v in json.load(f)["products"].items()}
+        except (OSError, ValueError, KeyError):
+            _KB_OWNERS = {}
+    return _KB_OWNERS.get(product, set())
+
+
+_POSSESSIVE_LEAD = re.compile(r"\W*((?:[A-Z][\w.+-]*\s+){0,2}[A-Z][\w.+-]*)['’]s\s")
+_BUNDLED_AFTER = re.compile(
+    r"\s+(?:librar(?:y|ies)|components?|binar(?:y|ies)|dlls?)\s+"
+    r"(?:within|bundled\s+(?:in|with)|shipped\s+(?:in|with)|included\s+in|used\s+by)\s+[A-Z]")
+_ATTACK_AFTER = re.compile(r"\s+(?:code|command|argument)\s+injection\b", re.I)
+_CVE_LEAD = re.compile(r"^(?:\W*CVE-\d{4}-\d+\W*)+", re.I)
+
+
+def foreign_name_before(text: str, vendor_name: str) -> bool:
+    """True when the first mention of a product whose owner is on file follows
+    another product's capitalised name: "OpenClaw Windows Node", "Maono Link
+    3.8.13 MaonoAiServices Windows service" (sweep, 2026-11-23). The owner's
+    own advisories say "in Windows Win32K", "Windows Kernel ...", "Microsoft
+    Windows": a lowercase word, the owner, or nothing before the name.
+
+    ponytail: one word of look-behind. Only products with an owner on file
+    are judged, so "Canonical Ubuntu" and "Apache Log4j" are never touched."""
+    want = (vendor_name or "").strip().lower()
+    owners = _owner_words(want)
+    if not owners:
+        return False
+    # A record's title leads with its CVE id ("CVE-2026-2001 Linux kernel ..."):
+    # an id is not a product name.
+    text = _CVE_LEAD.sub("", text or "")
+    # "Flowintel's community data launcher script passes ... a child Python
+    # helper": the possessive opening names whose artifact it is.
+    own = _POSSESSIVE_LEAD.match(text)
+    if own and want not in own.group(1).lower() and not (
+            {w.lower() for w in own.group(1).split()} & owners):
+        return True
+    m = re.search(rf"(?<![\w-]){re.escape(want)}(?![\w-])", text or "", re.I)
+    if not m:
+        return False
+    # The product inside another one, or as the name of an attack: "statically
+    # linked OpenSSL libraries within Netskope Client", "perform an OpenSSL
+    # code injection in the backends ImportPKCS12 function" (sweep, 2026-11-25).
+    if _BUNDLED_AFTER.match(text, m.end()) or _ATTACK_AFTER.match(text, m.end()):
+        return True
+    before = text[:m.start()].rstrip()
+    prev = re.findall(r"[\w.+-]+$", before)
+    if not prev or before != before.rstrip(",;:(."):
+        return False
+    p = prev[0]
+    # Any capital or digit makes it a name: "iTerm2", "MaonoAiServices".
+    return (p != p.lower() or any(c.isdigit() for c in p)) and p.lower() not in owners | _SENTENCE_OPENERS
+
+
 def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     """Whether a CVE record is really about `vendor_name`, by its own text.
 
@@ -599,6 +723,10 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     want = (vendor_name or "").strip().lower()
     if not want:
         return True
+    # The project's own name (vendor_kb.json `nvd_keywords`) names it too:
+    # "In CPython 3.13 and earlier, the tarfile module ..." is Python's.
+    if any(advisory_names_vendor(row, alt) for alt in _project_names(want)):
+        return True
     text = " ".join(str(row.get(f) or "") for f in
                     ("notes", "versionReleaseNotes")).strip()
     if not text:
@@ -609,6 +737,12 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     # (live check, 2026-11-22).
     if text.lower().startswith("in the linux kernel, the following vulnerability"):
         return want in ("linux", "linux kernel", "kernel")
+    # "In the nrfconnect/ncs-zigbee repository, ..." names whose code it is, the
+    # same way the kernel preamble does; a later "GitHub Pages" or "GitHub
+    # Actions" is where that repository runs, not the product (sweep, 2026-11-23).
+    repo = re.match(r"\s*in the ([\w.-]+/[\w.-]+) repository\b", text, re.I)
+    if repo:
+        return re.search(rf"(?<![\w-]){re.escape(want)}(?![\w-])", repo.group(1).lower()) is not None
     # For Linux itself, a CVE has to say "Linux kernel". The feed files
     # "Linux Foundation Magma", "TeamViewer ... for Linux", hMailServer's Linux
     # builds and EilikO Linux robot firmware under it too (9 of 21 rows on a
@@ -618,6 +752,8 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     if want in ("linux", "linux kernel", "kernel"):
         return "linux kernel" in text.lower()
 
+    if other_wordpress_plugin(text, want) or foreign_name_before(text, want):
+        return False
     m = _VERSION_MARKER.search(text)
     # The marker's own sentence, or the first one when there is no marker.
     # With no marker the product may be named in any sentence: Mozilla's
@@ -634,7 +770,9 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     # A path component (".github/workflows") is not the product either.
     # "The devalue package for npm", "the connect-xcors npm package", "the
     # fastjsonschema Python package": the registry or language a package is
-    # published for, not the product (NVD "npm" search, 2026-11-22).
+    # published for, not the product (NVD "npm" search, 2026-11-22). Likewise
+    # "the hyper-staticfile Rust crate" and "Apache Arrow Rust (`parquet`
+    # crate)": a library written in Rust, not Rust (sweep, 2026-11-23).
     # The product as a platform: "OneCLI 5.5.0 for Linux", "Acronis Backup
     # plugin (Linux)", "a .desktop file on Linux", "Linux Foundation Magma",
     # "the Linux builds of hMailServer", "EilikO Linux robot firmware" --
@@ -649,8 +787,9 @@ def advisory_names_vendor(row: Dict, vendor_name: str) -> bool:
     # "(", and stays.
     span = _PLATFORM_LIST.sub(" ", span.lower())
     return re.search(rf"(?<![\w./(-])(?<!for )(?<!on ){re.escape(want)}(?![\w/-]|\.\w)"
-                     r"(?!\s+actions?\b(?!\s+runner))(?!\s+(?:packages?|modules?)\b)"
-                     r"(?!\s+(?:foundation|builds?)\b)(?!\s+(?:\w+\s+)?firmware\b)"
+                     r"(?!\s+actions?\b(?!\s+runner))(?!\s+(?:packages?|modules?|crates?)\b)"
+                     r"(?!\s*\(\s*`?[\w.-]+`?\s+crates?\))"
+                     r"(?!\s+(?:foundation|builds?|installers?)\b)(?!\s+(?:\w+\s+)?firmware\b)"
                      r"(?!\s+(?:x86|x64|amd64|arm64|aarch64|i386)\b)",
                      span) is not None
 
@@ -768,7 +907,35 @@ def describe_record(row: Dict) -> str:
     # has YYYY first, Chrome's big number is third); revisit if one turns up.
     if re.match(r"\d+\.\d{4,}(?:\.|$)", version):
         version = ""
+    # A kernel CVE's description never states the affected range, so the feed
+    # takes the first version-like string in its free text: "hw2.1" from a
+    # Tested-on line, "DWC_usb31 v2.00a", the kernel a reporter booted ("Not
+    # tainted 7.2.0-rc7"). "CVE-2026-97442 (affects linux 2.1.0)" reached a
+    # demo answer (sweep, 2026-11-23); 12 of 12 kernel rows on the linux page
+    # had such a version.
+    notes = str(row.get("notes") or row.get("versionReleaseNotes") or "")
+    if notes.lstrip().lower().startswith("in the linux kernel, the following vulnerability"):
+        version = ""
+    # With no product in the question nothing has checked the feed's product
+    # field, and its mitre bot guesses it from the CVE text: "3" for phpBB,
+    # "vulnerability", "booking" (sweep, 2026-11-23: "CVE-2026-134927 (affects 3
+    # 3.3.19)"), or labels a WordPress plugin's version as WordPress's. Print
+    # the product only when it is a real name the CVE's own text is about. On
+    # /api/v/ (2026-11-23) this keeps 161 of 685 such labels.
+    if notes and (not _searchable(product) or product.lower() in _FEED_GUESSES
+                  or not advisory_names_vendor(row, product)):
+        version = ""
     return f"{head} (affects {product} {version})" if version else head
+
+
+# Ordinary words the feed's bot files CVEs under that `_searchable` lets through
+# (counted on /api/v/, 2026-11-23). ponytail: a stopword list; the bot's guess
+# is upstream's and cannot be fixed here.
+_FEED_GUESSES = frozenset({
+    "automation", "booking", "builder", "crm", "csv", "embedded", "force",
+    "framework", "html", "kit", "lite", "otp", "sql", "submit", "ultimate",
+    "unknown", "url",
+})
 
 
 # Subreddit -> catalog product. The community feed carries no product field at
@@ -865,8 +1032,12 @@ def filter_community(rows: Iterable[Dict], vendors: Sequence[VendorMatch],
     for r in rows:
         sub = subreddit_vendor(r.get("subreddit", ""))
         title = str(r.get("title", "")).lower()
+        # A generic part in the title counts as the product: "Microsoft says
+        # November security updates cause printing issues" never says Windows.
         if (sub and sub in wanted) or any(
-                re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])", title) for w in wanted):
+                re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])", title)
+                for w in wanted | {p for v in vendors for p in v.parts
+                                   if p in _GENERIC_PARTS}):
             out.append(r)
 
     return [r for r in out if on_subject(r)] if pats else out
