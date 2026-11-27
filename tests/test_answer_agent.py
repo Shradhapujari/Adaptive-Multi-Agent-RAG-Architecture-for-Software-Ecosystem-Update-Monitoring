@@ -957,3 +957,17 @@ def test_no_provenance_footer_bullet():
     rel = [Evidence(label="R1", kind="release", title="v1")]
     for ev in (web, rel):
         assert "outside them" not in deterministic_paragraph("q", ev)
+
+
+def test_community_mood_counts_the_tagged_posts_not_all_of_them():
+    # Sweep 5 (rust): one of four posts carried a title-keyword "Negative"
+    # tag, and the summary read "4 post(s) with negative reaction reported".
+    ev = [Evidence(label=f"Community - r/rust #{i}", kind="community", title=t,
+                   sentiment=s)
+          for i, (t, s) in enumerate([("rapid-rs v0.4.0", "Positive"),
+                                      ("Rust GPU drivers", "Positive"),
+                                      ("most of the gap is already fixed", "Negative"),
+                                      ("crossync update", "Positive")], 1)]
+    text = deterministic_paragraph("Is it safe to update rust?", ev)
+    assert "Community coverage adds 4 post(s) (1 tagged negative by the source feed)" in text
+    assert "negative reaction" not in text
