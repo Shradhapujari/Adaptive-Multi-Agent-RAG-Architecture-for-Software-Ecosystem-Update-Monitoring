@@ -2046,6 +2046,7 @@ def _latest_release(rows: list, query: str, today=None) -> Optional[dict]:
 # A question that asks for a fact -- "what bugs were fixed", "which versions" --
 # is answered with the fact. Leading with the verdict answered "What bugs were
 # fixed in Chrome recently?" with "🔴 Patch urgently" and named no bug.
+_NEWEST = re.compile(r"\b(?:latest|newest|most recent|last|new)\b", re.I)
 _ASKS_WHAT = re.compile(r"^\s*(?:what|which|list|show|tell me|how many|summari[sz]e)\b", re.I)
 
 
@@ -2319,6 +2320,9 @@ def _tab_short(results: dict, presented=None) -> None:
         # Composed from the advisory rows when there are any, so the count is
         # the Sources tab's; the model's headline otherwise.
         line = answer_agent.summary_line(presented.evidence) or line
+    if presented is not None and graph.asks(query) == "cve" and _NEWEST.search(query):
+        newest = answer_agent.newest_advisory_line(presented.evidence)
+        line = f"{newest} {line}".strip() if newest else line
     if line and _ASKS_WHAT.match(query):
         st.markdown(f"### {line}")
         if dec and dec.get("verdict") not in (None, "safe", "insufficient_evidence"):
