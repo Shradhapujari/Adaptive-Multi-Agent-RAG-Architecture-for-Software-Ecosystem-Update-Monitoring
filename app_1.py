@@ -1323,6 +1323,11 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # what the presenter now leads the answer with. The tally below stays
     # gated -- counting stances only makes sense on a yes/no question.
     subject = _subject_terms(g)
+    # A package isn't a catalog vendor, so nothing below asked the thread to
+    # name it: "Is the requests package safe?" led with an r/aws comment on
+    # RDS MySQL 8.4, matched on "package"/"safe" alone (2026-11-28).
+    pkg = (live_sources.package_ref(query)
+           if live_sources.kind(query, g.vendor_names) == "package_safety" else None)
     if thread is None and subject:
         # Scoped by the same subject filter the community pool gets, and for
         # the reason its docstring gives: a product match says the row is about
@@ -1344,7 +1349,7 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
             must_name=sorted({n for v in g.vendors
                               for n in (v.name, v.matched,
                                         *(a for a, c in vendor._ALIASES.items()
-                                          if c == v.name))}))
+                                          if c == v.name))} | ({pkg[0]} if pkg else set())))
     if thread is not None:
         results["thread"] = thread
         results["top_comment"] = yesno.top_comment(thread)
@@ -1475,6 +1480,11 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # "Is X down?" is answered only by documents that name X.
     if live_kind in ("down_now", "incident") and (results.get("live") or {}).get("answer_only"):
         results["web"] = live_sources.about_subject(query, results.get("web") or [])
+    # A package OSV cleared is answered by OSV alone. Beside six search pages,
+    # "no known advisories against requests 2.34.2" lost to a Stack Overflow
+    # page on HTTPS: "not explicitly stated to be safe" (sweep 5, 2026-11-25).
+    if live_kind == "package_safety" and results["live"]["answer_only"]:
+        results["web"] = [d for d in results.get("web") or [] if d.get("host") == "osv.dev"]
 
     # Retry new terms: a healthy fetch with no evidence gets one more run on
     # the rewriter's terms. Adopted only if that run finds evidence.
@@ -2246,7 +2256,8 @@ def _off_topic_note(query: str, live: bool = False) -> Optional[str]:
 
 _NEEDS_LIVE = {"down_now": "whether a service is down", "incident": "what an outage was about",
                "eol": "whether a version is still supported",
-               "news": "what's been happening recently", "general": "a general software question"}
+               "news": "what's been happening recently", "general": "a general software question",
+               "package_safety": "whether a package has known vulnerabilities"}
 
 
 def _show_feed_tiles(results: dict) -> bool:
@@ -2268,7 +2279,10 @@ def _needs_live_note(query: str, live: bool) -> Optional[str]:
     import live_sources
     g = ground(query)
     k = live_sources.kind(query, g.vendor_names)
-    if k not in _NEEDS_LIVE or not live_sources.answer_only(k, query):
+    # A package is never in the feeds (kind() requires no catalog vendor), so
+    # without OSV the verdict is the unscoped pool's: "Is the requests library
+    # safe to use?" read "safe" off bun release notes (2026-11-28).
+    if k not in _NEEDS_LIVE or (k != "package_safety" and not live_sources.answer_only(k, query)):
         return None
     # A news/general question naming no product is declined by the off-topic
     # gate even with web search on, so "turn it on" would be a false promise.

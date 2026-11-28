@@ -200,6 +200,43 @@ def test_clean_package_result_carries_no_verdict(empty_lake, monkeypatch):
     assert r["decision"] is None and r["live"]["answer_only"]
 
 
+def test_clean_package_answer_cites_only_osv(empty_lake, monkeypatch):
+    """Sweep 5 (2026-11-25): OSV found no advisories against requests 2.34.2,
+    and the model answered "not explicitly stated to be safe" from a Stack
+    Overflow page about HTTPS that web search added beside it."""
+    clean = dict(ANSWER_DOC, label="OSV - requests 2.34.2", url="https://osv.dev/list?q=requests")
+    page = {"title": "Is requests safe?", "text": "use https", "source": "web_trusted",
+            "url": "https://stackoverflow.com/q/1", "label": "Web - stackoverflow.com",
+            "host": "stackoverflow.com"}
+    monkeypatch.setattr(live_sources, "package_safety", lambda q: {
+        "verdict_docs": [], "answer_docs": [clean], "meta": dict(PKG_META)})
+    monkeypatch.setattr(websearch, "trusted", lambda *a, **k: (
+        [dict(page)], {"backend": True, "n": 1, "used": True, "hosts": [], "error": None}))
+    r = app_1.run_pipeline("Is the requests package safe?", show_steps=False, web_fallback=True)
+    assert [d["label"] for d in r["web"]] == ["OSV - requests 2.34.2"]
+
+
+def test_package_with_a_fixed_cve_keeps_its_web_pages(empty_lake, monkeypatch):
+    page = {"title": "requests advisory", "text": "t", "url": "https://github.com/psf/requests/x",
+            "source": "web_trusted", "host": "github.com"}
+    monkeypatch.setattr(websearch, "trusted", lambda *a, **k: (
+        [dict(page)], {"backend": True, "n": 1, "used": True, "hosts": [], "error": None}))
+    r = app_1.run_pipeline("Is requests 2.31.0 safe? (pip)", show_steps=False, web_fallback=True)
+    assert not r["live"]["answer_only"]
+    assert any(d["url"] == page["url"] for d in r["web"])
+
+
+@pytest.mark.parametrize("web", [True, False])
+def test_package_question_thread_must_name_the_package(empty_lake, monkeypatch, web):
+    """Live 2026-11-28: "Is the requests package safe?" led with an r/aws
+    comment on RDS MySQL 8.4, matched on "package"/"safe" alone."""
+    import yesno
+    seen = {}
+    monkeypatch.setattr(yesno, "find_thread", lambda q, **k: seen.update(k))
+    app_1.run_pipeline("Is the requests package safe?", show_steps=False, web_fallback=web)
+    assert "requests" in seen["must_name"]
+
+
 def test_a_vendorless_question_gets_only_on_subject_community_posts(empty_lake, monkeypatch):
     # The community feed ignores `q`; the subject filter only ran when a
     # catalog vendor was detected, so this question got the whole global feed.
@@ -215,7 +252,8 @@ def test_a_vendorless_question_gets_only_on_subject_community_posts(empty_lake, 
     assert [p["title"] for p in r["community"]] == ["CrowdStrike outage took down our fleet"]
 
 
-@pytest.mark.parametrize("q", ["Is GitHub down?", "Is Python 3.9 still supported?"])
+@pytest.mark.parametrize("q", ["Is GitHub down?", "Is Python 3.9 still supported?",
+                               "Is the requests library safe to use?", "Is requests 2.31.0 safe? (pip)"])
 def test_outage_and_eol_questions_decline_when_web_search_is_off(q):
     """Live check 2026-11-20: with web search off, "Is GitHub down?" got a
     patch_urgently verdict from unrelated GitHub Actions advisories."""
