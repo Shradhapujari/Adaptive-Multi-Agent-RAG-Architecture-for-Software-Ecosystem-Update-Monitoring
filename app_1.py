@@ -2745,10 +2745,12 @@ def _tab_loops(results: dict, query: str) -> None:
                "fetch abstains, only a degraded fetch re-enters rewrite.")
 
 
-def ask(q: str, limit: int = 5, source: str = "agent", checks: Optional[dict] = None):
+def ask(q: str, limit: int = 5, source: str = "agent", checks: Optional[dict] = None,
+        reddit_id: Optional[str] = None):
     """(results, presented) for one console question. A fast-routed question
     tries `run_fast` and escalates to the full pipeline when it returns None;
-    `results["route"]` says which path actually answered."""
+    `results["route"]` says which path actually answered. `reddit_id` is a
+    thread picked in the sidebar, answered from its own comments."""
     route = dict(zip(("mode", "why"), graph.route_query(q)))
     import live_sources
     import websearch
@@ -2757,6 +2759,9 @@ def ask(q: str, limit: int = 5, source: str = "agent", checks: Optional[dict] = 
         # "Is Python 3.9 still supported?" reads as a version lookup, and the
         # fast path would answer it with the latest version.
         route = {"mode": "full", "why": "live source question"}
+    if reddit_id:
+        # The fast path reads a feed value and never the thread.
+        route = {"mode": "full", "why": "picked Reddit thread"}
     with st.spinner(f"{route['mode'].upper()} path — {route['why']}…"):
         results = run_fast(q, limit=limit, source=source) if route["mode"] == "fast" else None
         if results is not None:
@@ -2768,7 +2773,8 @@ def ask(q: str, limit: int = 5, source: str = "agent", checks: Optional[dict] = 
         import websearch
         results = run_pipeline(q, show_steps=False, limit=limit, source=source,
                                web_fallback=bool((checks or {}).get("web_search"))
-                               or websearch.ENABLE_WEB_FALLBACK, checks=checks)
+                               or websearch.ENABLE_WEB_FALLBACK, checks=checks,
+                               reddit_id=reddit_id)
         if route["mode"] == "fast":
             route = {"mode": "full", "why": "fast path could not answer — escalated"}
         results["route"] = route
@@ -2929,6 +2935,20 @@ def _console_html(text: str) -> str:
     return f'<div class="sys-console">{body}</div>'
 
 
+def _submit(q: str, row: Optional[dict] = None) -> None:
+    """Ask `q` from the sidebar: fill both question boxes (the console's and
+    the classic view's -- only one is on screen) and flag one run, so a click
+    answers without a second press of Ask. `row` is a Reddit thread, answered
+    from its own comments; without one, any earlier pick is forgotten."""
+    st.session_state["main_query"] = st.session_state["ask_query"] = q
+    if row is not None:
+        st.session_state["reddit_title"] = row.get("title", "")
+        st.session_state["reddit_id"] = row.get("redditId")
+    else:
+        st.session_state.pop("reddit_id", None)
+    st.session_state["auto_ask"] = True
+
+
 def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = None,
                     details=None) -> None:
     st.markdown("### Software Update Decision Intelligence")
@@ -2944,14 +2964,21 @@ def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = Non
         q = qcol.text_input("Ask", key="ask_query", label_visibility="collapsed",
                             placeholder='e.g. "Is it safe to update Firefox?"  ·  "Latest Node.js version?"')
         asked = bcol.form_submit_button("Ask", type="primary", use_container_width=True)
+    # A sidebar click (_submit) asks once, as if Ask had been pressed.
+    asked = st.session_state.pop("auto_ask", False) or asked
     if not q or not asked:
         with strip:
             _render_mermaid(_pipeline_mermaid(), height=150)
         return
+    # A picked thread applies only while the box still holds its title.
+    rid = (st.session_state.get("reddit_id")
+           if st.session_state.get("reddit_title") == q else None)
     import websearch
     live_on = bool((checks or {}).get("web_search")) or websearch.ENABLE_WEB_FALLBACK
-    note, heading = _needs_live_note(q, live_on), "⚪ Needs a live source"
-    if not note:
+    # A picked thread is answered from its own comments, so the gates on what
+    # the feeds can answer do not apply to it.
+    note, heading = (None if rid else _needs_live_note(q, live_on)), "⚪ Needs a live source"
+    if not note and not rid:
         note, heading = _off_topic_note(q, live=live_on), "⚪ Not a software update question"
     if note:
         with strip:
@@ -2961,7 +2988,8 @@ def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = Non
             st.markdown(f"### {heading}")
             st.markdown(note)
         return
-    results, presented = ask(q, limit=result_limit, source=source, checks=checks)
+    results, presented = ask(q, limit=result_limit, source=source, checks=checks,
+                             reddit_id=rid)
     with strip:
         _render_mermaid(_pipeline_mermaid(results), height=150)
     st.markdown(" ".join(f":blue-badge[{t}]" for t in _question_tags(q, results)))
@@ -2974,6 +3002,16 @@ def render_ask_view(result_limit: int, source: str, checks: Optional[dict] = Non
     # away (Read more) or in the sidebar's Advanced checks.
     with st.container(border=True):
         _tab_short(results, presented)
+        if rid:
+            # The picked thread's own answer: how its commenters answered, and
+            # the top-voted comment, as the classic and compare views show it.
+            yn = results.get("yesno")
+            if yn is not None and yn["answered"]:
+                st.success(yesno.verdict_line(yn))
+            tc = results.get("top_comment")
+            if tc:
+                st.info(f"**Top-voted comment ({tc.get('score', 0)} points, "
+                        f"u/{tc.get('author','')}):** {tc.get('body','')[:600]}")
         if _show_feed_tiles(results):
             rel = _headline_release(results, q)
             latest, advisories, community = st.columns(3)
@@ -3076,8 +3114,12 @@ def _sources_list(results: dict, presented=None) -> None:
 # ── SIDEBAR ───────────────────────────────────────────────
 
 with st.sidebar:
+    # Set before the radio exists: a sidebar question asked from Monitor or
+    # Results (see below) lands here on the rerun that switches to Ask.
+    if st.session_state.pop("goto_ask", False):
+        st.session_state["view"] = "Ask"
     view = st.radio("View", ["Ask", "Monitor", "Results"], horizontal=True,
-                    label_visibility="collapsed")
+                    label_visibility="collapsed", key="view")
     with st.expander("About", expanded=False):
         st.image("https://upload.wikimedia.org/wikipedia/en/b/bb/University_of_the_Pacific_seal.svg", width=80)
         st.markdown("**Adaptive Multi-Agent RAG Architecture** · University of the Pacific · 2026")
@@ -3263,15 +3305,13 @@ with st.sidebar:
             return fn() if fn else 0
 
         def _ask_thread(row: dict) -> None:
-            """Put a picked thread in the question box and remember which it is.
+            """Ask a picked thread: its title in the box, answered at once.
 
             Shared by the dropdown and the two buttons so a thread arrives the
             same way however it was chosen: `reddit_id` is what makes the run
             answer from *this* thread's comments instead of searching for one.
             """
-            st.session_state["main_query"] = row.get("title", "")
-            st.session_state["reddit_title"] = row.get("title", "")
-            st.session_state["reddit_id"] = row.get("redditId")
+            _submit(row.get("title", ""), row)
 
         @st.cache_data(ttl=3600, show_spinner=False)
         def _catalog():
@@ -3341,11 +3381,17 @@ with st.sidebar:
                 st.caption("No question matched — try All vendors.")
         q_opts = {f"{vendor.attribution(r) or '—'} · {r.get('title','')[:70]} "
                   f"({len(r.get('comments') or [])} comments)": r for r in q_rows}
-        picked = st.selectbox("Question", ["—"] + list(q_opts), key="reddit_pick")
-        # Applied once per pick, so the box stays editable afterwards.
-        if picked != "—" and st.session_state.get("reddit_title") != q_opts[picked].get("title"):
-            _ask_thread(q_opts[picked])
-        elif not q_rows:
+        def _on_pick(opts: dict) -> None:
+            pick = st.session_state.get("reddit_pick", "—")
+            if pick in opts:
+                _ask_thread(opts[pick])
+
+        # on_change, so a pick applies once, when it is made. Comparing the pick
+        # with the box on every rerun re-applied a stale pick over Latest or
+        # Random in the same rerun, and over whatever was typed since.
+        st.selectbox("Question", ["—"] + list(q_opts), key="reddit_pick",
+                     on_change=_on_pick, args=(q_opts,))
+        if not q_rows:
             st.caption("Feed unreachable — type a question instead.")
     st.divider()
     st.markdown("#### Example queries")
@@ -3361,8 +3407,7 @@ with st.sidebar:
     ]
     for ex in examples:
         if st.button(ex, use_container_width=True):
-            st.session_state["main_query"] = ex
-            st.session_state.pop("reddit_id", None)
+            _submit(ex)
 
     st.divider()
     st.markdown("#### Store")
@@ -3393,9 +3438,16 @@ with st.sidebar:
                                f"{r.n_documents} document(s){flag}")
                     if st.button("Ask again", key=f"again_{r.run_id}",
                                  use_container_width=True):
-                        st.session_state["main_query"] = r.query
+                        _submit(r.query)
 
 # ── MAIN UI ───────────────────────────────────────────────
+
+# The sidebar's questions show in every view, but only Ask answers them. A
+# click elsewhere switches to Ask and runs there, rather than leaving the run
+# flag set for whenever Ask is next opened.
+if view != "Ask" and st.session_state.get("auto_ask"):
+    st.session_state["goto_ask"] = True
+    st.rerun()
 
 st.caption("Software Ecosystem Monitoring")
 
@@ -3565,6 +3617,8 @@ with col1:
                         else "Run Both & Compare" if compare_mode
                         else "Run Multi-Agent Pipeline",
                         type="primary", use_container_width=True)
+    # A sidebar click (_submit) runs once, as if this had been pressed.
+    run_btn = st.session_state.pop("auto_ask", False) or run_btn
 with col2:
     # A callback, not an `if st.button(...)` body: the text box above is already
     # instantiated by the time the body runs, and Streamlit refuses to change a
