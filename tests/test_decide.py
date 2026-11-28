@@ -433,3 +433,15 @@ def test_an_old_advisory_naming_the_asked_version_still_counts():
                date="2022-03-03"),
             _d(2, "vendor_releases", "Ubuntu 26.04 LTS released", date="2026-04-25")]
     assert D.decide(pool, "Is Ubuntu 20.04 safe to keep?", V).verdict == "patch_urgently"
+
+
+# 2026-11-26 (SAIS E3 probe): one unrelated, title-only news row dated in the
+# future made every advisory "over a year older than the newest doc", which
+# moved 69 of 72 frozen patch_urgently pools off patch, 5 of them to safe.
+
+def test_a_future_dated_row_does_not_age_out_a_current_advisory(monkeypatch):
+    monkeypatch.setenv("MARAG_NOW", "2026-11-26")
+    pool = [_d(1, "cisa_kev", "[CISA KEV] Ubuntu kernel flaw", "CVE-2026-1234 exploited", date="2026-03-03"),
+            _d(2, "vendor_releases", "Ubuntu 26.04 LTS released", date="2026-04-25"),
+            _d(3, "google_news", "Weekly tech roundup", date="2030-01-01")]
+    assert D.decide(pool, Q, V).verdict == "patch_urgently"
