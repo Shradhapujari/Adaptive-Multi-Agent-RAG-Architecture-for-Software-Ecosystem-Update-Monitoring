@@ -69,6 +69,20 @@ def test_package_safety_never_fires_for_a_catalog_vendor():
     assert L.kind("Is the firefox package safe?", vendors=["firefox"]) != "package_safety"
 
 
+@pytest.mark.parametrize("q,vendors", [
+    ("Is lodash npm safe?", ["npm", "lodash"]),        # live 2026-11-28: npm release notes
+    ("Is left-pad npm safe?", ["npm"]),                # "npm" is a catalog product (the CLI)
+    ("npm install express safe?", ["npm", "express"]),
+])
+def test_an_ecosystem_cue_makes_it_a_package_question_despite_catalog_names(q, vendors):
+    assert L.kind(q, vendors=vendors) == "package_safety"
+
+
+@pytest.mark.parametrize("q", ["Is npm 10 safe to update?", "Is npm 10.2.0 safe to update?"])
+def test_npm_itself_is_still_a_product(q):
+    assert L.kind(q, vendors=["npm"]) != "package_safety"
+
+
 def test_safe_to_update_without_package_cue_is_not_package_safety():
     assert L.kind("Is it safe to update Firefox right now?") is None
 
@@ -487,9 +501,15 @@ def test_has_package_cue(q, want):
 
 
 @pytest.mark.parametrize("pkg", ["lodash", "express", "django"])
-def test_catalog_vendors_never_reach_osv(pkg):
-    """These resolve as catalog vendors, so the feeds answer them, not OSV."""
-    assert L.kind(f"Is the {pkg} npm package safe?", vendors=[pkg]) != "package_safety"
+def test_catalog_vendors_with_a_bare_package_cue_stay_on_the_feeds(pkg):
+    assert L.kind(f"Is the {pkg} package safe?", vendors=[pkg]) != "package_safety"
+
+
+@pytest.mark.parametrize("pkg", ["lodash", "express", "django"])
+def test_catalog_vendors_named_with_their_registry_reach_osv(pkg):
+    """lodash and express have no feed rows: "the feeds answer them" was npm
+    CLI release notes (2026-11-28). A named registry is OSV's question."""
+    assert L.kind(f"Is the {pkg} npm package safe?", vendors=[pkg]) == "package_safety"
 
 
 # ─────────────────────────────────────────────── typo suggestions

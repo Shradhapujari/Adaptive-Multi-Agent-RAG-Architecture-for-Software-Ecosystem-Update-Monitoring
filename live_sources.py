@@ -147,8 +147,12 @@ def answer_only(kind_: Optional[str], query: str) -> bool:
 def kind(query: str, vendors: Sequence[str] = ()) -> Optional[str]:
     """Which live type the question is, in KINDS precedence order, or None."""
     q = query or ""
-    if (not vendors and has_package_cue(q) and _SAFETY.search(q)
-            and package_ref(q) is not None):
+    ref = package_ref(q) if has_package_cue(q) and _SAFETY.search(q) else None
+    # A bare "package" leaves a catalog product on the feeds ("Is the firefox
+    # package safe?"); a named ecosystem does not. "npm" is itself a catalog
+    # product, so no npm package ever reached OSV: "Is lodash npm safe?" read
+    # npm CLI release notes (2026-11-28).
+    if ref and (not vendors or (ref[1] and ref[0] not in ("npm", "pip", "yarn", "pypi"))):
         return "package_safety"
     if _DOWN.search(q) and status_product(q):
         return "down_now"
