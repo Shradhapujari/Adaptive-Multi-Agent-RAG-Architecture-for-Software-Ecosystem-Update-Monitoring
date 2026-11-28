@@ -200,6 +200,19 @@ def test_clean_package_result_carries_no_verdict(empty_lake, monkeypatch):
     assert r["decision"] is None and r["live"]["answer_only"]
 
 
+def test_clean_package_result_is_answered_by_osv_alone(empty_lake, monkeypatch):
+    """Sweep 5: "Is the requests package safe?" cited PyPI's generic malware
+    disclaimer and a "requests-safe" page over OSV's "no known advisories"."""
+    monkeypatch.setattr(live_sources, "package_safety", lambda q: {
+        "verdict_docs": [], "answer_docs": [dict(ANSWER_DOC)], "meta": dict(PKG_META)})
+    page = {"title": "requests-safe · PyPI", "text": "t", "url": "https://pypi.org/project/requests-safe/",
+            "source": "web"}
+    monkeypatch.setattr(websearch, "trusted",
+                        lambda *a, **k: ([page], {"backend": True, "n": 1, "used": True, "hosts": [], "error": None}))
+    r = app_1.run_pipeline("Is the requests package safe?", show_steps=False, web_fallback=True)
+    assert [d["url"] for d in r["web"]] == [ANSWER_DOC["url"]]
+
+
 def test_a_vendorless_question_gets_only_on_subject_community_posts(empty_lake, monkeypatch):
     # The community feed ignores `q`; the subject filter only ran when a
     # catalog vendor was detected, so this question got the whole global feed.
@@ -340,3 +353,12 @@ def test_cve_question_keeps_its_verdict_with_web_off(empty_lake, monkeypatch):
                         lambda *a, **k: ({"community": [], "releases": [], "cve": [adv]}, []))
     r = app_1.run_pipeline("Does Chrome 131 fix CVE-2024-1234?", show_steps=False, web_fallback=False)
     assert r["decision"] is not None
+
+
+def test_productless_question_quotes_no_reddit_thread(empty_lake, monkeypatch):
+    """Sweep 5: with no product to name, the thread search's product check is
+    empty, and an RDS MySQL 8.4 thread led "Is the requests package safe?"."""
+    import yesno
+    monkeypatch.setattr(yesno, "find_thread", lambda *a, **k: pytest.fail("thread search with no product"))
+    r = app_1.run_pipeline("Is the requests package safe?", show_steps=False, web_fallback=True)
+    assert r.get("top_comment") is None

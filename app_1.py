@@ -1323,7 +1323,10 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # what the presenter now leads the answer with. The tally below stays
     # gated -- counting stances only makes sense on a yes/no question.
     subject = _subject_terms(g)
-    if thread is None and subject:
+    # No product, no search either: `must_name` is then empty, and "Is the
+    # requests package safe?" (no catalog product) quoted an RDS MySQL 8.4
+    # thread at the top of the answer (sweep 5, 2026-11-25).
+    if thread is None and subject and g.vendors:
         # Scoped by the same subject filter the community pool gets, and for
         # the reason its docstring gives: a product match says the row is about
         # the right product, not the right subject. The thread is quoted at the
@@ -1475,6 +1478,11 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # "Is X down?" is answered only by documents that name X.
     if live_kind in ("down_now", "incident") and (results.get("live") or {}).get("answer_only"):
         results["web"] = live_sources.about_subject(query, results.get("web") or [])
+    # A package OSV cleared is answered by OSV alone: beside it, "Is the
+    # requests package safe?" cited PyPI's generic malware disclaimer and a
+    # "requests-safe" page instead (sweep 5, 2026-11-25).
+    if live_kind == "package_safety" and (results.get("live") or {}).get("answer_only"):
+        results["web"] = [d for d in results.get("web") or [] if d.get("source") == "live"]
 
     # Retry new terms: a healthy fetch with no evidence gets one more run on
     # the rewriter's terms. Adopted only if that run finds evidence.
