@@ -148,6 +148,7 @@ def release_row(v: dict) -> dict:
         "version":  v.get("versionNumber", ""),
         "date":     str(v.get("versionReleaseDate", ""))[:8],
         "notes":    str(notes)[:200],
+        "notes_full": str(notes),
         "channel":  v.get("versionReleaseChannel", ""),
         "url":      v.get("versionUrl", ""),
         "security": cls.get("securityType", []),
