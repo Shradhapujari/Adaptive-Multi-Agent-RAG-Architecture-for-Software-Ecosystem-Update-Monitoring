@@ -292,6 +292,16 @@ def test_fixed_cve_advisory_reaches_verdict(stub):
     assert v["url"] == "https://osv.dev/vulnerability/GHSA-9wx4-h78v-vm56"
 
 
+def test_one_cve_filed_twice_is_one_advisory(stub):
+    """Live 2026-11-28: OSV returns a GHSA and a PYSEC entry per CVE, so
+    "Is requests 2.31.0 safe?" read "6 advisory document(s)" for 3 CVEs."""
+    twin = dict(FIXED, id="PYSEC-2026-1873", aliases=["CVE-2024-35195"])
+    stub.table["api.osv.dev"] = (osv(FIXED, twin, NO_CVE), None)
+    r = L.package_safety(REQ)
+    assert [d["title"] for d in r["verdict_docs"]] == ["GHSA-9wx4-h78v-vm56"]
+    assert [d["label"] for d in r["answer_docs"]] == ["OSV - GHSA-9wx4-h78v-vm56", "OSV - PYSEC-2026-1"]
+
+
 def test_unfixed_advisory_stays_out_of_verdict(stub):
     stub.table["api.osv.dev"] = (osv(UNFIXED), None)
     r = L.package_safety(REQ)

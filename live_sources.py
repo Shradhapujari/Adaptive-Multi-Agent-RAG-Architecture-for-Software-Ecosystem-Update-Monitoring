@@ -462,8 +462,16 @@ def package_safety(query: str) -> dict:
     if err or not isinstance(data, dict):
         return out | {"meta": _meta("package_safety", source, [], err or "bad reply", True)}
     import guardrail
+    seen: set = set()
     for v in data.get("vulns") or []:
         vid = str(v.get("id", ""))
+        ids = {str(a).upper() for a in [vid, *(v.get("aliases") or [])]}
+        # One flaw, several databases: OSV files each requests CVE as a GHSA
+        # and a PYSEC entry, so 3 CVEs read "6 advisory document(s)" (live,
+        # 2026-11-28). The first entry for a shared id stands for all of them.
+        if ids & seen:
+            continue
+        seen |= ids
         cves = [a for a in [vid, *(v.get("aliases") or [])] if str(a).upper().startswith("CVE-")]
         # Release fixes only: GIT ranges carry commit SHAs, which aren't a
         # release anyone can install; and only this package's entries.
