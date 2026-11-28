@@ -167,8 +167,13 @@ _PREDICATE = re.compile(
 # subject, the product only shows up in the fix clause). Capture stops at the
 # first comma/period/semicolon, so a cross-vendor row -- "fixed in Metabase
 # 1.2, also affects MySQL" -- keeps only "Metabase 1.2" and is still rejected.
+# "identified/found in" is the other weakness-first shape: GitHub's own CNA
+# writes "A stored cross-site scripting vulnerability was identified in GitHub
+# Enterprise Server that allowed ..." and fixes "in versions 3.17.12", so
+# without it every GHES advisory was not-about-GitHub (sweep 5, 2026-11-25).
 _FIX_CLAUSE = re.compile(
-    r"\b(?:fixed|patched|resolved|addressed|mitigated)\s+in\s+([^.,;]{0,40})", re.I)
+    r"\b(?:fixed|patched|resolved|addressed|mitigated|identified|found|discovered"
+    r"|reported)\s+in\s+([^.,;]{0,40})", re.I)
 
 
 _PLATFORM_PREP = re.compile(r"\b(?:on|for)\b", re.I)
