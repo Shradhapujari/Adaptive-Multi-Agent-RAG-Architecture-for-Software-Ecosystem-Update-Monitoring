@@ -237,6 +237,21 @@ def test_package_question_thread_must_name_the_package(empty_lake, monkeypatch, 
     assert "requests" in seen["must_name"]
 
 
+def test_npm_package_question_is_not_scoped_to_the_npm_cli(empty_lake, monkeypatch):
+    """"npm" and "lodash" are catalog names, so the feeds and the gate were
+    scoped to them: "Is lodash npm safe?" read npm CLI release notes."""
+    text = ("lodash 4.17.15: GHSA-p6mc-m468-83gw (CVE-2020-8203) Prototype Pollution in lodash. "
+            "Fixed in 4.17.19.")
+    doc = dict(VERDICT_DOC, title="GHSA-p6mc-m468-83gw", text=text, body=text, product="lodash",
+               url="https://osv.dev/vulnerability/GHSA-p6mc-m468-83gw")
+    monkeypatch.setattr(live_sources, "package_safety", lambda q: {
+        "verdict_docs": [doc], "answer_docs": [dict(ANSWER_DOC)], "meta": dict(PKG_META)})
+    r = app_1.run_pipeline("Is lodash 4.17.15 safe? (npm)", show_steps=False, web_fallback=True)
+    assert r["live"]["kind"] == "package_safety"
+    assert r["grounding"].vendors == []
+    assert r["decision"]["verdict"] == "patch_urgently"
+
+
 def test_a_vendorless_question_gets_only_on_subject_community_posts(empty_lake, monkeypatch):
     # The community feed ignores `q`; the subject filter only ran when a
     # catalog vendor was detected, so this question got the whole global feed.

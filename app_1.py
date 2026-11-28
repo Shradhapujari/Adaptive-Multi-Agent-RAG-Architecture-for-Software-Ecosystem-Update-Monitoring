@@ -991,6 +991,12 @@ def run_pipeline(query: str, show_steps: bool = True, limit: int = 5,
     # the web search: off means no live read at all.
     import live_sources
     live_kind = live_sources.kind(query, g.vendor_names) if web_fallback else None
+    # A package question answers from OSV; a catalog name in it ("npm" is the
+    # CLI, "lodash" has no feed rows) would scope the feeds and the gate to
+    # the wrong product.
+    if live_kind == "package_safety" and g.vendors:
+        g = dataclasses.replace(g, vendors=[])
+        results["grounding"] = g
     results["live"] = None
     # A "did you mean" for a question that named no known product; shown to
     # the reader, never substituted into retrieval.
