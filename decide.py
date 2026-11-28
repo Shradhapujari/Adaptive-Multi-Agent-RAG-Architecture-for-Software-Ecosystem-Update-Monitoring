@@ -51,6 +51,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+import temporal
 from eval_harness.benchmarks import extract_versions
 from guardrail import normalize
 import vendor as _vendor_rules
@@ -482,9 +483,17 @@ def _stale(d: dict, pool: Sequence[dict], asked: Sequence[str]) -> bool:
     """True when the advisory is over STALE_ADVISORY_DAYS older than the newest
     dated document in the pool. Undated advisories are kept (age unknown), and
     so is an old one naming the version the question asked about: a user on
-    that old version is exactly who it applies to."""
+    that old version is exactly who it applies to.
+
+    The newest date is capped at the present (`temporal.now`, pinned by
+    MARAG_NOW on replay): one future-dated row -- a feed's wrong pubDate, or a
+    planted one -- otherwise ages every advisory out, and moved 69 of 72
+    frozen patch pools off patch_urgently. A frozen pool's dates are all in
+    the past, so the cap leaves its replay unchanged."""
     when = _date(d)
     newest = max(filter(None, (_date(x) for x in pool)), default=None)
+    if newest:
+        newest = min(newest, temporal.now().strftime("%Y%m%d"))
     if not when or not newest or _days(newest) - _days(when) <= STALE_ADVISORY_DAYS:
         return False
     return not (asked and _version_ok(d, asked))
